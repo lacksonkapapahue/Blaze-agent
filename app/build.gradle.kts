@@ -45,7 +45,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            keepDebugSymbols += listOf("**/libneedle.so")
+            keepDebugSymbols += listOf("**/libneedle.so", "**/libbusybox.so")
         }
     }
     lint { checkReleaseBuilds = false; abortOnError = false }
