@@ -1,0 +1,534 @@
+package com.blaze.assistant.ui
+
+import android.Manifest
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.PixelFormat
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings as AndroidSettings
+import android.view.Gravity
+import android.view.View
+import android.view.WindowManager
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.blaze.assistant.MainActivity
+import com.blaze.assistant.agent.Agent
+import com.blaze.assistant.agent.Mood
+import com.blaze.assistant.agent.Role
+import com.blaze.assistant.agent.Settings
+import com.blaze.assistant.assist.BlazeInteractionService
+import com.blaze.assistant.phone.BlazeAccessibilityService
+import com.blaze.assistant.voice.Voice
+
+/** Lets a ComposeView live outside an Activity (assistant session window, floating orb). */
+class OverlayOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
+    private val reg = LifecycleRegistry(this)
+    private val saved = SavedStateRegistryController.create(this)
+    private val store = ViewModelStore()
+    override val lifecycle: Lifecycle get() = reg
+    override val savedStateRegistry: SavedStateRegistry get() = saved.savedStateRegistry
+    override val viewModelStore: ViewModelStore get() = store
+
+    fun start() { saved.performRestore(null); reg.currentState = Lifecycle.State.RESUMED }
+    fun destroy() { reg.currentState = Lifecycle.State.DESTROYED; store.clear() }
+
+    fun attach(v: View) {
+        v.setViewTreeLifecycleOwner(this)
+        v.setViewTreeSavedStateRegistryOwner(this)
+        v.setViewTreeViewModelStoreOwner(this)
+    }
+}
+
+fun composeView(ctx: Context, owner: OverlayOwner, content: @androidx.compose.runtime.Composable () -> Unit): ComposeView =
+    ComposeView(ctx).apply { owner.attach(this); setContent { BlazeTheme { content() } } }
+
+/** The floating orb (and, without the assistant role, the overlay chat panel). */
+object Overlay {
+    private var orbView: View? = null
+    private var orbOwner: OverlayOwner? = null
+    private var panelView: View? = null
+    private var panelOwner: OverlayOwner? = null
+
+    fun canDrawOverApps(ctx: Context) = AndroidSettings.canDrawOverlays(ctx)
+
+    /** A context + window type that may draw over other apps, or null. */
+    private fun host(ctx: Context): Pair<Context, Int>? {
+        BlazeAccessibilityService.instance?.let { return it to WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY }
+        if (canDrawOverApps(ctx)) return ctx.applicationContext to WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        return null
+    }
+
+    val orbShowing get() = orbView != null
+
+    // Drag-to-bin state, read by the orb and bin composables.
+    private var restoreOrb: (() -> Unit)? = null
+    private val binHot = mutableStateOf(false)
+    private val binShown = mutableStateOf(false)
+    private val orbDying = mutableStateOf(false)
+    private var binView: View? = null
+    private var binOwner: OverlayOwner? = null
+
+    private fun screen(wm: WindowManager, ctx: Context): Pair<Int, Int> =
+        if (Build.VERSION.SDK_INT >= 30) wm.currentWindowMetrics.bounds.let { it.width() to it.height() }
+        else ctx.resources.displayMetrics.let { it.widthPixels to it.heightPixels }
+
+    fun showOrb(ctx: Context): Boolean {
+        if (orbView != null) return true
+        val (hc, type) = host(ctx) ?: return false
+        val wm = hc.getSystemService(WindowManager::class.java)
+        val d = hc.resources.displayMetrics.density
+        val orbPx = (64 * d).toInt()
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            val (w, h) = screen(wm, hc)
+            x = Settings.orbX.takeIf { it >= 0 } ?: (w - (72 * d).toInt())
+            y = Settings.orbY.takeIf { it >= 0 } ?: (h / 2)
+        }
+        var rawX = lp.x.toFloat(); var rawY = lp.y.toFloat()
+        orbDying.value = false
+        val owner = OverlayOwner().also { it.start() }
+        val v = composeView(hc, owner) {
+            Orb(
+                dying = orbDying.value,
+                onDragStart = { rawX = lp.x.toFloat(); rawY = lp.y.toFloat(); showBin(hc, type) },
+                onDrag = { dx, dy ->
+                    val (w, h) = screen(wm, hc)
+                    rawX = (rawX + dx).coerceIn(0f, (w - orbPx).toFloat())
+                    rawY = (rawY + dy).coerceIn(0f, (h - orbPx).toFloat())
+                    // The bin sits centred near the bottom; within reach, the orb snaps into it.
+                    val bx = w / 2f; val by = h - 110 * d
+                    val hot = Math.hypot((rawX + orbPx / 2f - bx).toDouble(), (rawY + orbPx / 2f - by).toDouble()) < 110 * d
+                    binHot.value = hot
+                    if (hot) { lp.x = (bx - orbPx / 2f).toInt(); lp.y = (by - orbPx / 2f).toInt() }
+                    else { lp.x = rawX.toInt(); lp.y = rawY.toInt() }
+                    orbView?.let { runCatching { wm.updateViewLayout(it, lp) } }
+                },
+                onDragEnd = {
+                    if (binHot.value) {
+                        orbDying.value = true   // scatter, then the orb removes itself
+                    } else {
+                        Settings.orbX = lp.x; Settings.orbY = lp.y
+                        hideBin()
+                    }
+                },
+                onGone = { hideBin(); hideOrb(ctx) },
+                onTap = { openPanel(ctx, listen = false) },
+                onLongPress = { openPanel(ctx, listen = true) }
+            )
+        }
+        return try {
+            wm.addView(v, lp); orbView = v; orbOwner = owner; Settings.orbPinned = true; Agent.overlayOpen = true; true
+        } catch (_: Exception) { owner.destroy(); false }
+    }
+
+    private fun showBin(hc: Context, type: Int) {
+        binHot.value = false
+        if (binView != null) { binShown.value = true; return }
+        val wm = hc.getSystemService(WindowManager::class.java)
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, (220 * hc.resources.displayMetrics.density).toInt(), type,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.BOTTOM }
+        val owner = OverlayOwner().also { it.start() }
+        val v = composeView(hc, owner) { ParticleBin(binShown.value, binHot.value) }
+        try { wm.addView(v, lp); binView = v; binOwner = owner; binShown.value = true } catch (_: Exception) { owner.destroy() }
+    }
+
+    private fun hideBin() {
+        binShown.value = false
+        val v = binView ?: return
+        val o = binOwner
+        binView = null; binOwner = null
+        // Let the bin fade out before removing its window.
+        v.postDelayed({
+            runCatching { v.context.getSystemService(WindowManager::class.java).removeView(v) }
+            o?.destroy()
+        }, 260)
+    }
+
+    fun hideOrb(ctx: Context, unpin: Boolean = true) {
+        orbView?.let { v -> runCatching { (v.context.getSystemService(WindowManager::class.java)).removeView(v) } }
+        orbOwner?.destroy()
+        orbView = null; orbOwner = null
+        orbDying.value = false
+        Agent.overlayOpen = panelView != null
+        if (unpin) Settings.orbPinned = false
+    }
+
+    /** Open the chat panel over the current app: the assistant session if Blaze is the assistant, else an overlay. */
+    fun openPanel(ctx: Context, listen: Boolean) {
+        if (BlazeInteractionService.showPanel(listen)) return
+        if (panelView != null) return
+        val h = host(ctx)
+        // Typing needs a window the keyboard can reach; the app-overlay type supports that.
+        val type = if (canDrawOverApps(ctx)) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else h?.second
+        val hc = if (canDrawOverApps(ctx)) ctx.applicationContext else h?.first
+        if (type == null || hc == null) { openApp(ctx, listen); return }
+        val wm = hc.getSystemService(WindowManager::class.java)
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, type,
+            WindowManager.LayoutParams.FLAG_DIM_BEHIND, PixelFormat.TRANSLUCENT
+        ).apply {
+            dimAmount = 0.25f
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        }
+        val owner = OverlayOwner().also { it.start() }
+        val v = composeView(hc, owner) {
+            AssistPanel(
+                autoListen = listen,
+                onClose = { closePanel() },
+                onPin = { closePanel(); showOrb(ctx) },
+                onExpand = { closePanel(); openApp(ctx, false) }
+            )
+        }
+        // Tuck the orb away while the panel is open so it doesn't sit on top of it.
+        val hadOrb = orbView != null
+        if (hadOrb) hideOrb(ctx, unpin = false)
+        restoreOrb = if (hadOrb) ({ showOrb(ctx) }) else null
+        try { wm.addView(v, lp); panelView = v; panelOwner = owner; Agent.overlayOpen = true }
+        catch (_: Exception) { owner.destroy(); openApp(ctx, listen) }
+    }
+
+    fun closePanel() {
+        panelView?.let { v -> runCatching { v.context.getSystemService(WindowManager::class.java).removeView(v) } }
+        panelOwner?.destroy()
+        panelView = null; panelOwner = null
+        Agent.overlayOpen = orbView != null
+        restoreOrb?.let { r -> restoreOrb = null; if (Settings.orbPinned) r() }
+    }
+
+    fun openApp(ctx: Context, listen: Boolean) {
+        ctx.startActivity(Intent(ctx, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(MainActivity.EXTRA_LISTEN, listen))
+    }
+
+    fun requestOverlayPermission(ctx: Context) {
+        ctx.startActivity(Intent(AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            android.net.Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
+// ---------------- UI ----------------
+
+/** The round Blaze orb: pixel B in the middle, a ring that breathes while listening or working. */
+@Composable
+fun OrbFace(size: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier) {
+    val c = LocalBlaze.current
+    val mood by Agent.mood.collectAsState()
+    val voice by Voice.state.collectAsState()
+    val level by Voice.level.collectAsState()
+    val active = mood != Mood.IDLE || voice != Voice.State.IDLE
+    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+        // Idle orb is a still picture: no animation frames while it just sits on screen.
+        if (active) OrbRing(size, level) else Canvas(Modifier.size(size)) {
+            drawCircle(c.accent.copy(alpha = 0.10f), radius = this.size.minDimension / 2f * 0.92f)
+        }
+        Box(Modifier.size(size * 0.66f).clip(CircleShape).background(c.ink), contentAlignment = Alignment.Center) {
+            BrandMark(mood, size * 0.44f)
+        }
+    }
+}
+
+@Composable
+private fun OrbRing(size: androidx.compose.ui.unit.Dp, level: Float) {
+    val c = LocalBlaze.current
+    val t = rememberInfiniteTransition(label = "orb")
+    val spin by t.animateFloat(0f, 360f, infiniteRepeatable(tween(2400, easing = LinearEasing)), label = "spin")
+    val breathe by t.animateFloat(0.9f, 1.05f, infiniteRepeatable(tween(1400), RepeatMode.Reverse), label = "b")
+    val lv by animateFloatAsState(level, label = "lv")
+    Canvas(Modifier.size(size)) {
+        val r = this.size.minDimension / 2f
+        drawCircle(c.accent.copy(alpha = 0.18f + lv * 0.3f), radius = r * breathe)
+        drawArc(c.accent, spin, 110f, false, style = Stroke(width = r * 0.08f),
+            topLeft = Offset(r * 0.1f, r * 0.1f), size = androidx.compose.ui.geometry.Size(r * 1.8f, r * 1.8f))
+    }
+}
+
+@Composable
+private fun Orb(
+    dying: Boolean, onDragStart: () -> Unit, onDrag: (Float, Float) -> Unit, onDragEnd: () -> Unit,
+    onGone: () -> Unit, onTap: () -> Unit, onLongPress: () -> Unit
+) {
+    if (dying) { Scatter(64.dp, onGone); return }
+    OrbFace(64.dp, Modifier
+        .pointerInput(Unit) {
+            detectDragGestures(onDragStart = { onDragStart() }, onDragEnd = onDragEnd, onDragCancel = onDragEnd) { ch, d -> ch.consume(); onDrag(d.x, d.y) }
+        }
+        .pointerInput(Unit) { detectTapGestures(onTap = { onTap() }, onLongPress = { onLongPress() }) })
+}
+
+/** The orb bursting into Blaze's pixel particles, then gone. */
+@Composable
+private fun Scatter(size: androidx.compose.ui.unit.Dp, onGone: () -> Unit) {
+    val c = LocalBlaze.current
+    val p = remember { androidx.compose.animation.core.Animatable(0f) }
+    val bits = remember {
+        val r = kotlin.random.Random(System.nanoTime())
+        List(36) { Triple(r.nextFloat() * 6.283f, 0.35f + r.nextFloat() * 0.65f, r.nextInt(5)) }
+    }
+    LaunchedEffect(Unit) { p.animateTo(1f, tween(520)); onGone() }
+    Canvas(Modifier.size(size)) {
+        val cx = this.size.width / 2f; val cy = this.size.height / 2f
+        val t = p.value
+        val px = this.size.width / 14f
+        bits.forEach { (ang, sp, k) ->
+            val dist = this.size.width * 0.9f * sp * t
+            val col = if (k == 0) c.accent else c.ink
+            drawRect(col.copy(alpha = (1f - t).coerceIn(0f, 1f)),
+                Offset(cx + kotlin.math.cos(ang) * dist - px / 2, cy + kotlin.math.sin(ang) * dist - px / 2),
+                androidx.compose.ui.geometry.Size(px * (1f - t * 0.5f), px * (1f - t * 0.5f)))
+        }
+        if (t < 0.25f) drawCircle(c.accent.copy(alpha = 0.3f * (1f - t * 4f)), radius = this.size.width / 2f * (1f + t))
+    }
+}
+
+/**
+ * The bin that rises while you drag the orb: a ring of drifting pixel particles with a pixel "×".
+ * When the orb is over it, the particles pull in, turn blue and the ring swells.
+ */
+@Composable
+private fun ParticleBin(shown: Boolean, hot: Boolean) {
+    val c = LocalBlaze.current
+    val vis by animateFloatAsState(if (shown) 1f else 0f, tween(240), label = "vis")
+    val heat by animateFloatAsState(if (hot) 1f else 0f, tween(180), label = "heat")
+    if (!shown && vis <= 0.001f) return   // nothing drawn, no frames, while you aren't dragging
+    val t = rememberInfiniteTransition(label = "bin")
+    val time by t.animateFloat(0f, 6.283f, infiniteRepeatable(tween(5200, easing = LinearEasing)), label = "time")
+    val dots = remember {
+        val r = kotlin.random.Random(7)
+        List(54) { Triple(r.nextFloat() * 6.283f, r.nextFloat(), r.nextFloat()) }
+    }
+    Canvas(Modifier.fillMaxSize()) {
+        if (vis <= 0f) return@Canvas
+        val w = size.width; val h = size.height
+        // Soft fade from the bottom edge, like the app's paper.
+        drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(
+            listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f * vis)), startY = 0f, endY = h))
+        val cx = w / 2f
+        val cy = h - 110.dp.toPx() + (1f - vis) * 80.dp.toPx()
+        val ringR = (34.dp.toPx() + 10.dp.toPx() * heat)
+        val px = 3.dp.toPx() + 1.dp.toPx() * heat
+        // Drifting particle ring.
+        dots.forEach { (a0, rr, ph) ->
+            val a = a0 + time * (0.25f + ph * 0.3f) * (if (ph > 0.5f) 1 else -1)
+            val spread = (1f - heat * 0.75f) * 18.dp.toPx()
+            val rad = ringR + (rr - 0.5f) * spread + kotlin.math.sin(time * 2 + ph * 9) * 3.dp.toPx() * (1f - heat)
+            val col = if (heat > 0.5f || ph > 0.86f) c.accent else Color.White
+            drawRect(col.copy(alpha = vis * (0.55f + 0.45f * heat)),
+                Offset(cx + kotlin.math.cos(a) * rad - px / 2, cy + kotlin.math.sin(a) * rad - px / 2),
+                androidx.compose.ui.geometry.Size(px, px))
+        }
+        // Pixel "×" in the middle (hidden under the orb when it snaps in).
+        val cell = 4.dp.toPx()
+        for (i in -3..3) {
+            for (sgn in listOf(1, -1)) {
+                drawRect((if (heat > 0.5f) c.accent else Color.White).copy(alpha = vis * 0.9f),
+                    Offset(cx + i * cell - cell / 2, cy + sgn * i * cell - cell / 2), androidx.compose.ui.geometry.Size(cell * 0.9f, cell * 0.9f))
+            }
+        }
+    }
+}
+
+/** Compact chat over any app: orb, the latest messages, and an input with mic. */
+@Composable
+fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onExpand: () -> Unit) {
+    val c = LocalBlaze.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val messages by Agent.messages.collectAsState()
+    val mood by Agent.mood.collectAsState()
+    val voice by Voice.state.collectAsState()
+    val partial by Voice.partial.collectAsState()
+    var text by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    val recent = messages.filter { it.role != Role.STEP || it == messages.lastOrNull() }.takeLast(8)
+    val list = rememberLazyListState()
+    LaunchedEffect(recent.size, recent.lastOrNull()?.text?.length) { if (recent.isNotEmpty()) list.animateScrollToItem(recent.size - 1) }
+
+    fun listen() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            note = "Open Blaze once and allow the microphone."; return
+        }
+        Voice.listen(onText = { if (it.isNotBlank()) Agent.send(it, byVoice = true) }, onError = { note = it })
+    }
+    LaunchedEffect(Unit) { if (autoListen && mood == Mood.IDLE) listen() }
+    val octx = androidx.compose.ui.platform.LocalContext.current
+    fun submit() {
+        if (text.isBlank()) return
+        val openApp = { s: String -> octx.startActivity(android.content.Intent(octx, com.blaze.assistant.MainActivity::class.java)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        val cmd = CommandRunner.run(octx, text.trim(), openSettings = { openApp(it) }, openChats = { openApp("") }, listen = { })
+        if (cmd == "") { text = ""; return }
+        if (mood == Mood.IDLE) { Agent.send(cmd ?: text); text = "" }
+    }
+
+    Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { Voice.cancelListening(); onClose() }) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .clickable(remember { MutableInteractionSource() }, null) { }
+                // The window itself resizes above the keyboard, so no IME padding here (doubling it
+                // shoved the panel under the status bar).
+                .statusBarsPadding().navigationBarsPadding()
+                .padding(10.dp)
+                .background(c.paper).hairline(c.hair)
+        ) {
+            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                OrbFace(40.dp)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Blaze", style = TextStyle(fontFamily = Type.Display, fontSize = 17.sp, color = c.ink))
+                    Label(when {
+                        voice == Voice.State.LISTENING -> "Listening"
+                        voice == Voice.State.SPEAKING -> "Speaking"
+                        mood == Mood.ACTING -> "Working"
+                        mood == Mood.THINKING -> "Thinking"
+                        else -> "Ready"
+                    }, color = if (mood != Mood.IDLE || voice != Voice.State.IDLE) c.accent else c.sub, size = 9.sp)
+                }
+                PanelButton("New") { Voice.cancelListening(); Agent.clear(); text = "" }
+                PanelButton("Pin", onPin)
+                PanelButton("Open", onExpand)
+                PanelButton("×", onClose)
+            }
+            if (recent.isNotEmpty()) {
+                LazyColumn(state = list, modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 300.dp).padding(horizontal = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { Spacer(Modifier.height(4.dp)) }
+                    items(recent, key = { it.id }) { m ->
+                        when (m.role) {
+                            Role.USER -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                                Text(m.text, modifier = Modifier.background(c.ink).padding(horizontal = 12.dp, vertical = 8.dp),
+                                    style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.paper))
+                            }
+                            Role.STEP -> Label("— " + m.text, size = 10.sp)
+                            else -> SelectionContainer {
+                                Text(m.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp,
+                                    color = if (m.role == Role.ERROR) c.accent else c.body))
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.height(4.dp)) }
+                }
+            }
+            ConfirmCard()
+            if (voice == Voice.State.LISTENING || note.isNotEmpty()) {
+                Text(if (note.isNotEmpty()) note else partial.ifBlank { "Listening…" },
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    style = TextStyle(fontFamily = Type.Display, fontSize = 19.sp, color = if (note.isNotEmpty()) c.accent else c.ink))
+            }
+            Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 12.dp, vertical = 12.dp)) {
+                    if (text.isEmpty()) Text("Ask Blaze", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+                    BasicTextField(text, { text = it },
+                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink),
+                        cursorBrush = SolidColor(c.accent), maxLines = 3,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { submit() }),
+                        modifier = Modifier.fillMaxWidth())
+                }
+                Spacer(Modifier.width(8.dp))
+                val micOn = voice != Voice.State.IDLE
+                Box(Modifier.size(46.dp).background(if (micOn) c.accent else c.paper).hairline(if (micOn) c.accent else c.hair)
+                    .clickable {
+                        note = ""
+                        when (voice) {
+                            Voice.State.LISTENING -> Voice.cancelListening()
+                            Voice.State.SPEAKING -> Voice.stopSpeaking()
+                            else -> listen()
+                        }
+                    }, contentAlignment = Alignment.Center) {
+                    Label(if (micOn) "■" else "Mic", color = if (micOn) c.paper else c.ink, size = 10.sp)
+                }
+                Spacer(Modifier.width(6.dp))
+                Box(Modifier.height(46.dp).background(if (mood != Mood.IDLE) c.accent else c.ink)
+                    .clickable { if (mood != Mood.IDLE) Agent.stop() else submit() }.padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center) {
+                    Label(if (mood != Mood.IDLE) "Stop" else "Send", color = c.paper, size = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PanelButton(label: String, onClick: () -> Unit) {
+    Box(Modifier.clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp)) {
+        Label(label, color = if (label == "Pin orb") LocalBlaze.current.accent else LocalBlaze.current.sub, size = if (label == "×") 16.sp else 10.sp)
+    }
+}

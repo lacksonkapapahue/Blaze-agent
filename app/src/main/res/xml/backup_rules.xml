@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own backup keeps settings, keys, memory and chats; the 40 MB voice model re-downloads. -->
+<full-backup-content>
+    <include domain="sharedpref" path="." />
+    <include domain="file" path="chats/" />
+    <exclude domain="file" path="wake-model/" />
+</full-backup-content>
