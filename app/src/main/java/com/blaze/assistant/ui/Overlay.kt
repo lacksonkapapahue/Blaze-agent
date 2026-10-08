@@ -20,6 +20,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -69,6 +70,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
@@ -228,6 +230,45 @@ object Overlay {
         orbDying.value = false
         Agent.overlayOpen = panelView != null
         if (unpin) Settings.orbPinned = false
+    }
+
+    // ---------- Live task card ----------
+
+    private var cardView: View? = null
+    private var cardOwner: OverlayOwner? = null
+    private var cardWatch: kotlinx.coroutines.Job? = null
+
+    /**
+     * While Blaze works and you're in another app, a slim card at the top shows the step it's
+     * on with Stop. Tap it to open the panel. Hidden when Blaze is on screen or the panel is open.
+     */
+    fun watchTasks(ctx: Context) {
+        if (cardWatch != null) return
+        val app = ctx.applicationContext
+        cardWatch = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            while (true) {
+                val busy = Agent.busyChats.value.isNotEmpty()
+                val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app)
+                if (want && cardView == null) showCard(app) else if (!want && cardView != null) hideCard()
+                kotlinx.coroutines.delay(400)
+            }
+        }
+    }
+
+    private fun showCard(ctx: Context) {
+        val wm = ctx.getSystemService(WindowManager::class.java)
+        val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP; y = (36 * ctx.resources.displayMetrics.density).toInt() }
+        val owner = OverlayOwner().also { it.start() }
+        val v = composeView(ctx, owner) { TaskCard(onOpen = { hideCard(); openPanel(ctx, false) }, onStop = { Agent.stopAll() }) }
+        try { wm.addView(v, lp); cardView = v; cardOwner = owner } catch (_: Exception) { owner.destroy() }
+    }
+
+    private fun hideCard() {
+        cardView?.let { v -> runCatching { v.context.getSystemService(WindowManager::class.java).removeView(v) } }
+        cardOwner?.destroy(); cardView = null; cardOwner = null
     }
 
     /** Open the chat panel over the current app: the assistant session if Blaze is the assistant, else an overlay. */
@@ -531,5 +572,29 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
 private fun PanelButton(label: String, onClick: () -> Unit) {
     Box(Modifier.clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp)) {
         Label(label, color = if (label == "Pin orb") LocalBlaze.current.accent else LocalBlaze.current.sub, size = if (label == "×") 16.sp else 10.sp)
+    }
+}
+
+
+/** The slim "Blaze is working" card shown over other apps. */
+@Composable
+fun TaskCard(onOpen: () -> Unit, onStop: () -> Unit) {
+    run {
+        val c = LocalBlaze.current
+        val msgs by Agent.messages.collectAsState()
+        val busy by Agent.busyChats.collectAsState()
+        val step = msgs.lastOrNull { it.role == com.blaze.assistant.agent.Role.STEP }?.text ?: "Working"
+        Row(Modifier.padding(horizontal = 12.dp).fillMaxWidth().background(c.paper).border(1.dp, c.ink).clickable(onClick = onOpen)
+            .padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            OrbFace(26.dp)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
+                Label(if (busy.size > 1) "Blaze · ${busy.size} tasks" else "Blaze is working", color = c.accent, size = 9.sp)
+                Text(step, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
+            }
+            Box(Modifier.height(52.dp).width(64.dp).background(c.ink).clickable(onClick = onStop), contentAlignment = Alignment.Center) {
+                Label("Stop", color = c.paper, size = 10.sp) }
+        }
     }
 }

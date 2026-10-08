@@ -176,6 +176,21 @@ object Settings {
         return n
     }
 
+    /** Slim live task card over other apps while Blaze works. */
+    var taskCard: Boolean
+        get() = prefs.getBoolean("task_card", true)
+        set(v) = prefs.edit().putBoolean("task_card", v).apply()
+
+    /** Haptic ticks when actions land. */
+    var haptics: Boolean
+        get() = prefs.getBoolean("haptics", true)
+        set(v) = prefs.edit().putBoolean("haptics", v).apply()
+
+    /** Chat text size multiplier (accessibility). */
+    var textScale: Float
+        get() = prefs.getFloat("text_scale", 1f)
+        set(v) = prefs.edit().putFloat("text_scale", v).apply()
+
     /** Small "⚡ on-device" / "☁ model · 2.1 s" badge under replies. */
     var showRoute: Boolean
         get() = prefs.getBoolean("show_route", true)

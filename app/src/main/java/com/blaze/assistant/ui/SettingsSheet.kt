@@ -60,6 +60,10 @@ data class SettingsPage(val id: String, val title: String, val sub: String)
 val settingsPages = listOf(
     SettingsPage("ai", "AI & model", "Provider, key, model, reasoning, follow-ups"),
     SettingsPage("connections", "Connections", "Google, GitHub, Spotify, Notion, Slack, MCP"),
+    SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
+    SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
+    SettingsPage("terminal", "Terminal", "A real shell, jobs, Termux"),
+    SettingsPage("dashboard", "Dashboard", "Local web dashboard and analytics"),
     SettingsPage("persona", "Personality", "How Blaze talks"),
     SettingsPage("control", "Phone control", "Accessibility, skills, permissions"),
     SettingsPage("commands", "Slash commands", "Your own /commands and prompt skills"),
@@ -124,6 +128,10 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "usage" -> UsageSection()
                 "privacy" -> SecuritySection()
                 "device" -> DevicePage()
+                "proactive" -> ProactivePage()
+                "specialists" -> SpecialistsPage()
+                "terminal" -> TerminalPage()
+                "dashboard" -> DashboardPage()
                 "backup" -> BackupSection()
             }
             Spacer(Modifier.height(30.dp))

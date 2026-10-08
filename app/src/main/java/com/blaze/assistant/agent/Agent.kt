@@ -603,6 +603,7 @@ When you finish, say in one or two sentences what you did.
                     if (calls == null || calls.length() == 0) {
                         kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
                         val secs = (System.currentTimeMillis() - turnStart) / 1000.0
+                    if (step > 0) com.blaze.assistant.device.Haptics.done(app)
                         com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
                         addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
                             if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model }, "%.1f s".format(secs),
@@ -627,6 +628,7 @@ When you finish, say in one or two sentences what you did.
                         val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
                             catch (_: Exception) { JSONObject() }
                         var result = runTool(name, args, shots)
+                        if (name in screenActions && !result.startsWith("Error") && !result.startsWith("Couldn't")) com.blaze.assistant.device.Haptics.tick(app)
                         if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
                         history.put(
                             JSONObject().put("role", "tool")

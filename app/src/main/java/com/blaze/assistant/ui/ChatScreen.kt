@@ -253,7 +253,9 @@ fun ChatScreen() {
                 if (!hasMessages) {
                     Welcome(needsSetup = !Settings.ready, onSetup = { settingsPage = "ai" }) { Agent.send(it) }
                 } else {
-                    CompositionLocalProvider(LocalTextToolbar provides toolbar) {
+                    val dens = LocalDensity.current
+                    CompositionLocalProvider(LocalTextToolbar provides toolbar,
+                        LocalDensity provides androidx.compose.ui.unit.Density(dens.density, dens.fontScale * Settings.textScale)) {
                         MessageList(mood,
                             onQuote = { quote = it },
                             onFollowup = { send(it) })
