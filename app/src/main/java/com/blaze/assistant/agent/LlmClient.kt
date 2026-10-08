@@ -59,6 +59,10 @@ object LlmClient {
             val t = target(Settings.stepsProvider, Settings.stepsModel)
             if (t.key.isNotBlank()) return call(t, messages, tools, onText, null, false).also { lastRoute = t.label }
         }
+        // Daily spend cap: once today's estimated cost passes it, switch to the free chain.
+        val cap = Settings.str("daily_cap", "").toDoubleOrNull()
+        if (cap != null && cap > 0 && Settings.providerId != Providers.AUTO && try { Usage.today().cost >= cap } catch (_: Exception) { false })
+            return FreeRouter.complete(messages, tools, onText, onThink, lane).also { lastRoute = "Free (daily cap) · " + lastRoute }
         if (Settings.providerId == Providers.AUTO || (lane == Lane.STEPS && Settings.stepsProvider == Providers.AUTO))
             return FreeRouter.complete(messages, tools, onText, onThink, lane)
         val t = target(Settings.providerId)

@@ -254,6 +254,7 @@ fun LearningSection() {
                         Text(s.name + if (s.replay != null) "  ▶" else "", style = TextStyle(fontFamily = Type.Mono, fontSize = 13.sp, color = c.ink))
                         Text(s.description + " · used ${s.uses}×", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                     }
+                    Box(Modifier.clickable { com.blaze.assistant.agent.Agent.send("Run my skill \"${s.name}\"") }.padding(10.dp)) { Label("Run", color = c.accent, size = 10.sp) }
                     Box(Modifier.clickable { Learning.deleteSkill(s.name) }.padding(10.dp)) { Label("×", size = 13.sp) }
                 }
                 if (shown == s.name) Text(s.steps, modifier = Modifier.padding(top = 6.dp, end = 12.dp),

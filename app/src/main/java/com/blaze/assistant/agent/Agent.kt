@@ -329,6 +329,7 @@ When you finish, say in one or two sentences what you did.
                 .put("required", JSONArray(listOf("question", "options"))))))
         Web.tools().forEach { t.put(it) }
         com.blaze.assistant.proactive.Triggers.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.phone.Ussd.tool())
         if (Settings.bool("terminal_tools", true)) com.blaze.assistant.terminal.Terminal.tools(app).forEach { t.put(it) }
         if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
@@ -754,6 +755,13 @@ When you finish, say in one or two sentences what you did.
                         "The user did NOT approve running that command."
                     else if (args.optBoolean("background")) com.blaze.assistant.terminal.Terminal.startJob(cmd)
                     else com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60))
+                }
+                "run_ussd" -> {
+                    val code = args.optString("code")
+                    add(Role.STEP, "Dialling $code")
+                    if (com.blaze.assistant.phone.Ussd.risky(code) && !confirm("Dial $code?", "This looks like a mobile money or multi-step code.", "Dial"))
+                        "The user did NOT approve dialling $code."
+                    else com.blaze.assistant.phone.Ussd.run(app, code)
                 }
                 "terminal_jobs" -> com.blaze.assistant.terminal.Terminal.listJobs()
                 "terminal_stop" -> com.blaze.assistant.terminal.Terminal.stopJob(args.optInt("id"))

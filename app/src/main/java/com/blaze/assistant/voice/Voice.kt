@@ -42,7 +42,15 @@ object Voice {
                 tts?.language = Locale.getDefault()
                 tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                     override fun onStart(id: String?) { _state.value = State.SPEAKING }
-                    override fun onDone(id: String?) { _state.value = State.IDLE; WakeWordService.resume(app) }
+                    override fun onDone(id: String?) {
+                        _state.value = State.IDLE
+                        // Hands-free: after answering a spoken question, listen again for the follow-up.
+                        if (com.blaze.assistant.agent.Settings.bool("voice_loop", false) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                listen({ t -> if (t.isNotBlank()) com.blaze.assistant.agent.Agent.send(t, byVoice = true) }, { })
+                            }, 250)
+                        } else WakeWordService.resume(app)
+                    }
                     @Deprecated("old api") override fun onError(id: String?) { _state.value = State.IDLE; WakeWordService.resume(app) }
                 })
             }

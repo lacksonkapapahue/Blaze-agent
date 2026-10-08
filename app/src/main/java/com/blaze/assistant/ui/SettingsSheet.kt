@@ -121,11 +121,11 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "persona" -> PersonaSection()
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)
                 "commands" -> CommandsSection()
-                "voice" -> VoiceSection()
+                "voice" -> { VoiceSection(); VoiceExtras() }
                 "orb" -> OrbSection()
                 "routines" -> RoutinesSection()
                 "memory" -> { MemorySection(); LearningSection() }
-                "usage" -> UsageSection()
+                "usage" -> { UsageSection(); CostCap() }
                 "privacy" -> SecuritySection()
                 "device" -> DevicePage()
                 "proactive" -> ProactivePage()

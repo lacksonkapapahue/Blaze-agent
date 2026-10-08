@@ -337,3 +337,18 @@ internal fun V18Field(hint: String, value: String, onChange: (String) -> Unit) {
             cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent), modifier = Modifier.fillMaxWidth())
     }
 }
+
+@Composable
+fun VoiceExtras() {
+    var loop by remember { mutableStateOf(Settings.bool("voice_loop", false)) }
+    V18Section("Hands-free")
+    ToggleRow("Conversation mode", "After Blaze answers out loud, it listens again so you can keep talking", loop) { loop = !loop; Settings.setBool("voice_loop", loop) }
+}
+
+@Composable
+fun CostCap() {
+    var cap by remember { mutableStateOf(Settings.str("daily_cap", "")) }
+    V18Section("Daily spend cap")
+    V18Note("When today's estimated cost passes this (in US dollars), Blaze switches to the free Auto chain until tomorrow. Leave blank for no cap.")
+    V18Field("e.g. 0.50", cap) { v -> cap = v.filter { it.isDigit() || it == '.' }; Settings.setStr("daily_cap", cap) }
+}

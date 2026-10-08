@@ -626,6 +626,8 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
                 }
             }
             Actions(m, canAct, onQuote, allowQuote = false)
+            // Pick up where it broke instead of starting over: the history keeps the steps done so far.
+            if (canAct) Followups(listOf("Continue where you stopped"), onFollowup)
         }
         Role.STEP -> {}
     }
