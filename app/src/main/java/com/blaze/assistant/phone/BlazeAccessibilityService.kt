@@ -54,6 +54,7 @@ class BlazeAccessibilityService : AccessibilityService() {
             if (pkg.isNotEmpty() && pkg != lastWindowPkg && pkg != packageName) {
                 lastWindowPkg = pkg
                 com.blaze.assistant.agent.ScreenMemory.onWindow(this, pkg)
+                try { com.blaze.assistant.proactive.Triggers.onApp(pkg, appLabel(pkg)) } catch (_: Exception) { }
             }
         }
     }

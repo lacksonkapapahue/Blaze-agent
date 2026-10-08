@@ -130,6 +130,39 @@ object Notifier {
     }
     fun clearWakeBlocked() = try { NotificationManagerCompat.from(app).cancel(ID_WAKE_BLOCKED) } catch (_: Exception) { }
 
+    private const val ID_PROACTIVE = 8
+    private const val CH_PROACTIVE = "blaze_proactive"
+
+    /** Blaze speaking up on its own, with a one-tap suggestion and an inline reply. */
+    fun proactive(text: String, suggest: String, urgent: Boolean) {
+        if (!allowed()) return
+        if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CH_PROACTIVE, "Blaze heads-ups", NotificationManager.IMPORTANCE_HIGH).apply { description = "When Blaze notices something worth telling you" })
+        val input = RemoteInput.Builder(KEY_REPLY).setLabel("Reply to Blaze").build()
+        val b = NotificationCompat.Builder(app, CH_PROACTIVE).setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
+            .setContentTitle(if (urgent) "Blaze · important" else "Blaze").setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(openApp())
+            .setPriority(if (urgent) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
+            .addAction(NotificationCompat.Action.Builder(0, "Reply", broadcast(ActionReceiver.REPLY, mutable = true)).addRemoteInput(input).build())
+        if (suggest.isNotBlank()) {
+            val pi = PendingIntent.getBroadcast(app, ("do" + suggest).hashCode(), Intent(app, ActionReceiver::class.java).setAction(ActionReceiver.DO)
+                .putExtra("prompt", suggest), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            b.addAction(0, suggest.take(28), pi)
+        }
+        try { NotificationManagerCompat.from(app).notify(ID_PROACTIVE, b.build()) } catch (_: SecurityException) { }
+    }
+
+    private const val ID_QUESTION = 7
+    fun question(q: String) {
+        if (!allowed()) return
+        val n = NotificationCompat.Builder(app, CH_REPLY).setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
+            .setContentTitle("Blaze needs an answer").setContentText(q)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(q))
+            .setAutoCancel(true).setContentIntent(openApp()).setPriority(NotificationCompat.PRIORITY_HIGH).build()
+        try { NotificationManagerCompat.from(app).notify(ID_QUESTION, n) } catch (_: SecurityException) { }
+    }
+    fun clearQuestion() = try { NotificationManagerCompat.from(app).cancel(ID_QUESTION) } catch (_: Exception) { }
+
     fun clearReplies() = NotificationManagerCompat.from(app).cancel(ID_REPLY)
 
     /** Approval request with Allow / Don't buttons. */
@@ -156,11 +189,17 @@ class ActionReceiver : BroadcastReceiver() {
         const val REPLY = "com.blaze.assistant.REPLY"
         const val ALLOW = "com.blaze.assistant.ALLOW"
         const val DENY = "com.blaze.assistant.DENY"
+        const val DO = "com.blaze.assistant.DO"
     }
 
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
-            STOP -> { Agent.stop(); Notifier.doneWorking() }
+            STOP -> { Agent.stopAll(); Notifier.doneWorking() }
+            DO -> intent.getStringExtra("prompt")?.let { p ->
+                androidx.core.app.NotificationManagerCompat.from(ctx).cancel(8)
+                Agent.runRoutine("Heads-up", p)
+                Notifier.working("Working on: " + p.take(60))
+            }
             ALLOW -> { Agent.answerConfirm(true); Notifier.clearConfirm() }
             DENY -> { Agent.answerConfirm(false); Notifier.clearConfirm() }
             REPLY -> {

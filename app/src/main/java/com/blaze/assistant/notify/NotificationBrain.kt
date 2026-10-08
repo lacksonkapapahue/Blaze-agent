@@ -56,6 +56,9 @@ class NotificationBrain : NotificationListenerService() {
 
         private var lastList: List<Item> = emptyList()
 
+        /** Notifications posted after [since] (for proactive checks). */
+        fun since(since: Long): List<Item> = synchronized(items) { items.filter { it.time > since } }
+
         fun list(app: String?, hours: Double): String {
             if (instance == null) return "Notification access is off. Ask the user to turn it on in Blaze → Settings → Phone control."
             val since = System.currentTimeMillis() - (hours * 3_600_000).toLong()
@@ -99,5 +102,6 @@ class NotificationBrain : NotificationListenerService() {
             items.addLast(Item(sbn.key, sbn.postTime, app, title, text, reply))
             while (items.size > 150) items.removeFirst()
         }
+        try { com.blaze.assistant.proactive.Triggers.onNotification(this, app, title, text) } catch (_: Exception) { }
     }
 }

@@ -55,6 +55,10 @@ enum class Mood { IDLE, THINKING, ACTING }
 data class PendingConfirm(val title: String, val detail: String, val action: String,
                           val answer: kotlinx.coroutines.CompletableDeferred<Boolean>)
 
+/** A question Blaze asks mid-task, with tap-to-answer [options] (the UI always adds "type my own"). */
+data class PendingQuestion(val question: String, val options: List<String>, val chat: String,
+                           val answer: kotlinx.coroutines.CompletableDeferred<String>)
+
 /** Something the user attached: [parts] are OpenAI content parts (image_url / text). */
 data class Attachment(val name: String, val parts: List<JSONObject>)
 
@@ -102,6 +106,33 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     }
 
     fun answerConfirm(ok: Boolean) { _confirm.value?.answer?.complete(ok) }
+
+    private val _question = MutableStateFlow<PendingQuestion?>(null)
+    val pendingQuestion: StateFlow<PendingQuestion?> = _question
+    private val askLock = kotlinx.coroutines.sync.Mutex()
+
+    /**
+     * Pause the task and ask the user. In Blaze it's a card in the chat; over another app the
+     * orb panel pops up with the question so the task continues right where it is.
+     */
+    suspend fun askUser(question: String, options: List<String>, chat: String): String = askLock.withLock {
+        val d = kotlinx.coroutines.CompletableDeferred<String>()
+        _question.value = PendingQuestion(question, options.filter { it.isNotBlank() }.take(5), chat, d)
+        var popped = false
+        if (!inForeground && !overlayOpen) {
+            if (com.blaze.assistant.ui.Overlay.canDrawOverApps(app)) {
+                kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Overlay.openPanel(app, false) }; popped = true
+            } else Notifier.question(question)
+        }
+        if (Voice.lastTurnByVoice && Settings.speakReplies) Voice.speak(question)
+        val a = kotlinx.coroutines.withTimeoutOrNull(15 * 60_000) { d.await() }
+        _question.value = null
+        Notifier.clearQuestion()
+        if (popped && a != null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Overlay.closePanel() }
+        a ?: "(The user didn't answer within 15 minutes. Stop and say what you need.)"
+    }
+
+    fun answerQuestion(text: String) { _question.value?.answer?.complete(text) }
 
     private val risky = Regex("\\b(send|pay|buy|purchase|order|checkout|check out|delete|remove|post|publish|transfer|confirm|subscribe|place order|book)\\b", RegexOption.IGNORE_CASE)
 
@@ -154,15 +185,22 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     /** Retry the newest answer. */
     fun retryLast() { cur.msgs.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.let { retry(it.id) } }
 
-    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) = cur.send(text, byVoice, attachments)
+    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
+        // Typing or speaking while Blaze waits on a question answers it.
+        if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
+        cur.send(text, byVoice, attachments)
+    }
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
     fun stopAll() = sessions.values.forEach { it.stop() }
 
     /** Open a chat. If it's still working in the background you see it live. */
-    fun open(id: String) {
-        sessions[id]?.let { show(it); return }
-        val o = ChatStore.load(id) ?: return
+    fun open(id: String) { load(id)?.let { show(it) } }
+
+    /** A chat's session: the live one if it's open or working, else read from disk. */
+    private fun load(id: String): Session? {
+        sessions[id]?.let { return it }
+        val o = ChatStore.load(id) ?: return null
         val s = Session(id)
         s.title = o.optString("title"); s.pinned = o.optBoolean("pinned"); s.summary = o.optString("summary")
         val h = o.optJSONArray("history") ?: JSONArray()
@@ -180,7 +218,22 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
         }
         ids.set(maxOf(ids.get(), maxId + 1))
         s.msgs = list
-        show(s)
+        return s
+    }
+
+    /**
+     * Send [text] into chat [chatId] (or a new chat) without switching the screen, wait for the
+     * answer and return (chatId, reply). Used by the dashboard.
+     */
+    suspend fun askIn(chatId: String?, text: String): Pair<String, String> {
+        val s = chatId?.let { load(it) } ?: Session(newId()).also { it.title = "Dashboard · " + text.take(30) }
+        sessions[s.id] = s
+        if (s.busy) s.job?.join()
+        val before = s.msgs.size
+        kotlinx.coroutines.withContext(Dispatchers.Main) { s.send(text) }
+        s.job?.join()
+        val reply = s.msgs.drop(before).lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.text.orEmpty()
+        return s.id to reply
     }
 
     /** Start a fresh chat. The one you leave keeps working if it was busy. */
@@ -221,7 +274,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     }
 
     /** Messages of any chat (for the dashboard). */
-    fun messagesOf(id: String): List<ChatMessage>? = sessions[id]?.msgs
+    fun messagesOf(id: String): List<ChatMessage>? = load(id)?.msgs
 
     fun lastStep(): String = cur.msgs.lastOrNull { it.role == Role.STEP }?.text ?: "Thinking"
 
@@ -243,6 +296,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
             append(Learning.promptBlock(userText))
             append(com.blaze.assistant.connect.Connectors.promptBlock())
             append("\nWhen the user tells you something lasting about themselves, save it with the remember tool. ")
+            append("\nIf you're unsure what the user wants, or there are several options (accounts, contacts, items, times), don't guess and don't end your turn: call ask_user with short options, then carry on with the answer. ")
             if (control) {
                 append("""
 You can control the phone with tools. To do something in an app:
@@ -267,7 +321,15 @@ When you finish, say in one or two sentences what you did.
         val t = JSONArray()
         Memory.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.device.DeviceStatus.tool())
+        t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "ask_user")
+            .put("description", "Pause and ask the user a question with 2-4 short tap-able options (an 'own answer' choice is added automatically). Use whenever you're unsure, the request is ambiguous, or there are several choices on screen (which account, which contact, which item). The task waits right where it is and continues with the answer.")
+            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("question", JSONObject().put("type", "string"))
+                .put("options", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))))
+                .put("required", JSONArray(listOf("question", "options"))))))
         Web.tools().forEach { t.put(it) }
+        com.blaze.assistant.proactive.Triggers.tools().forEach { t.put(it) }
+        if (Settings.bool("terminal_tools", true)) com.blaze.assistant.terminal.Terminal.tools(app).forEach { t.put(it) }
         if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
@@ -672,6 +734,28 @@ When you finish, say in one or two sentences what you did.
                 "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
                 "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
                 "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
+                "ask_user" -> {
+                    val opts = args.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                    add(Role.STEP, "Asked: ${args.optString("question").take(80)}")
+                    mood = Mood.IDLE
+                    val a = askUser(args.optString("question"), opts, title)
+                    mood = Mood.ACTING
+                    add(Role.STEP, "You answered: ${a.take(80)}")
+                    "The user answered: $a"
+                }
+                in com.blaze.assistant.proactive.Triggers.names -> { add(Role.STEP, if (name == "create_trigger") "Setting up \u201c${args.optString("name")}\u201d" else "Checking triggers")
+                    com.blaze.assistant.proactive.Triggers.run(name, args) }
+                "run_shell" -> {
+                    val cmd = args.optString("command")
+                    add(Role.STEP, "$ " + cmd.take(70))
+                    if (com.blaze.assistant.terminal.Terminal.risky(cmd) && !confirm("Run this command?", cmd.take(200), "Run"))
+                        "The user did NOT approve running that command."
+                    else if (args.optBoolean("background")) com.blaze.assistant.terminal.Terminal.startJob(cmd)
+                    else com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60))
+                }
+                "terminal_jobs" -> com.blaze.assistant.terminal.Terminal.listJobs()
+                "terminal_stop" -> com.blaze.assistant.terminal.Terminal.stopJob(args.optInt("id"))
+                "termux_run" -> { add(Role.STEP, "Termux: " + args.optString("command").take(60)); com.blaze.assistant.terminal.Terminal.runInTermux(app, args.optString("command"), args.optBoolean("background", true)) }
                 "delegate" -> delegate(args.optJSONArray("tasks") ?: JSONArray())
                 "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
                 "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }

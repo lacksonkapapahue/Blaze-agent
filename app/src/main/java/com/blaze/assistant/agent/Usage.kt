@@ -94,6 +94,19 @@ object Usage {
         return Totals(i, o, c, priced && any, calls)
     }
 
+    /** Last [n] days, oldest first: day, tokens, cost, calls (for the dashboard chart). */
+    fun daily(n: Int = 14): List<org.json.JSONObject> {
+        val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val cal = java.util.Calendar.getInstance()
+        val out = mutableListOf<org.json.JSONObject>()
+        for (i in n - 1 downTo 0) {
+            val c = cal.clone() as java.util.Calendar; c.add(java.util.Calendar.DAY_OF_YEAR, -i)
+            val d = fmt.format(c.time); val t = totals(d)
+            out += org.json.JSONObject().put("day", d).put("tokens", t.input + t.output).put("cost", t.cost).put("calls", t.calls)
+        }
+        return out
+    }
+
     fun today() = totals(day)
     fun month() = totals(day.take(7))
     fun reset() { prefs.edit().remove("usage").apply(); _version.value++ }

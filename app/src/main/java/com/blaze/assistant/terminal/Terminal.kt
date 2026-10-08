@@ -1,0 +1,176 @@
+package com.blaze.assistant.terminal
+
+import android.content.Context
+import android.content.Intent
+import android.system.Os
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+/**
+ * A real shell on the phone: Android's sh plus ~300 BusyBox tools (vi, wget, httpd, tar, grep,
+ * awk, nc…) shipped inside the APK. Home is filesDir/home. Long jobs (local servers) run in the
+ * background. For a full Linux (pkg install python/nodejs/gradle) Blaze hands commands to Termux.
+ */
+object Terminal {
+    private lateinit var app: Context
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun home(): File = File(app.filesDir, "home").apply { mkdirs() }
+    private fun bin(): File = File(app.filesDir, "usr/bin")
+    private fun busybox() = File(app.applicationInfo.nativeLibraryDir, "libbusybox.so")
+    fun hasBusybox() = ::app.isInitialized && busybox().exists()
+
+    fun init(ctx: Context) { app = ctx.applicationContext }
+
+    /** Links every BusyBox applet into usr/bin once per app version (cheap, no root). */
+    @Synchronized fun setup() {
+        if (!hasBusybox()) return
+        val stamp = File(app.filesDir, "usr/.bb")
+        val ver = try { app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime.toString() } catch (_: Exception) { "1" }
+        if (stamp.exists() && stamp.readText() == ver && File(bin(), "busybox").exists()) return
+        bin().deleteRecursively(); bin().mkdirs()
+        val applets = try {
+            ProcessBuilder(busybox().absolutePath, "--list").redirectErrorStream(true).start().inputStream.bufferedReader().readLines()
+        } catch (_: Exception) { emptyList() }
+        for (a in applets + "busybox") {
+            val name = a.trim(); if (name.isEmpty() || name.contains('/')) continue
+            // Keep Android's own versions of a few that apps rely on.
+            if (name in setOf("sh", "su", "reboot", "init", "mount", "umount")) continue
+            try { Os.symlink(busybox().absolutePath, File(bin(), name).absolutePath) } catch (_: Exception) { }
+        }
+        stamp.parentFile?.mkdirs(); stamp.writeText(ver)
+    }
+
+    fun env(): Map<String, String> = mapOf(
+        "HOME" to home().absolutePath,
+        "PATH" to "${bin().absolutePath}:/system/bin:/system/xbin",
+        "TMPDIR" to app.cacheDir.absolutePath,
+        "TERM" to "dumb",
+        "LANG" to "en_US.UTF-8",
+        "PREFIX" to File(app.filesDir, "usr").absolutePath,
+    )
+
+    private fun builder(cmd: String) = ProcessBuilder("/system/bin/sh", "-c", cmd).directory(home()).redirectErrorStream(true)
+        .also { pb -> pb.environment().putAll(env()) }
+
+    // ---------- Interactive session (Terminal screen) ----------
+
+    private val _out = MutableStateFlow("")
+    val output: StateFlow<String> = _out
+    private var shell: Process? = null
+    val cwdName get() = "~"
+
+    private fun append(s: String) { val v = _out.value + s; _out.value = if (v.length > 120_000) v.takeLast(100_000) else v }
+
+    @Synchronized fun startShell() {
+        if (shell?.isAlive == true) return
+        scope.launch { setup() }
+        val p = ProcessBuilder("/system/bin/sh").directory(home()).redirectErrorStream(true)
+            .also { it.environment().putAll(env()) }.start()
+        shell = p
+        if (_out.value.isEmpty()) append("Blaze terminal · sh + BusyBox · home is ~\n")
+        scope.launch {
+            val buf = CharArray(4096)
+            val r = p.inputStream.bufferedReader()
+            try { while (true) { val n = r.read(buf); if (n < 0) break; append(String(buf, 0, n)) } } catch (_: Exception) { }
+            append("\n[shell exited]\n")
+        }
+    }
+
+    fun input(line: String) {
+        startShell()
+        append("$ $line\n")
+        try { shell?.outputStream?.let { it.write((line + "\n").toByteArray()); it.flush() } } catch (e: Exception) { append("error: ${e.message}\n") }
+    }
+
+    fun interrupt() { shell?.destroy(); shell = null; append("^C\n"); startShell() }
+    fun clearScreen() { _out.value = "" }
+
+    // ---------- For the agent ----------
+
+    private val danger = Regex("(\\brm\\s+-[a-z]*r[a-z]*f?\\s+(/|~|\\*|\\.\\s*$))|\\bmkfs|\\bdd\\s+if=|\\breboot\\b|\\bsu\\b|>\\s*/dev/", RegexOption.IGNORE_CASE)
+    fun risky(cmd: String) = danger.containsMatchIn(cmd)
+
+    suspend fun run(cmd: String, timeoutSec: Int = 60): String = withContext(Dispatchers.IO) {
+        setup()
+        val p = try { builder(cmd).start() } catch (e: Exception) { return@withContext "Error: ${e.message}" }
+        val out = StringBuilder()
+        val reader = launch { try { p.inputStream.bufferedReader().forEachLine { if (out.length < 60_000) out.append(it).append('\n') } } catch (_: Exception) { } }
+        val done = withTimeoutOrNull(timeoutSec.coerceIn(1, 600) * 1000L) { while (p.isAlive) kotlinx.coroutines.delay(50); true }
+        if (done == null) { p.destroy(); reader.cancel(); return@withContext out.toString().takeLast(8000) + "\n[stopped after ${timeoutSec}s; use background=true for servers]" }
+        reader.join()
+        val code = p.exitValue()
+        val text = out.toString().let { if (it.length > 8000) it.take(2000) + "\n…\n" + it.takeLast(6000) else it }
+        "exit $code\n$text".trimEnd()
+    }
+
+    data class Job(val id: Int, val cmd: String, val proc: Process, val log: StringBuilder, val started: Long)
+    private val jobs = LinkedHashMap<Int, Job>()
+    private var nextJob = 1
+
+    fun startJob(cmd: String): String {
+        setup()
+        val p = try { builder(cmd).start() } catch (e: Exception) { return "Error: ${e.message}" }
+        val j = Job(nextJob++, cmd, p, StringBuilder(), System.currentTimeMillis())
+        synchronized(jobs) { jobs[j.id] = j }
+        scope.launch { try { p.inputStream.bufferedReader().forEachLine { synchronized(j.log) { j.log.append(it).append('\n'); if (j.log.length > 50_000) j.log.delete(0, 20_000) } } } catch (_: Exception) { } }
+        Thread.sleep(800)
+        return "Started job ${j.id}: $cmd\n" + (if (!p.isAlive) "It already exited (code ${p.exitValue()}).\n" else "") + synchronized(j.log) { j.log.toString().takeLast(1500) }
+    }
+
+    fun listJobs(): String = synchronized(jobs) {
+        if (jobs.isEmpty()) "No background jobs." else jobs.values.joinToString("\n") { j ->
+            "[${j.id}] ${if (j.proc.isAlive) "running" else "exited ${j.proc.exitValue()}"} · ${(System.currentTimeMillis() - j.started) / 1000}s · ${j.cmd.take(80)}\n" +
+                synchronized(j.log) { j.log.toString().takeLast(400).prependIndent("    ") } }
+    }
+
+    fun stopJob(id: Int): String = synchronized(jobs) { jobs.remove(id)?.let { it.proc.destroy(); "Stopped job $id." } ?: "No job $id." }
+    fun jobCount() = synchronized(jobs) { jobs.values.count { it.proc.isAlive } }
+
+    // ---------- Termux bridge ----------
+
+    fun termuxInstalled(ctx: Context) = try { ctx.packageManager.getPackageInfo("com.termux", 0); true } catch (_: Exception) { false }
+
+    /** Needs Termux with allow-external-apps=true in ~/.termux/termux.properties, and the RUN_COMMAND permission granted to Blaze. */
+    fun runInTermux(ctx: Context, cmd: String, background: Boolean): String {
+        if (!termuxInstalled(ctx)) return "Termux isn't installed. Get it from F-Droid (not Play Store) for a full Linux with pkg install python, nodejs, git, openjdk, gradle."
+        val i = Intent().setClassName("com.termux", "com.termux.app.RunCommandService").setAction("com.termux.RUN_COMMAND")
+            .putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+            .putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", cmd))
+            .putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+            .putExtra("com.termux.RUN_COMMAND_BACKGROUND", background)
+            .putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
+        return try {
+            if (android.os.Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            "Sent to Termux${if (background) " (background)" else " (opens a Termux session)"}: $cmd. Output appears in Termux; for results you can read, redirect to a file under ~/storage or run it here with run_shell."
+        } catch (e: SecurityException) {
+            "Termux refused: grant Blaze the 'Run commands in Termux' permission (App info → Permissions → Additional) and set allow-external-apps=true in ~/.termux/termux.properties."
+        } catch (e: Exception) { "Error: ${e.message}" }
+    }
+
+    // ---------- Tool definitions ----------
+
+    val names = setOf("run_shell", "terminal_jobs", "terminal_stop", "termux_run")
+    private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
+        JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
+    private fun p(t: String, d: String) = JSONObject().put("type", t).put("description", d)
+
+    fun tools(ctx: Context): List<JSONObject> = buildList {
+        add(fn("run_shell", "Run a shell command on the phone (Android sh + BusyBox: ls, cat, grep, sed, awk, wget, curl-less http via wget, tar, unzip, vi, nc, httpd, find, ps, top, df, du...). Working dir is Blaze's home (~). Set background=true for servers or long jobs (e.g. 'httpd -f -p 8080 -h ~/site'). Returns exit code and output.",
+            JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job")), listOf("command")))
+        add(fn("terminal_jobs", "List background shell jobs with their latest output.", JSONObject(), emptyList()))
+        add(fn("terminal_stop", "Stop a background shell job.", JSONObject().put("id", p("integer", "Job number")), listOf("id")))
+        if (termuxInstalled(ctx)) add(fn("termux_run", "Run a command in Termux (full Linux: pkg install python nodejs git openjdk-17 gradle, build Android apps, etc.).",
+            JSONObject().put("command", p("string", "bash command")).put("background", p("boolean", "Run without opening a Termux window")), listOf("command")))
+    }
+}

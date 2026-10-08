@@ -487,6 +487,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                 }
             }
             ConfirmCard()
+            QuestionCard()
             if (voice == Voice.State.LISTENING || note.isNotEmpty()) {
                 Text(if (note.isNotEmpty()) note else partial.ifBlank { "Listening…" },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),

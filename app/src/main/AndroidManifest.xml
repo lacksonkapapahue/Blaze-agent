@@ -22,8 +22,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
+        <package android:name="com.termux" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
@@ -124,6 +127,7 @@
         </service>
 
         <receiver android:name=".notify.ActionReceiver" android:exported="false" />
+        <receiver android:name=".proactive.ProactiveReceiver" android:exported="false" />
 
         <provider android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files" android:exported="false" android:grantUriPermissions="true">

@@ -262,6 +262,7 @@ fun ChatScreen() {
             }
             if (voiceState == Voice.State.LISTENING) ListeningStrip()
             ConfirmCard()
+            QuestionCard()
             val sugg = remember(input.text) { CommandRunner.suggest(input.text) }
             if (sugg.isNotEmpty()) SuggestionList(sugg) { s ->
                 if (s.runNow) send(s.fill) else input = TextFieldValue(s.fill, TextRange(s.fill.length))
