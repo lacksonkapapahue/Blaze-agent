@@ -1,2 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<paths><cache-path name="camera" path="camera/" /></paths>
+<paths>
+    <cache-path name="camera" path="camera/" />
+    <cache-path name="cache" path="." />
+    <files-path name="home" path="home/" />
+</paths>

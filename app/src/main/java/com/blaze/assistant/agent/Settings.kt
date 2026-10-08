@@ -176,6 +176,11 @@ object Settings {
         return n
     }
 
+    /** Small "⚡ on-device" / "☁ model · 2.1 s" badge under replies. */
+    var showRoute: Boolean
+        get() = prefs.getBoolean("show_route", true)
+        set(v) = prefs.edit().putBoolean("show_route", v).apply()
+
     /** Drifting background dots. Off = lightest on slower phones. */
     var particles: Boolean
         get() = prefs.getBoolean("particles", true)

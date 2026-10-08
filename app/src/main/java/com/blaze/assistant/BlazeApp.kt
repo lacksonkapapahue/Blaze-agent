@@ -7,7 +7,9 @@ import com.blaze.assistant.agent.Settings
 class BlazeApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        com.blaze.assistant.device.CrashLog.init(this)
         Settings.init(this)
+        com.blaze.assistant.agent.IntentCache.init(this)
         com.blaze.assistant.agent.Memory.init(this)
         com.blaze.assistant.agent.Usage.init(this)
         com.blaze.assistant.agent.Learning.init(this)

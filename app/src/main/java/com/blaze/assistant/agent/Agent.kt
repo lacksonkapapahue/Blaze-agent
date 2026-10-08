@@ -291,7 +291,8 @@ object Agent {
             append(persona).append(' ')
             if (name != null) append("The user's name is $name. ")
             append("It is $now. ")
-            append(Memory.promptBlock())
+            append(Memory.promptBlock(lastUserText()))
+            append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
             append(Learning.promptBlock(lastUserText()))
             append(com.blaze.assistant.connect.Connectors.promptBlock())
             append("\nWhen the user tells you something lasting about themselves, save it with the remember tool. ")
@@ -333,12 +334,12 @@ When you finish, say in one or two sentences what you did.
         job = scope.launch {
             // Fast lane: direct commands run on-device in well under a second.
             val offline = !FastLane.online(app)
-            if (attachments.isEmpty() && !routine && FastLane.enabled(app)) {
+            if (attachments.isEmpty() && !routine && (FastLane.enabled(app) || IntentCache.size() > 0)) {
                 _mood.value = Mood.THINKING
                 val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                 if (fast != null) {
                     history.put(JSONObject().put("role", "assistant").put("content", fast.reply))
-                    addReply(-1, fast.reply, "", meta = "⚡ on-device · ${fast.ms} ms")
+                    addReply(-1, fast.reply, "", meta = if (fast.ms < 60) "⚡ instant · ${fast.ms} ms" else "⚡ on-device · ${fast.ms} ms")
                     _mood.value = Mood.IDLE
                     persist(); announce()
                     launch { kotlinx.coroutines.delay(5 * 60_000 + 5_000); FastLane.trimIfIdle() }
@@ -402,6 +403,7 @@ When you finish, say in one or two sentences what you did.
     private suspend fun tools(): JSONArray {
         val t = JSONArray()
         Memory.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.device.DeviceStatus.tool())
         Learning.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
@@ -427,6 +429,7 @@ When you finish, say in one or two sentences what you did.
             val tools = tools()
             while (trace.length() > 0) trace.remove(0)
             val turnThink = StringBuilder()
+            val turnStart = System.currentTimeMillis()
             _thinking.value = ""
             for (step in 0 until MAX_STEPS) {
                 currentStep = step + 1
@@ -474,8 +477,11 @@ When you finish, say in one or two sentences what you did.
 
                 if (calls == null || calls.length() == 0) {
                     kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
+                    val secs = (System.currentTimeMillis() - turnStart) / 1000.0
+                    com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
                     addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
-                        if (Settings.providerId == Providers.AUTO || Settings.stepsProvider.isNotBlank()) LlmClient.lastRoute else "")
+                        if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model }, "%.1f s".format(secs),
+                            if (step > 0) "${step + 1} steps" else "").filter { it.isNotBlank() }.joinToString(" · ") else "")
                     break
                 }
                 // Text that came with tool calls is narration, shown as a step; its reasoning joins the turn's.
@@ -517,6 +523,7 @@ When you finish, say in one or two sentences what you did.
         } catch (e: LlmClient.LlmException) {
             add(Role.ERROR, e.message ?: "Something went wrong.")
         } catch (e: Exception) {
+            com.blaze.assistant.device.CrashLog.error("agent loop", e)
             add(Role.ERROR, "Something went wrong: ${e.message}")
         } finally {
             _thinking.value = ""
@@ -546,6 +553,8 @@ When you finish, say in one or two sentences what you did.
         return when (name) {
             "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact")) }
             "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
+            "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
+            "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
             "look_at_screen" -> {
                 add(Role.STEP, "Looking at a screenshot")
                 val shot = PhoneTools.screenshot()

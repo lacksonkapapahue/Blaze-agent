@@ -146,8 +146,15 @@ object FastLane {
      * [offline] lowers the bar, since the cloud isn't an option.
      */
     suspend fun tryHandle(ctx: Context, text: String, offline: Boolean, confirm: suspend (String, String, String) -> Boolean): Result? {
-        if (!enabled(ctx) || text.length > 160 || text.contains('\n')) return null
+        if (text.length > 160 || text.contains('\n')) return null
         val t0 = System.currentTimeMillis()
+        // Intent cache: a command that worked before runs again with no model at all.
+        IntentCache.get(text)?.let { (n, a) ->
+            val r = try { execute(ctx, n, a, confirm) } catch (_: Exception) { null }
+            if (r != null && listOf("Couldn't tell", "Error", "Unknown", "No app").none { r.startsWith(it) }) return Result(r, System.currentTimeMillis() - t0, n)
+            IntentCache.drop(text)
+        }
+        if (!enabled(ctx)) return null
         val out = lock.withLock {
             try {
                 if (!ensureStarted(ctx)) return null
@@ -169,6 +176,7 @@ object FastLane {
         val a = call.optJSONObject("arguments") ?: JSONObject()
         val reply = execute(ctx, name, a, confirm) ?: return null
         if (listOf("Couldn't tell", "Error", "Unknown", "No app").any { reply.startsWith(it) }) return null
+        if (conf >= 0.5 && name !in setOf("send_text", "call_contact", "web_search")) IntentCache.put(text, name, a)
         return Result(reply, System.currentTimeMillis() - t0, name)
     }
 

@@ -69,6 +69,7 @@ val settingsPages = listOf(
     SettingsPage("memory", "Memory & learning", "What Blaze remembers and has learned"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
     SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
+    SettingsPage("device", "Device & diagnostics", "Phone health, self-check, crash report"),
     SettingsPage("backup", "Backup", "Export or import everything")
 )
 
@@ -122,6 +123,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "memory" -> { MemorySection(); LearningSection() }
                 "usage" -> UsageSection()
                 "privacy" -> SecuritySection()
+                "device" -> DevicePage()
                 "backup" -> BackupSection()
             }
             Spacer(Modifier.height(30.dp))

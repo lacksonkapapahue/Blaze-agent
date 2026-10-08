@@ -178,7 +178,7 @@ Return ONLY a JSON object:
 {"memory":[{"op":"add|replace|remove","fact":"short fact","old":"text of the fact to replace/remove"}],
  "skill":null or {"name":"kebab-name","description":"one line","when":"when to use","steps":"1. … 2. …","use_trace":true|false},
  "summary":"one line, max 14 words, what this chat is about"}
-Memory: only durable facts or preferences about the user (people, places, routines, likes, accounts they use). Never secrets, codes, passwords, card numbers, or one-off details. Skip anything already known.
+Memory: durable facts or preferences about the user (people and relationships, places, routines, work, goals, likes and dislikes, devices, accounts and apps they use, how they want Blaze to behave). If a known fact changed, use replace. Never secrets, codes, passwords, card numbers, or one-off details. Skip anything already known.
 Skill: only when a multi-step task clearly succeeded and is likely to be asked again. use_trace=true only if the recorded phone actions completed that task. Skip trivial one-step things.
 Be strict: most exchanges produce no memory and no skill."""
         val user = "Known facts:\n$known\n\nExisting skills: $skillNames\n\nRecorded phone actions: ${if (trace.length() == 0) "(none)" else trace.toString().take(2500)}\n\nExchange:\n${exchange.takeLast(6000)}"
@@ -213,7 +213,7 @@ Be strict: most exchanges produce no memory and no skill."""
             "memory" -> when (o.optString("op")) {
                 "remove" -> Memory.forget(o.optString("old"))
                 "replace" -> { if (o.optString("old").isNotBlank()) Memory.forget(o.optString("old")); Memory.add(o.optString("fact")) }
-                else -> if (Memory.facts.value.size < 80) Memory.add(o.optString("fact"))
+                else -> if (Memory.facts.value.size < 250) Memory.add(o.optString("fact"))
             }
             "skill" -> upsertSkill(o.optString("name"), o.optString("description"), o.optString("when"), o.optString("steps"), o.optJSONArray("replay"))
         }

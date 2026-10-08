@@ -30,6 +30,11 @@ object Memory {
         val f = fact.trim().removeSuffix(".")
         if (f.isEmpty()) return "Nothing to remember."
         if (_facts.value.any { it.equals(f, true) }) return "Already remembered."
+        // A newer version of the same fact replaces the old one ("lives in Ndola" -> "lives in Lusaka").
+        val w = words(f)
+        val old = _facts.value.firstOrNull { o -> val ow = words(o)
+            w.size >= 3 && ow.size >= 3 && (w intersect ow).size.toDouble() / (w union ow).size >= 0.6 }
+        if (old != null) { persist(_facts.value.map { if (it == old) f else it }); return "Updated: $f" }
         persist(_facts.value + f); return "Remembered: $f"
     }
 
@@ -44,8 +49,32 @@ object Memory {
     fun remove(index: Int) { persist(_facts.value.filterIndexed { i, _ -> i != index }) }
     fun clear() = persist(emptyList())
 
-    fun promptBlock(): String = if (_facts.value.isEmpty()) "" else
-        "\nWhat you remember about the user (use quietly, don't recite):\n" + _facts.value.joinToString("\n") { "- $it" } + "\n"
+    private fun words(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 2 }.toSet()
+
+    /**
+     * Facts for the prompt. Small memories go in whole; big ones send only what fits this
+     * request (word overlap) plus the newest few, which keeps prompts short and cheap.
+     */
+    fun promptBlock(query: String = ""): String {
+        val all = _facts.value
+        if (all.isEmpty()) return ""
+        val chosen = if (all.size <= 30) all else {
+            val q = words(query)
+            val scored = all.withIndex().map { (i, f) -> Triple(i, f, (words(f) intersect q).size) }
+            val top = scored.filter { it.third > 0 }.sortedByDescending { it.third }.take(18).map { it.first }.toSet()
+            val recent = (all.size - 8 until all.size).toSet()
+            all.filterIndexed { i, _ -> i in top || i in recent }
+        }
+        val more = all.size - chosen.size
+        return "\nWhat you remember about the user (use quietly, don't recite):\n" + chosen.joinToString("\n") { "- $it" } +
+            (if (more > 0) "\n($more more facts saved; call recall_memory to search them.)" else "") + "\n"
+    }
+
+    fun recall(query: String): String {
+        val q = words(query)
+        val hits = _facts.value.filter { (words(it) intersect q).isNotEmpty() || it.contains(query, true) }
+        return if (hits.isEmpty()) "Nothing saved about \"$query\"." else hits.take(25).joinToString("\n") { "- $it" }
+    }
 
     fun tools(): List<JSONObject> = listOf(
         JSONObject().put("type", "function").put("function", JSONObject()
@@ -54,6 +83,12 @@ object Memory {
             .put("parameters", JSONObject().put("type", "object")
                 .put("properties", JSONObject().put("fact", JSONObject().put("type", "string").put("description", "Short fact, e.g. 'Sister is Mary, lives in Ndola'")))
                 .put("required", JSONArray(listOf("fact"))))),
+        JSONObject().put("type", "function").put("function", JSONObject()
+            .put("name", "recall_memory")
+            .put("description", "Search everything you've saved about the user (when the prompt says more facts are saved).")
+            .put("parameters", JSONObject().put("type", "object")
+                .put("properties", JSONObject().put("query", JSONObject().put("type", "string")))
+                .put("required", JSONArray(listOf("query"))))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "forget")
             .put("description", "Delete a remembered fact when the user asks you to forget it or it's no longer true.")

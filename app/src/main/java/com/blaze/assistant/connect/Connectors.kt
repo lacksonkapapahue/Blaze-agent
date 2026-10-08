@@ -78,6 +78,7 @@ object Connectors {
     private fun tokens(id: String): JSONObject? = Settings.secret("conn_tok_$id").takeIf { it.isNotBlank() }?.let { try { JSONObject(it) } catch (_: Exception) { null } }
     private fun saveTokens(id: String, o: JSONObject) = Settings.setSecret("conn_tok_$id", o.toString())
     fun connected(id: String) = tokens(id)?.optString("access_token")?.isNotBlank() == true
+    fun connectedCount() = all.count { connected(it.id) }
     fun disconnect(id: String) { Settings.setSecret("conn_tok_$id", ""); status(id, "") }
 
     /** Paste-a-token connectors. */
