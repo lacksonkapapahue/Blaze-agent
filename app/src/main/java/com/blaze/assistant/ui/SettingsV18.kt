@@ -137,11 +137,37 @@ fun TerminalPage() {
     val out by com.blaze.assistant.terminal.Terminal.output.collectAsState()
     var line by remember { mutableStateOf("") }
     val scroll = androidx.compose.foundation.rememberScrollState()
+    val mode by com.blaze.assistant.terminal.Terminal.mode.collectAsState()
+    val L = com.blaze.assistant.terminal.Linux
+    val lstatus by L.status.collectAsState()
+    val installing by L.installing.collectAsState()
+    var linuxReady by remember { mutableStateOf(L.installed()) }
+    val tscope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(Unit) { com.blaze.assistant.terminal.Terminal.startShell() }
     LaunchedEffect(out.length) { scroll.animateScrollTo(scroll.maxValue) }
-    V18Note("A real shell on your phone: Android sh plus ~300 BusyBox tools (vi, wget, tar, grep, awk, nc, httpd…). Blaze can use it too. Try: ls, df -h, httpd -f -p 8080 &")
+    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        listOf("phone" to "Phone shell", "linux" to "Linux (Alpine)").forEach { (id, label) ->
+            Box(Modifier.weight(1f).height(40.dp).background(if (mode == id) c.ink else c.paper).hairline(c.hair)
+                .clickable { if (id == "phone" || linuxReady) com.blaze.assistant.terminal.Terminal.switchMode(id) }, contentAlignment = Alignment.Center) {
+                Label(label, color = if (mode == id) c.paper else if (id == "linux" && !linuxReady) c.weak else c.ink, size = 10.sp) }
+        }
+    }
+    if (!linuxReady) {
+        Column(Modifier.fillMaxWidth().hairline(c.accent).padding(12.dp)) {
+            Text("Get a real Linux", style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 15.sp, color = c.ink))
+            Text(lstatus.ifEmpty { "Alpine Linux, about 3.5 MB to download, no root. Then install anything with apk: python3, nodejs, git, gcc, openjdk17…" },
+                style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 18.sp, color = c.sub))
+            Spacer(Modifier.height(8.dp))
+            V18Button(if (installing) "Installing…" else "Install Linux") {
+                if (!installing) tscope.launch { L.install(); linuxReady = L.installed(); if (linuxReady) com.blaze.assistant.terminal.Terminal.switchMode("linux") }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+    }
+    V18Note(if (mode == "linux") "Alpine Linux. Try: apk update && apk add python3, then python3. Your phone's Blaze files are in ~/phone."
+        else "Android sh plus ~300 BusyBox tools (vi, wget, tar, grep, awk, nc, httpd…). Blaze can use it too.")
     Box(Modifier.fillMaxWidth().height(380.dp).background(androidx.compose.ui.graphics.Color(0xFF111110)).padding(10.dp)) {
-        Text(out.ifEmpty { "Starting…" }, modifier = Modifier.verticalScroll(scroll),
+        Text(out.ifEmpty { "Starting the shell…" }, modifier = Modifier.verticalScroll(scroll),
             style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, lineHeight = 17.sp, color = androidx.compose.ui.graphics.Color(0xFFF0F0EE)))
     }
     Row(Modifier.fillMaxWidth().hairline(c.ink), verticalAlignment = Alignment.CenterVertically) {
@@ -170,7 +196,13 @@ fun TerminalPage() {
     var tools by remember { mutableStateOf(Settings.bool("terminal_tools", true)) }
     Spacer(Modifier.height(10.dp))
     ToggleRow("Let Blaze use the terminal", "Risky commands (rm -rf, dd…) still ask first", tools) { tools = !tools; Settings.setBool("terminal_tools", tools) }
-    V18Section("Full Linux")
+    if (linuxReady) {
+        V18Section("Linux")
+        Mono("Alpine · ${L.sizeMb()} MB on disk")
+        Spacer(Modifier.height(8.dp))
+        V18Button("Remove Linux", primary = false) { L.uninstall(); linuxReady = false; com.blaze.assistant.terminal.Terminal.switchMode("phone") }
+    }
+    V18Section("Termux (optional)")
     val termux = com.blaze.assistant.terminal.Terminal.termuxInstalled(ctx)
     V18Note(if (termux) "Termux is installed: Blaze can run commands there too (python, node, git, openjdk, gradle — even building Android apps). In Termux run: echo allow-external-apps=true >> ~/.termux/termux.properties, then allow Blaze under App info → Permissions → Additional permissions."
         else "For python, node, git or building Android apps on the phone, install Termux from F-Droid. Blaze can then send commands to it. Android doesn't let regular apps run downloaded programs, which is why Termux is needed for that part.")
@@ -342,6 +374,16 @@ internal fun V18Field(hint: String, value: String, onChange: (String) -> Unit) {
 fun VoiceExtras() {
     var loop by remember { mutableStateOf(Settings.bool("voice_loop", false)) }
     V18Section("Hands-free")
+    var conf by remember { mutableStateOf(Settings.str("wake_conf", "0.88")) }
+    Label("\u201cHey Blaze\u201d sensitivity", modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        listOf("0.94" to "Strict", "0.88" to "Normal", "0.78" to "Easy").forEach { (v, l) ->
+            Box(Modifier.weight(1f).height(40.dp).background(if (conf == v) LocalBlaze.current.ink else LocalBlaze.current.paper).hairline(LocalBlaze.current.hair)
+                .clickable { conf = v; Settings.setStr("wake_conf", v) }, contentAlignment = Alignment.Center) {
+                Label(l, color = if (conf == v) LocalBlaze.current.paper else LocalBlaze.current.ink, size = 10.sp) }
+        }
+    }
+    V18Note("Strict wakes only on a clear \u201cHey Blaze\u201d. Use Easy if it misses you.")
     ToggleRow("Conversation mode", "After Blaze answers out loud, it listens again so you can keep talking", loop) { loop = !loop; Settings.setBool("voice_loop", loop) }
 }
 

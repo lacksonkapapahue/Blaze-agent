@@ -23,14 +23,14 @@ import java.util.concurrent.TimeUnit
  */
 object Terminal {
     private lateinit var app: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.blaze.assistant.device.CrashLog.guard)
 
     fun home(): File = File(app.filesDir, "home").apply { mkdirs() }
     private fun bin(): File = File(app.filesDir, "usr/bin")
     private fun busybox() = File(app.applicationInfo.nativeLibraryDir, "libbusybox.so")
     fun hasBusybox() = ::app.isInitialized && busybox().exists()
 
-    fun init(ctx: Context) { app = ctx.applicationContext }
+    fun init(ctx: Context) { app = ctx.applicationContext; Linux.init(ctx) }
 
     /** Links every BusyBox applet into usr/bin once per app version (cheap, no root). */
     @Synchronized fun setup() {
@@ -72,24 +72,52 @@ object Terminal {
 
     private fun append(s: String) { val v = _out.value + s; _out.value = if (v.length > 120_000) v.takeLast(100_000) else v }
 
-    @Synchronized fun startShell() {
+    /** "phone" = Android sh + BusyBox, "linux" = Alpine via PRoot. */
+    val mode = MutableStateFlow("phone")
+
+    fun startShell() {
         if (shell?.isAlive == true) return
-        scope.launch { setup() }
-        val p = ProcessBuilder("/system/bin/sh").directory(home()).redirectErrorStream(true)
-            .also { it.environment().putAll(env()) }.start()
-        shell = p
-        if (_out.value.isEmpty()) append("Blaze terminal · sh + BusyBox · home is ~\n")
+        if (_out.value.isEmpty()) append(banner())
         scope.launch {
-            val buf = CharArray(4096)
-            val r = p.inputStream.bufferedReader()
-            try { while (true) { val n = r.read(buf); if (n < 0) break; append(String(buf, 0, n)) } } catch (_: Exception) { }
-            append("\n[shell exited]\n")
+            synchronized(this@Terminal) {
+                if (shell?.isAlive == true) return@launch
+                try {
+                    setup()
+                    val linux = mode.value == "linux" && Linux.installed()
+                    val pb = if (linux) ProcessBuilder(Linux.command(null)).also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }
+                             else ProcessBuilder("/system/bin/sh").also { it.environment().putAll(env()) }
+                    val p = pb.directory(home()).redirectErrorStream(true).start()
+                    shell = p
+                    append(if (linux) "[Alpine Linux — apk add <package> to install software]\n" else "[phone shell ready]\n")
+                    launch {
+                        val buf = CharArray(4096)
+                        val r = p.inputStream.bufferedReader()
+                        try { while (true) { val n = r.read(buf); if (n < 0) break; append(String(buf, 0, n)) } } catch (_: Exception) { }
+                        append("\n[shell exited${try { " with code " + p.exitValue() } catch (_: Exception) { "" }}]\n")
+                    }
+                } catch (e: Exception) {
+                    append("Couldn't start the shell: ${e.message}\n")
+                }
+            }
         }
     }
 
-    fun input(line: String) {
+    private fun banner() = "Blaze terminal · ${if (mode.value == "linux") "Alpine Linux" else "sh + BusyBox"} · home is ~\n"
+
+    fun switchMode(m: String) {
+        if (mode.value == m) return
+        mode.value = m
+        shell?.destroy(); shell = null
+        append("\n— switching to ${if (m == "linux") "Alpine Linux" else "phone shell"} —\n")
         startShell()
+    }
+
+    fun input(line: String) {
         append("$ $line\n")
+        val p = shell
+        if (p == null || !p.isAlive) { startShell(); scope.launch { kotlinx.coroutines.delay(1200); write(line) } } else scope.launch { write(line) }
+    }
+    private fun write(line: String) {
         try { shell?.outputStream?.let { it.write((line + "\n").toByteArray()); it.flush() } } catch (e: Exception) { append("error: ${e.message}\n") }
     }
 
@@ -101,9 +129,11 @@ object Terminal {
     private val danger = Regex("(\\brm\\s+-[a-z]*r[a-z]*f?\\s+(/|~|\\*|\\.\\s*$))|\\bmkfs|\\bdd\\s+if=|\\breboot\\b|\\bsu\\b|>\\s*/dev/", RegexOption.IGNORE_CASE)
     fun risky(cmd: String) = danger.containsMatchIn(cmd)
 
-    suspend fun run(cmd: String, timeoutSec: Int = 60): String = withContext(Dispatchers.IO) {
+    suspend fun run(cmd: String, timeoutSec: Int = 60, linux: Boolean = false): String = withContext(Dispatchers.IO) {
         setup()
-        val p = try { builder(cmd).start() } catch (e: Exception) { return@withContext "Error: ${e.message}" }
+        if (linux && !Linux.installed()) return@withContext "Linux isn't installed yet. Install it in Settings → Terminal (one-time ~3.5 MB download), or call linux_install."
+        val p = try { if (linux) ProcessBuilder(Linux.command(cmd)).directory(home()).redirectErrorStream(true)
+                .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(cmd).start() } catch (e: Exception) { return@withContext "Error: ${e.message}" }
         val out = StringBuilder()
         val reader = launch { try { p.inputStream.bufferedReader().forEachLine { if (out.length < 60_000) out.append(it).append('\n') } } catch (_: Exception) { } }
         val done = withTimeoutOrNull(timeoutSec.coerceIn(1, 600) * 1000L) { while (p.isAlive) kotlinx.coroutines.delay(50); true }
@@ -118,9 +148,11 @@ object Terminal {
     private val jobs = LinkedHashMap<Int, Job>()
     private var nextJob = 1
 
-    fun startJob(cmd: String): String {
+    fun startJob(cmd: String, linux: Boolean = false): String {
         setup()
-        val p = try { builder(cmd).start() } catch (e: Exception) { return "Error: ${e.message}" }
+        if (linux && !Linux.installed()) return "Linux isn't installed yet (linux_install)."
+        val p = try { if (linux) ProcessBuilder(Linux.command(cmd)).directory(home()).redirectErrorStream(true)
+                .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(cmd).start() } catch (e: Exception) { return "Error: ${e.message}" }
         val j = Job(nextJob++, cmd, p, StringBuilder(), System.currentTimeMillis())
         synchronized(jobs) { jobs[j.id] = j }
         scope.launch { try { p.inputStream.bufferedReader().forEachLine { synchronized(j.log) { j.log.append(it).append('\n'); if (j.log.length > 50_000) j.log.delete(0, 20_000) } } } catch (_: Exception) { } }
@@ -160,14 +192,16 @@ object Terminal {
 
     // ---------- Tool definitions ----------
 
-    val names = setOf("run_shell", "terminal_jobs", "terminal_stop", "termux_run")
+    val names = setOf("run_shell", "terminal_jobs", "terminal_stop", "termux_run", "linux_install")
     private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
         JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
     private fun p(t: String, d: String) = JSONObject().put("type", t).put("description", d)
 
     fun tools(ctx: Context): List<JSONObject> = buildList {
         add(fn("run_shell", "Run a shell command on the phone (Android sh + BusyBox: ls, cat, grep, sed, awk, wget, curl-less http via wget, tar, unzip, vi, nc, httpd, find, ps, top, df, du...). Working dir is Blaze's home (~). Set background=true for servers or long jobs (e.g. 'httpd -f -p 8080 -h ~/site'). Returns exit code and output.",
-            JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job")), listOf("command")))
+            JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job"))
+            .put("linux", p("boolean", "Run inside Blaze's Alpine Linux (apk add python3/nodejs/git/openjdk17…) instead of the phone shell")), listOf("command")))
+        add(fn("linux_install", "Download and set up Alpine Linux inside Blaze (one time, ~3.5 MB, no root).", JSONObject(), emptyList()))
         add(fn("terminal_jobs", "List background shell jobs with their latest output.", JSONObject(), emptyList()))
         add(fn("terminal_stop", "Stop a background shell job.", JSONObject().put("id", p("integer", "Job number")), listOf("id")))
         if (termuxInstalled(ctx)) add(fn("termux_run", "Run a command in Termux (full Linux: pkg install python nodejs git openjdk-17 gradle, build Android apps, etc.).",

@@ -22,7 +22,7 @@ import java.util.Locale
  */
 object ScreenMemory {
     private const val MAX = 300
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard)
     private val skipPkgs = listOf("com.android.systemui", "launcher", "keyguard", "password", "bitwarden", "1password", "lastpass", "authenticator")
     private val list = ArrayList<JSONObject>()
     @Volatile private var loaded = false

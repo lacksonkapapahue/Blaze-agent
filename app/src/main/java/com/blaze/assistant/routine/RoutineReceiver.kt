@@ -34,7 +34,7 @@ class RoutineReceiver : BroadcastReceiver() {
         } catch (_: Exception) {
             // Android refused a background service: run it in the broadcast's short window instead.
             val pending = goAsync()
-            CoroutineScope(SupervisorJob() + Dispatchers.Main).launch {
+            CoroutineScope(SupervisorJob() + Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard).launch {
                 withTimeoutOrNull(55_000) { RoutineService.runRoutine(id) }
                 pending.finish()
             }
@@ -44,7 +44,7 @@ class RoutineReceiver : BroadcastReceiver() {
 
 /** Keeps Blaze alive while a routine runs, then stops. */
 class RoutineService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard)
 
     companion object {
         suspend fun runRoutine(id: Int) {
@@ -68,8 +68,10 @@ class RoutineService : Service() {
         val n: Notification = NotificationCompat.Builder(this, "blaze_routine")
             .setSmallIcon(R.drawable.ic_stat_blaze).setContentTitle("Blaze routine")
             .setContentText(Routines.get(id)?.name ?: "Running").setOngoing(true).build()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(77, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        else startForeground(77, n)
+        try {
+            if (Build.VERSION.SDK_INT >= 29) startForeground(77, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            else startForeground(77, n)
+        } catch (_: Exception) { }
         scope.launch {
             runRoutine(id)
             stopSelf()

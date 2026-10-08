@@ -118,7 +118,8 @@ class WakeWordService : Service() {
             var rec: Recognizer? = null
             var ar: android.media.AudioRecord? = null
             try {
-                rec = Recognizer(m, 16000f, "[\"hey blaze\", \"wake up blaze\", \"okay blaze\", \"blaze\", \"[unk]\"]")
+                // Decoy words soak up sounds that are close but not the wake phrase.
+                rec = Recognizer(m, 16000f, GRAMMAR).also { it.setWords(true) }
                 val min = android.media.AudioRecord.getMinBufferSize(16000, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)
                 @Suppress("MissingPermission")
                 ar = android.media.AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, 16000,
@@ -136,7 +137,8 @@ class WakeWordService : Service() {
                     if (peak == 0) { silentMs += n / 16 } else { silentMs = 0; if (warned) { warned = false; com.blaze.assistant.notify.Notifier.clearWakeBlocked() } }
                     if (silentMs > 6000 && !warned) { warned = true; com.blaze.assistant.notify.Notifier.wakeBlocked() }
                     val done = rec.acceptWaveForm(buf, n)
-                    if (check(if (done) rec.result else rec.partialResult)) { rec.reset(); break }
+                    // Only whole, finished phrases count; partial guesses fire on random speech.
+                    if (done && check(rec.result)) { rec.reset(); break }
                 }
             } catch (_: Exception) {
                 Thread.sleep(1500)   // mic held by another app; the watchdog retries
@@ -147,6 +149,11 @@ class WakeWordService : Service() {
             }
         }.also { it.start() }
     }
+
+    private val PHRASES = setOf("hey blaze", "okay blaze", "ok blaze", "wake up blaze")
+    private val GRAMMAR = "[\"hey blaze\", \"okay blaze\", \"ok blaze\", \"wake up blaze\", " +
+        "\"hey\", \"okay\", \"blaze\", \"play\", \"place\", \"plays\", \"base\", \"blade\", \"blessed\", \"lady\", \"baby\", \"maybe\", " +
+        "\"hey babe\", \"hey they\", \"he played\", \"the\", \"a\", \"and\", \"is\", \"what\", \"yes\", \"no\", \"[unk]\"]"
 
     private fun stopListening() { listening = false; thread = null }
 
@@ -161,10 +168,22 @@ class WakeWordService : Service() {
         return START_STICKY
     }
 
-    /** True when the wake phrase was heard (and Blaze was woken). */
+    /**
+     * True when the wake phrase was heard (and Blaze was woken). The whole utterance must be the
+     * phrase (not buried in other speech), and every word must be recognised confidently.
+     */
     private fun check(hyp: String?): Boolean {
-        val text = try { JSONObject(hyp ?: return false).let { it.optString("text").ifEmpty { it.optString("partial") } } } catch (_: Exception) { return false }
-        val heard = text.contains("hey blaze") || text.contains("wake up blaze") || text.contains("okay blaze")
+        val o = try { JSONObject(hyp ?: return false) } catch (_: Exception) { return false }
+        val text = o.optString("text").trim()
+        val heard = text in PHRASES
+        if (!heard) return false
+        val words = o.optJSONArray("result")
+        val minConf = com.blaze.assistant.agent.Settings.str("wake_conf", "0.88").toDoubleOrNull() ?: 0.88
+        if (words != null && words.length() > 0) {
+            for (i in 0 until words.length()) if (words.getJSONObject(i).optDouble("conf", 0.0) < minConf) return false
+            val dur = words.getJSONObject(words.length() - 1).optDouble("end") - words.getJSONObject(0).optDouble("start")
+            if (dur < 0.35 || dur > 2.2) return false   // too clipped or too drawn-out to be "hey blaze"
+        }
         if (!heard || System.currentTimeMillis() - lastFire < 3000) return false
         lastFire = System.currentTimeMillis()
         paused = true; pausedAt = System.currentTimeMillis(); listening = false

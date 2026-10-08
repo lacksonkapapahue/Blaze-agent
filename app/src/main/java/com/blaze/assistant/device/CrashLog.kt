@@ -23,6 +23,39 @@ object CrashLog {
         }
     }
 
+    /**
+     * Added to every background scope: a failure inside Blaze's own work is logged and shown as
+     * an error in the chat instead of closing the app.
+     */
+    val guard = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        write("CAUGHT: ${android.util.Log.getStackTraceString(e).take(4000)}")
+        try {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try { com.blaze.assistant.agent.Agent.reportError("Something went wrong (${e.javaClass.simpleName}: ${e.message?.take(120)}). It's in the crash report; try again.") } catch (_: Throwable) { }
+            }
+        } catch (_: Throwable) { }
+    }
+
+    private val recent = ArrayDeque<Long>()
+
+    /**
+     * Keep the app alive through a stray error on the main thread (a tap handler, a UI update):
+     * log it, show it in chat, and carry on. If errors pile up (5 in 10 s), let Android restart us.
+     */
+    fun shieldMainThread() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            while (true) {
+                try { android.os.Looper.loop() } catch (e: Throwable) {
+                    val now = System.currentTimeMillis()
+                    recent.addLast(now); while (recent.isNotEmpty() && now - recent.first() > 10_000) recent.removeFirst()
+                    write("CAUGHT on main: ${android.util.Log.getStackTraceString(e).take(4000)}")
+                    if (recent.size >= 5 || e is OutOfMemoryError) throw e
+                    try { com.blaze.assistant.agent.Agent.reportError("Something went wrong (${e.javaClass.simpleName}: ${e.message?.take(120)}). Blaze kept running; it's in the crash report.") } catch (_: Throwable) { }
+                }
+            }
+        }
+    }
+
     @Synchronized fun write(line: String) {
         if (!::file.isInitialized) return
         try {

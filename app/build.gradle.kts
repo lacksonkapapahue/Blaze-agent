@@ -11,7 +11,7 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
+        versionCode = 10
         versionName = "1.8"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -45,7 +45,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            keepDebugSymbols += listOf("**/libneedle.so", "**/libbusybox.so")
+            keepDebugSymbols += listOf("**/libneedle.so", "**/libbusybox.so", "**/libproot.so", "**/libproot_loader.so", "**/libproot_loader32.so", "**/libtalloc.so")
         }
     }
     lint { checkReleaseBuilds = false; abortOnError = false }

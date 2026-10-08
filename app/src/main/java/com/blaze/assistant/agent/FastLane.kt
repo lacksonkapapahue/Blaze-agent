@@ -74,11 +74,11 @@ object FastLane {
 
     fun delete(ctx: Context) { stop(); dir(ctx).deleteRecursively() }
 
-    fun online(ctx: Context): Boolean {
-        val cm = ctx.getSystemService(ConnectivityManager::class.java) ?: return true
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
+    fun online(ctx: Context): Boolean = try {
+        val cm = ctx.getSystemService(ConnectivityManager::class.java)
+        val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+        caps == null && cm == null || caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    } catch (_: Exception) { true }   // can't tell: assume online and let the request decide
 
     // ---------- The direct-action tools Needle may pick ----------
 

@@ -36,7 +36,7 @@ import java.security.SecureRandom
 object Dashboard {
     const val PORT = 8787
     private var server: ServerSocket? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.blaze.assistant.device.CrashLog.guard)
     val running = MutableStateFlow(false)
     private lateinit var app: Context
 

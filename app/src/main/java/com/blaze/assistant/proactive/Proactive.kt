@@ -37,7 +37,7 @@ object Proactive {
     data class HeadsUp(val time: Long, val text: String, val urgent: Boolean)
 
     private lateinit var app: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.blaze.assistant.device.CrashLog.guard)
     private var loop: Job? = null
     private val lock = Mutex()
     val recent = MutableStateFlow<List<HeadsUp>>(emptyList())

@@ -69,7 +69,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url", "search_in_app")
     private val ids = AtomicLong(1)
     private lateinit var app: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard)
 
     /** Messages of the chat on screen. */
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
@@ -169,7 +169,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
 
     private fun newId() = UUID.randomUUID().toString().take(12)
 
-    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.blaze.assistant.device.CrashLog.guard)
     private val ioLock = kotlinx.coroutines.sync.Mutex()
 
     /** Reads chat files in the background so the UI never waits on disk. */
@@ -193,6 +193,14 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
     fun stopAll() = sessions.values.forEach { it.stop() }
+
+    /** A background failure becomes an error line in the chat instead of a crash. */
+    fun reportError(text: String) {
+        val s = cur
+        s.add(Role.ERROR, text)
+        try { s.mood = Mood.IDLE } catch (_: Throwable) { }
+        try { s.persist() } catch (_: Throwable) { }
+    }
 
     /** Open a chat. If it's still working in the background you see it live. */
     fun open(id: String) { load(id)?.let { show(it) } }
@@ -753,8 +761,8 @@ When you finish, say in one or two sentences what you did.
                     add(Role.STEP, "$ " + cmd.take(70))
                     if (com.blaze.assistant.terminal.Terminal.risky(cmd) && !confirm("Run this command?", cmd.take(200), "Run"))
                         "The user did NOT approve running that command."
-                    else if (args.optBoolean("background")) com.blaze.assistant.terminal.Terminal.startJob(cmd)
-                    else com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60))
+                    else if (args.optBoolean("background")) kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.startJob(cmd, args.optBoolean("linux")) }
+                    else com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60), args.optBoolean("linux"))
                 }
                 "run_ussd" -> {
                     val code = args.optString("code")
@@ -763,7 +771,8 @@ When you finish, say in one or two sentences what you did.
                         "The user did NOT approve dialling $code."
                     else com.blaze.assistant.phone.Ussd.run(app, code)
                 }
-                "terminal_jobs" -> com.blaze.assistant.terminal.Terminal.listJobs()
+                "linux_install" -> { add(Role.STEP, "Installing Alpine Linux"); com.blaze.assistant.terminal.Linux.install() }
+                "terminal_jobs" -> kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.listJobs() }
                 "terminal_stop" -> com.blaze.assistant.terminal.Terminal.stopJob(args.optInt("id"))
                 "termux_run" -> { add(Role.STEP, "Termux: " + args.optString("command").take(60)); com.blaze.assistant.terminal.Terminal.runInTermux(app, args.optString("command"), args.optBoolean("background", true)) }
                 "delegate" -> delegate(args.optJSONArray("tasks") ?: JSONArray())

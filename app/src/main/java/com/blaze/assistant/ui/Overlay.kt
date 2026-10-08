@@ -245,7 +245,7 @@ object Overlay {
     fun watchTasks(ctx: Context) {
         if (cardWatch != null) return
         val app = ctx.applicationContext
-        cardWatch = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        cardWatch = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard).launch {
             while (true) {
                 val busy = Agent.busyChats.value.isNotEmpty()
                 val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app)
