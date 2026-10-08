@@ -38,6 +38,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        com.blaze.assistant.voice.WakeWordService.start(this)
         if (com.blaze.assistant.agent.Settings.orbPinned) com.blaze.assistant.ui.Overlay.showOrb(this)
     }
 
@@ -184,32 +185,85 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     fun currentApp(): String? = rootInActiveWindow?.packageName?.toString()?.let { appLabel(it) }
 
+    /** True if the screen changed (any accessibility event) since [since], waiting up to [ms]. */
+    private suspend fun changedSince(since: Long, ms: Long): Boolean {
+        val end = android.os.SystemClock.uptimeMillis() + ms
+        while (android.os.SystemClock.uptimeMillis() < end) {
+            if (lastEventAt > since) return true
+            kotlinx.coroutines.delay(40)
+        }
+        return lastEventAt > since
+    }
+
+    private fun centerOf(n: AccessibilityNodeInfo): Pair<Float, Float>? {
+        val r = Rect(); n.getBoundsInScreen(r)
+        val dm = resources.displayMetrics
+        r.intersect(0, 0, dm.widthPixels, dm.heightPixels)
+        if (r.width() <= 2 || r.height() <= 2) return null
+        return r.exactCenterX() to r.exactCenterY()
+    }
+
+    /**
+     * Tap an element. Uses the accessibility click on the element or its nearest clickable parent,
+     * then checks the screen actually reacted; if not (custom views often ignore it), it touches
+     * the middle of the element like a finger would.
+     */
     suspend fun tap(id: Int, long: Boolean = false): String {
         val node = element(id) ?: return "No element [$id]. Call read_screen again to get fresh numbers."
+        node.refresh()
         val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
         var n: AccessibilityNodeInfo? = node
+        var target: AccessibilityNodeInfo? = null
         while (n != null) {
-            val ok = if (long) n.isLongClickable else n.isClickable
-            if (ok && n.performAction(action)) return "Tapped [$id]."
+            if (if (long) n.isLongClickable else n.isClickable) { target = n; break }
             n = n.parent
         }
-        val r = Rect(); node.getBoundsInScreen(r)
-        return if (gestureTap(r.exactCenterX(), r.exactCenterY(), if (long) 800 else 60)) "Tapped [$id] by touch."
+        val before = android.os.SystemClock.uptimeMillis()
+        if (target != null && target.isEnabled && target.performAction(action)) {
+            if (changedSince(before, 700)) return "Tapped [$id]."
+        }
+        val pt = centerOf(node) ?: target?.let { centerOf(it) } ?: return "Couldn't tap [$id]: it's off screen. Scroll first."
+        return if (gestureTap(pt.first, pt.second, if (long) 800 else 60)) "Tapped [$id] by touch."
         else "Couldn't tap [$id]."
     }
 
-    suspend fun type(id: Int, text: String): String {
-        val node = element(id) ?: return "No element [$id]. Call read_screen again."
+    /** Fresh read, then tap the element whose words match [label]. Immune to stale numbers. */
+    suspend fun tapText(label: String, long: Boolean = false): String {
+        readScreen()
+        val id = findByLabel(label) ?: return "No element with text \"$label\" on screen. Read the screen or scroll."
+        return tap(id, long).replace("[$id]", "\"${label.take(40)}\"")
+    }
+
+    suspend fun type(id: Int, text: String, submit: Boolean = false): String {
+        var node = element(id) ?: return "No element [$id]. Call read_screen again."
         if (!node.isEditable) {
-            node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            settle(400, 120)
+            // Search icons/bars often turn into a real field after a tap.
+            tap(id)
+            settle(700, 150)
+            val focused = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (focused != null && focused.isEditable) node = focused
+            else {
+                readScreen()
+                elements.firstOrNull { it.isEditable }?.let { node = it }
+            }
         }
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        return if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) "Typed into [$id]."
-        else "Couldn't type into [$id]; it may not be a text field."
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return "Couldn't type into [$id]; it may not be a text field."
+        if (!submit) return "Typed into [$id]."
+        return "Typed into [$id] and " + (if (submitIme(node)) "pressed Enter/Search." else "couldn't press Enter; tap the search/send button.")
+    }
+
+    /** Presses the keyboard's Enter / Search key on a field (Android 11+). */
+    private suspend fun submitIme(node: AccessibilityNodeInfo): Boolean {
+        settle(300, 100)
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            node.refresh()
+            if (node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)) return true
+        }
+        return false
     }
 
     suspend fun scroll(direction: String, id: Int?): String {

@@ -146,7 +146,7 @@ object FastLane {
      * [offline] lowers the bar, since the cloud isn't an option.
      */
     suspend fun tryHandle(ctx: Context, text: String, offline: Boolean, confirm: suspend (String, String, String) -> Boolean): Result? {
-        if (text.length > 160 || text.contains('\n')) return null
+        if (text.length > 160 || text.contains('\n') || compound(text)) return null
         val t0 = System.currentTimeMillis()
         // Intent cache: a command that worked before runs again with no model at all.
         IntentCache.get(text)?.let { (n, a) ->
@@ -180,6 +180,14 @@ object FastLane {
         return Result(reply, System.currentTimeMillis() - t0, name)
     }
 
+    /**
+     * Multi-step or search-style asks ("open YouTube and play lofi", "search for…") go to the
+     * full agent: a one-shot model would only do half, or open a browser search.
+     */
+    private val multi = Regex("\\b(and|then|after that|search|find|look up|look for|google|with|about)\\b", RegexOption.IGNORE_CASE)
+    private val playThing = Regex("^\\s*play\\s+\\S+\\s+\\S+", RegexOption.IGNORE_CASE)
+    fun compound(text: String) = multi.containsMatchIn(text) || playThing.containsMatchIn(text) || text.count { it == ',' } > 0
+
     /** Idle runner is shut down to give memory back. */
     fun trimIfIdle() { if (proc != null && System.currentTimeMillis() - lastUse > 5 * 60_000) stop() }
 
@@ -205,7 +213,7 @@ object FastLane {
         }
         "call_contact" -> Skills.run(ctx, "call_number", JSONObject().put("to", a.optString("name")))
         "send_text" -> Skills.run(ctx, "send_sms", JSONObject().put("to", a.optString("to")).put("message", a.optString("message")))
-        "web_search" -> PhoneTools.run(ctx, "open_url", JSONObject().put("url", a.optString("query")))
+        "web_search" -> null   // the cloud agent searches properly (in-app or web_search)
         "navigate_to" -> {
             val i = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(a.optString("place"))))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

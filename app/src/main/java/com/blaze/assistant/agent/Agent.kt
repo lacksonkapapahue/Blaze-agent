@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
@@ -57,17 +58,16 @@ data class PendingConfirm(val title: String, val detail: String, val action: Str
 /** Something the user attached: [parts] are OpenAI content parts (image_url / text). */
 data class Attachment(val name: String, val parts: List<JSONObject>)
 
-/** The brain: keeps the conversation and runs the think → act → look loop. */
-object Agent {
+/** The brain: keeps the conversation and runs the think → act → look loop. */object Agent {
     private const val MAX_STEPS = 30
     private const val SHOT_NOTE = "[Screenshot of the phone screen]"
     private const val SCREEN_MARK = "Foreground app:"
-    private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url")
+    private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url", "search_in_app")
     private val ids = AtomicLong(1)
     private lateinit var app: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var job: Job? = null
 
+    /** Messages of the chat on screen. */
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
@@ -77,6 +77,11 @@ object Agent {
     /** The model's reasoning so far in the current turn (shown live under the brain). */
     private val _thinking = MutableStateFlow("")
     val thinking: StateFlow<String> = _thinking
+
+    /** Ids of chats that are working right now (shown as a live dot in the chat list). */
+    private val _busy = MutableStateFlow<Set<String>>(emptySet())
+    val busyChats: StateFlow<Set<String>> = _busy
+    private fun refreshBusy() { _busy.value = sessions.values.filter { it.mood != Mood.IDLE }.map { it.id }.toSet() }
 
     private val _confirm = MutableStateFlow<PendingConfirm?>(null)
     val pendingConfirm: StateFlow<PendingConfirm?> = _confirm
@@ -92,7 +97,7 @@ object Agent {
         val ok = kotlinx.coroutines.withTimeoutOrNull(120_000) { d.await() } ?: false
         _confirm.value = null
         Notifier.clearConfirm()
-        add(Role.STEP, if (ok) "You approved: $title" else "Not approved: $title")
+        cur.note(if (ok) "You approved: $title" else "Not approved: $title", false)
         return ok
     }
 
@@ -105,20 +110,22 @@ object Agent {
 
     private val _chatId = MutableStateFlow("")
     val chatId: StateFlow<String> = _chatId
-    private var title = ""
-    private var pinned = false
-    /** One-line summary written by the learning review (used by search_past_chats). */
-    private var summary = ""
 
-    /** Phone actions taken this turn (tool, args, element label) for skills / task replay. */
-    private val trace = JSONArray()
-    @Volatile private var currentStep = 0
+    /** Every chat that's open or still working, by id. */
+    private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
+    @Volatile private var cur: Session = Session("boot")
 
-    /** Conversation as sent to the model (OpenAI chat format). */
-    private val history = JSONArray()
-
-    /** history.length() at the moment each user message was added, so a retry can rewind. */
-    private val historyMark = HashMap<Long, Int>()
+    private fun show(s: Session) {
+        cur = s
+        sessions[s.id] = s
+        _chatId.value = s.id
+        _messages.value = s.msgs
+        _mood.value = s.mood
+        _thinking.value = s.thinking
+        Settings.lastChatId = s.id
+        // Forget idle chats in the background; working ones stay until they finish.
+        sessions.values.removeAll { it !== s && !it.busy }
+    }
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
@@ -126,14 +133,10 @@ object Agent {
         refreshChats()
         // Reopen the chat you were in.
         val last = Settings.lastChatId
-        if (last.isNotEmpty() && ChatStore.load(last) != null) open(last) else newChatId()
+        if (last.isNotEmpty() && ChatStore.load(last) != null) open(last) else show(Session(newId()))
     }
 
-    private fun newChatId() {
-        _chatId.value = UUID.randomUUID().toString().take(12)
-        title = ""; pinned = false; summary = ""
-        Settings.lastChatId = _chatId.value
-    }
+    private fun newId() = UUID.randomUUID().toString().take(12)
 
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val ioLock = kotlinx.coroutines.sync.Mutex()
@@ -142,92 +145,28 @@ object Agent {
     fun refreshChats() { io.launch { val l = ChatStore.list(); _chats.value = l } }
 
     /** A line from the app itself (command results, help). Shown, not sent to the model. */
-    fun note(text: String, asReply: Boolean = false) { add(if (asReply) Role.BLAZE else Role.STEP, text) }
+    fun note(text: String, asReply: Boolean = false) { cur.note(text, asReply) }
 
     /** The whole visible chat as plain text. */
-    fun transcript(): String = _messages.value.filter { it.role != Role.STEP }.joinToString("\n\n") {
+    fun transcript(): String = cur.msgs.filter { it.role != Role.STEP }.joinToString("\n\n") {
         (if (it.role == Role.USER) "You: " else "Blaze: ") + it.text }
 
     /** Retry the newest answer. */
-    fun retryLast() { _messages.value.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.let { retry(it.id) } }
+    fun retryLast() { cur.msgs.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.let { retry(it.id) } }
 
-    private fun add(role: Role, text: String, files: List<String> = emptyList()): Long {
-        val id = ids.getAndIncrement()
-        _messages.value = _messages.value + ChatMessage(id, role, text, files)
-        if (role == Role.STEP && !inForeground && _mood.value != Mood.IDLE) Notifier.working(if (currentStep > 0) "Step $currentStep · $text" else text)
-        return id
-    }
+    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) = cur.send(text, byVoice, attachments)
+    fun retry(messageId: Long) = cur.retry(messageId)
+    fun stop() = cur.stop()
+    fun stopAll() = sessions.values.forEach { it.stop() }
 
-    private fun replace(id: Long, role: Role, text: String) {
-        _messages.value = _messages.value.map { if (it.id == id) it.copy(role = role, text = text) else it }
-    }
-
-    private fun addReply(liveId: Long, raw: String, thinking: String, fu: List<String> = emptyList(), meta: String = "") {
-        val p = ReplyParts.split(raw).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
-        val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
-        val text = p.text.ifEmpty { "Done." }
-        if (liveId >= 0) _messages.value = _messages.value.map {
-            if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta) else it }
-        else {
-            val id = ids.getAndIncrement()
-            _messages.value = _messages.value + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta)
-        }
-    }
-
-    /** Adds a chip (e.g. "Memory updated") to a reply's footer. */
-    private fun addMeta(id: Long, chip: String) {
-        _messages.value = _messages.value.map { if (it.id == id) it.copy(meta = listOf(it.meta, chip).filter { s -> s.isNotBlank() }.joinToString(" · ")) else it }
-    }
-
-    // ---------- Chats ----------
-
-    /** Save the current chat to disk (screenshots are dropped to keep files small). */
-    private fun persist() {
-        if (_messages.value.none { it.role == Role.USER }) return
-        val msgs = JSONArray()
-        for (m in _messages.value) {
-            msgs.put(JSONObject().put("id", m.id).put("role", m.role.name).put("text", m.text)
-                .put("files", JSONArray(m.files)).apply {
-                    historyMark[m.id]?.let { put("mark", it) }
-                    if (m.thinking.isNotEmpty()) put("thinking", m.thinking.take(20000))
-                    if (m.followups.isNotEmpty()) put("followups", JSONArray(m.followups))
-                    if (m.meta.isNotEmpty()) put("meta", m.meta)
-                })
-        }
-        val hist = JSONArray()
-        for (i in 0 until history.length()) hist.put(stripImages(history.getJSONObject(i)))
-        val firstUser = _messages.value.first { it.role == Role.USER }.text
-        if (title.isEmpty()) title = firstUser.lineSequence().first().take(48)
-        val preview = _messages.value.lastOrNull { it.role == Role.BLAZE }?.text ?: firstUser
-        val doc = JSONObject().put("id", _chatId.value).put("title", title).put("pinned", pinned)
-            .put("updated", System.currentTimeMillis()).put("preview", preview.take(90))
-            .put("messages", msgs).put("history", hist).put("summary", summary)
-        Settings.lastChatId = _chatId.value
-        io.launch { ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list() }
-    }
-
-    /** Images become a short note in saved history; the words stay. */
-    private fun stripImages(m: JSONObject): JSONObject {
-        val c = m.opt("content") as? JSONArray ?: return m
-        val out = JSONArray(); var dropped = 0
-        for (i in 0 until c.length()) {
-            val p = c.getJSONObject(i)
-            if (p.optString("type") == "image_url") dropped++ else out.put(p)
-        }
-        if (dropped == 0) return m
-        out.put(JSONObject().put("type", "text").put("text", "[$dropped image(s) were shared here earlier]"))
-        return JSONObject(m.toString()).put("content", out)
-    }
-
+    /** Open a chat. If it's still working in the background you see it live. */
     fun open(id: String) {
+        sessions[id]?.let { show(it); return }
         val o = ChatStore.load(id) ?: return
-        stop()
-        _chatId.value = id
-        title = o.optString("title"); pinned = o.optBoolean("pinned"); summary = o.optString("summary")
-        historyMark.clear()
-        while (history.length() > 0) history.remove(0)
+        val s = Session(id)
+        s.title = o.optString("title"); s.pinned = o.optBoolean("pinned"); s.summary = o.optString("summary")
         val h = o.optJSONArray("history") ?: JSONArray()
-        for (i in 0 until h.length()) history.put(h.get(i))
+        for (i in 0 until h.length()) s.history.put(h.get(i))
         val list = mutableListOf<ChatMessage>()
         val ms = o.optJSONArray("messages") ?: JSONArray()
         var maxId = 0L
@@ -237,50 +176,58 @@ object Agent {
             val files = m.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"))
-            if (m.has("mark")) historyMark[mid] = m.getInt("mark")
+            if (m.has("mark")) s.historyMark[mid] = m.getInt("mark")
         }
         ids.set(maxOf(ids.get(), maxId + 1))
-        _messages.value = list
-        Settings.lastChatId = id
+        s.msgs = list
+        show(s)
     }
 
-    /** Start a fresh chat (the current one is already saved). */
+    /** Start a fresh chat. The one you leave keeps working if it was busy. */
     fun clear() {
-        stop()
-        persist()
-        _messages.value = emptyList()
-        historyMark.clear()
-        while (history.length() > 0) history.remove(0)
-        newChatId()
+        cur.persist()
+        show(Session(newId()))
     }
 
     fun deleteChat(id: String) {
+        sessions[id]?.stop()
+        sessions.remove(id)
         ChatStore.delete(id)
-        if (id == _chatId.value) { stop(); _messages.value = emptyList(); historyMark.clear()
-            while (history.length() > 0) history.remove(0); newChatId() }
+        if (id == cur.id) show(Session(newId()))
         refreshChats()
     }
 
-    fun renameChat(id: String, t: String) { ChatStore.rename(id, t); if (id == _chatId.value) title = t; refreshChats() }
-    fun pinChat(id: String, p: Boolean) { ChatStore.setPinned(id, p); if (id == _chatId.value) pinned = p; refreshChats() }
+    fun renameChat(id: String, t: String) { ChatStore.rename(id, t); sessions[id]?.title = t; refreshChats() }
+    fun pinChat(id: String, p: Boolean) { ChatStore.setPinned(id, p); sessions[id]?.pinned = p; refreshChats() }
 
-    /** A scheduled routine: runs in a fresh chat and reports by notification. */
+    /** A scheduled routine: runs in its own background chat and reports by notification. */
     fun runRoutine(name: String, prompt: String) {
-        clear()
-        title = "⟳ $name"
-        send("[Scheduled routine \"$name\". The user isn't watching; do it and reply in 1-3 short sentences that read well as a notification.]\n$prompt")
+        val s = Session(newId())
+        s.title = "⟳ $name"
+        sessions[s.id] = s
+        s.send("[Scheduled routine \"$name\". The user isn't watching; do it and reply in 1-3 short sentences that read well as a notification.]\n$prompt")
     }
 
-    fun stop() {
-        _confirm.value?.answer?.complete(false)
-        job?.cancel()
-        job = null
-        _mood.value = Mood.IDLE
+    /** Run a prompt in a hidden background chat and get the final answer (proactive checks, dashboard). */
+    suspend fun ask(title: String, prompt: String, visible: Boolean = false): String {
+        val s = Session(newId())
+        s.title = title
+        sessions[s.id] = s
+        s.send(prompt)
+        s.job?.join()
+        val out = s.msgs.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.text.orEmpty()
+        if (!visible) { ChatStore.delete(s.id); sessions.remove(s.id); refreshChats() }
+        return out
     }
+
+    /** Messages of any chat (for the dashboard). */
+    fun messagesOf(id: String): List<ChatMessage>? = sessions[id]?.msgs
+
+    fun lastStep(): String = cur.msgs.lastOrNull { it.role == Role.STEP }?.text ?: "Thinking"
 
     // ---------- Prompt ----------
 
-    private fun systemPrompt(): String {
+    private fun systemPrompt(userText: String): String {
         val now = SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())
         val name = Settings.userName.ifBlank { null }
         val control = Settings.phoneControl
@@ -291,9 +238,9 @@ object Agent {
             append(persona).append(' ')
             if (name != null) append("The user's name is $name. ")
             append("It is $now. ")
-            append(Memory.promptBlock(lastUserText()))
+            append(Memory.promptBlock(userText))
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
-            append(Learning.promptBlock(lastUserText()))
+            append(Learning.promptBlock(userText))
             append(com.blaze.assistant.connect.Connectors.promptBlock())
             append("\nWhen the user tells you something lasting about themselves, save it with the remember tool. ")
             if (control) {
@@ -303,7 +250,8 @@ You can control the phone with tools. To do something in an app:
 After every open_app, tap, type_text, scroll or press_button the fresh screen is returned automatically, so you rarely need read_screen. Element numbers change after every action: always use the newest screen.
 When you already know the next few steps on the current screen (tap a field, type, tap Search), do them in one do_actions call.
 If read_screen shows little or nothing useful (games, maps, photos, video, custom apps), call look_at_screen to see a screenshot.
-Prefer the direct tools (set_alarm, set_timer, dial, compose_sms, open_url) when they fit.
+Prefer the direct tools when they fit: search_in_app for "play/search X on YouTube/Spotify/Play Store/Maps" (never open_url for that), set_alarm, set_timer, dial, compose_sms. Use open_url only for real web addresses; for looking something up yourself use web_search.
+To search inside any other app: type_text into its search field with submit=true. If a tap by number didn't work, tap by its text.
 Before anything irreversible or that spends money or contacts someone (sending a message, posting, paying, deleting, calling), stop and ask the user to confirm in your reply, unless they clearly already told you to do exactly that.
 When you finish, say in one or two sentences what you did.
 """.trimIndent())
@@ -315,95 +263,12 @@ When you finish, say in one or two sentences what you did.
         }
     }
 
-    private fun lastUserText(): String = _messages.value.lastOrNull { it.role == Role.USER }?.text.orEmpty()
-
-    // ---------- Turns ----------
-
-    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
-        if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
-        Voice.lastTurnByVoice = byVoice
-        val shown = text.trim().ifEmpty { "Take a look at this." }
-        val id = add(Role.USER, shown, attachments.map { it.name })
-        historyMark[id] = history.length()
-        val content: Any = if (attachments.isEmpty()) shown else JSONArray().apply {
-            put(JSONObject().put("type", "text").put("text", shown))
-            attachments.forEach { a -> a.parts.forEach { put(it) } }
-        }
-        history.put(JSONObject().put("role", "user").put("content", content))
-        val routine = shown.startsWith("[Scheduled routine")
-        job = scope.launch {
-            // Fast lane: direct commands run on-device in well under a second.
-            val offline = !FastLane.online(app)
-            if (attachments.isEmpty() && !routine && (FastLane.enabled(app) || IntentCache.size() > 0)) {
-                _mood.value = Mood.THINKING
-                val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
-                if (fast != null) {
-                    history.put(JSONObject().put("role", "assistant").put("content", fast.reply))
-                    addReply(-1, fast.reply, "", meta = if (fast.ms < 60) "⚡ instant · ${fast.ms} ms" else "⚡ on-device · ${fast.ms} ms")
-                    _mood.value = Mood.IDLE
-                    persist(); announce()
-                    launch { kotlinx.coroutines.delay(5 * 60_000 + 5_000); FastLane.trimIfIdle() }
-                    return@launch
-                }
-            }
-            if (offline && !Settings.customBase.contains("127.0.0.1") && !Settings.customBase.contains("localhost")) {
-                add(Role.ERROR, if (FastLane.enabled(app)) "You're offline. I can still do direct commands like \u201copen WhatsApp\u201d, \u201cflashlight on\u201d or \u201cset a timer for 5 minutes\u201d." 
-                    else "You're offline. Turn on the fast lane in Settings → AI & model to use direct commands without internet.")
-                _mood.value = Mood.IDLE; persist(); return@launch
-            }
-            runLoop()
-        }
-    }
-
-    /**
-     * Retry from a message. On a user message: resend it. On a reply or error: regenerate
-     * the answer to the prompt before it. Everything after that prompt is discarded.
-     */
-    fun retry(messageId: Long) {
-        val list = _messages.value
-        val idx = list.indexOfFirst { it.id == messageId }
-        if (idx < 0) return
-        val userIdx = (idx downTo 0).firstOrNull { list[it].role == Role.USER } ?: return
-        val user = list[userIdx]
-        val mark = historyMark[user.id] ?: return
-        stop()
-        // Keep the original user turn (with any attachments) and drop everything after it.
-        while (history.length() > mark + 1) history.remove(history.length() - 1)
-        list.drop(userIdx + 1).forEach { historyMark.remove(it.id) }
-        _messages.value = list.take(userIdx + 1)
-        Voice.lastTurnByVoice = false
-        job = scope.launch { runLoop() }
-    }
-
-    /** Only the newest screenshot is sent as an image; older ones become a note. */
-    private fun requestMessages(): JSONArray {
-        val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt()))
-        var lastShot = -1
-        for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
-        var lastScreen = -1
-        for (i in 0 until history.length()) if (history.getJSONObject(i).let { it.optString("role") == "tool" && it.optString("content").contains(SCREEN_MARK) }) lastScreen = i
-        for (i in 0 until history.length()) {
-            val m = history.getJSONObject(i)
-            msgs.put(when {
-                isShot(m) && i != lastShot -> JSONObject().put("role", "user").put("content", "$SHOT_NOTE (older, removed)")
-                // Only the newest screen readout is sent in full; older ones are stale anyway.
-                i != lastScreen && m.optString("role") == "tool" && m.optString("content").contains(SCREEN_MARK) ->
-                    JSONObject(m.toString()).put("content", m.optString("content").substringBefore(SCREEN_MARK) + "[older screen omitted]")
-                else -> m
-            })
-        }
-        return msgs
-    }
-
-    private fun isShot(m: JSONObject): Boolean {
-        val c = m.opt("content") as? JSONArray ?: return false
-        return c.optJSONObject(0)?.optString("text") == SHOT_NOTE
-    }
-
     private suspend fun tools(): JSONArray {
         val t = JSONArray()
         Memory.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.device.DeviceStatus.tool())
+        Web.tools().forEach { t.put(it) }
+        if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
@@ -424,227 +289,471 @@ When you finish, say in one or two sentences what you did.
         return t
     }
 
-    private suspend fun runLoop() {
-        try {
-            val tools = tools()
-            while (trace.length() > 0) trace.remove(0)
-            val turnThink = StringBuilder()
-            val turnStart = System.currentTimeMillis()
-            _thinking.value = ""
-            for (step in 0 until MAX_STEPS) {
-                currentStep = step + 1
-                _mood.value = Mood.THINKING
-                var liveId = -1L
-                val before = turnThink.toString()
-                var pendingFollowups = emptyList<String>()
-                val onText: ((String) -> Unit)? = if (Settings.streamReplies) { partial ->
-                    scope.launch {
-                        val p = ReplyParts.split(partial)
-                        if (p.thinking.isNotEmpty()) _thinking.value = listOf(before, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
-                        if (p.text.isNotEmpty()) {
-                            if (liveId < 0) liveId = add(Role.BLAZE, p.text) else replace(liveId, Role.BLAZE, p.text)
-                        }
-                    }
-                } else null
-                val onThink: (String) -> Unit = { t -> scope.launch { _thinking.value = listOf(before, t).filter { it.isNotBlank() }.joinToString("\n\n") } }
-
-                val req = requestMessages()
-                val reply = LlmClient.complete(req, tools, onText, onThink, if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS)
-                reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
-                reply.remove("_reasoning")
-                try { Usage.record(req, reply, LlmClient.lastUsage) } catch (_: Exception) { }
-                kotlinx.coroutines.yield()
-                history.put(reply)
-
-                // Keep reasoning and follow-up tags out of what's sent back next turn.
-                (reply.opt("content") as? String)?.let { raw ->
-                    val p = ReplyParts.split(raw)
-                    if (p.text != raw.trim()) {
-                        reply.put("content", p.text)
-                        val parts = ReplyParts.split(raw)
-                        if (parts.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(parts.thinking) }
-                        if (parts.followups.isNotEmpty()) pendingFollowups = parts.followups
-                    }
-                }
-                val calls = reply.optJSONArray("tool_calls")
-                val textOut = when (val content = reply.opt("content")) {
-                    is String -> content
-                    is JSONArray -> (0 until content.length()).joinToString("") {
-                        content.optJSONObject(it)?.optString("text") ?: ""
-                    }
-                    else -> ""
-                }.trim()
-
-                if (calls == null || calls.length() == 0) {
-                    kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
-                    val secs = (System.currentTimeMillis() - turnStart) / 1000.0
-                    com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
-                    addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
-                        if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model }, "%.1f s".format(secs),
-                            if (step > 0) "${step + 1} steps" else "").filter { it.isNotBlank() }.joinToString(" · ") else "")
-                    break
-                }
-                // Text that came with tool calls is narration, shown as a step; its reasoning joins the turn's.
-                val narr = ReplyParts.split(textOut)
-                if (narr.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(narr.thinking) }
-                _thinking.value = turnThink.toString()
-                if (liveId >= 0) {
-                    if (narr.text.isNotEmpty()) replace(liveId, Role.STEP, narr.text)
-                    else _messages.value = _messages.value.filterNot { it.id == liveId }
-                } else if (narr.text.isNotEmpty()) add(Role.STEP, narr.text)
-
-                _mood.value = Mood.ACTING
-                val shots = mutableListOf<String>()
-                for (i in 0 until calls.length()) {
-                    val call = calls.getJSONObject(i)
-                    val fn = call.getJSONObject("function")
-                    val name = fn.getString("name")
-                    val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
-                        catch (_: Exception) { JSONObject() }
-                    var result = runTool(name, args, shots)
-                    if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
-                    history.put(
-                        JSONObject().put("role", "tool")
-                            .put("tool_call_id", call.optString("id", "call_$step$i"))
-                            .put("name", name)
-                            .put("content", result)
-                    )
-                }
-                shots.lastOrNull()?.let { url ->
-                    history.put(JSONObject().put("role", "user").put("content", JSONArray()
-                        .put(JSONObject().put("type", "text").put("text", SHOT_NOTE))
-                        .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url)))))
-                }
-                if (step == MAX_STEPS - 1) add(Role.BLAZE, "I've taken a lot of steps on this one, so I'm pausing here. Tell me if you want me to keep going.")
-            }
-        } catch (e: CancellationException) {
-            add(Role.STEP, "Stopped.")
-            throw e
-        } catch (e: LlmClient.LlmException) {
-            add(Role.ERROR, e.message ?: "Something went wrong.")
-        } catch (e: Exception) {
-            com.blaze.assistant.device.CrashLog.error("agent loop", e)
-            add(Role.ERROR, "Something went wrong: ${e.message}")
-        } finally {
-            _thinking.value = ""
-            _mood.value = Mood.IDLE
-            currentStep = 0
-            persist()
-            announce()
-            learnAfterTurn()
-        }
-    }
-
-    /** Fresh compact screen after an action, so the model doesn't spend a turn on read_screen. */
-    private suspend fun screenAfter(result: String): String {
-        val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance ?: return ""
-        if (!Settings.phoneControl || result.startsWith("Error") || result.startsWith("No app") || result.startsWith("Phone control is off")) return ""
-        svc.settle(1500, 250)
-        return "\n\nScreen now:\n" + svc.readScreen()
-    }
-
-    private suspend fun runTool(name: String, args: JSONObject, shots: MutableList<String>): String {
-        val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
-        // Record phone actions (with the element's label, since numbers change) for task replay.
-        if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "open_url") && trace.length() < 40) {
-            val label = if (name == "tap" || name == "type_text") svc?.labelOf(args.optInt("element")).orEmpty() else ""
-            trace.put(JSONObject().put("tool", name).put("args", JSONObject(args.toString()).apply { remove("element") }).put("label", label))
-        }
-        return when (name) {
-            "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact")) }
-            "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
-            "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
-            "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
-            "look_at_screen" -> {
-                add(Role.STEP, "Looking at a screenshot")
-                val shot = PhoneTools.screenshot()
-                if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
-            }
-            "create_routine", "list_routines", "delete_routine" -> {
-                add(Role.STEP, if (name == "create_routine") "Scheduling \"${args.optString("name")}\"" else "Checking routines")
-                try { com.blaze.assistant.routine.Routines.run(name, args) } catch (e: Exception) { "Error: ${e.message}" }
-            }
-            in com.blaze.assistant.phone.Skills.names -> {
-                add(Role.STEP, com.blaze.assistant.phone.Skills.describe(name, args))
-                com.blaze.assistant.phone.Skills.run(app, name, args)
-            }
-            in Learning.toolNames -> {
-                add(Role.STEP, when (name) { "run_skill" -> "Replaying skill \"${args.optString("name")}\""; "skill_manage" -> "Saving a skill"; else -> "Searching past chats" })
-                try { Learning.run(app, name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
-            }
-            "search_screen_memory" -> { add(Role.STEP, "Searching screen memory"); ScreenMemory.search(app, args.optString("query"), args.optString("app").ifBlank { null }) }
-            "recent_notifications" -> { add(Role.STEP, "Checking notifications"); com.blaze.assistant.notify.NotificationBrain.list(args.optString("app").ifBlank { null }, args.optDouble("hours", 6.0)) }
-            "reply_to_notification" -> { add(Role.STEP, "Replying"); com.blaze.assistant.notify.NotificationBrain.reply(app, args.optInt("number"), args.optString("text")) }
-            "do_actions" -> {
-                val steps = args.optJSONArray("steps") ?: JSONArray()
-                val log = StringBuilder()
-                for (i in 0 until minOf(steps.length(), 8)) {
-                    val st = steps.getJSONObject(i)
-                    val act = st.optString("action").let { if (it == "type") "type_text" else it }
-                    val sub = JSONObject(st.toString()).apply { remove("action") }
-                    val r = runTool(act, sub, shots)
-                    log.append("${i + 1}. $act: ${r.take(200)}\n")
-                    if (r.startsWith("Error") || r.startsWith("No element") || r.contains("did NOT approve") || r.startsWith("Unknown")) { log.append("Stopped at step ${i + 1}."); break }
-                    if (i < steps.length() - 1 && act != "wait") svc?.settle(900, 200)
-                }
-                log.toString()
-            }
-            "tap" -> {
-                add(Role.STEP, PhoneTools.describe(name, args))
-                val label = svc?.labelOf(args.optInt("element")).orEmpty()
-                if (Settings.confirmRisky && risky.containsMatchIn(label) &&
-                    !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap"))
-                    "The user did NOT approve tapping \"$label\". Don't retry; tell them it's ready for them to finish."
-                else PhoneTools.run(app, name, args)
-            }
-            else -> when {
-                com.blaze.assistant.connect.Mcp.handles(name) -> { add(Role.STEP, "Using ${name.removePrefix("mcp_").substringBefore('_')}"); com.blaze.assistant.connect.Mcp.call(name, args) }
-                com.blaze.assistant.connect.Connectors.handles(name) -> { add(Role.STEP, com.blaze.assistant.connect.Connectors.describe(name)); com.blaze.assistant.connect.Connectors.run(app, name, args) }
-                else -> { add(Role.STEP, PhoneTools.describe(name, args)); PhoneTools.run(app, name, args) }
-            }
-        }
-    }
-
-    /** After a turn: summary, memories and skills in the background (see Learning). */
-    private fun learnAfterTurn() {
-        if (!Settings.autoLearn) return
-        val reply = _messages.value.lastOrNull { it.role == Role.BLAZE } ?: return
-        if (reply.meta.contains("on-device")) return
-        val msgs = _messages.value
-        val lastUser = msgs.indexOfLast { it.role == Role.USER }; if (lastUser < 0) return
-        val exchange = msgs.drop(maxOf(0, lastUser - 4)).joinToString("\n") { m ->
-            when (m.role) { Role.USER -> "User: "; Role.BLAZE -> "Blaze: "; Role.STEP -> "  (step) "; Role.ERROR -> "  (error) " } + m.text.take(1500) }
-        if (msgs.drop(lastUser).any { it.role == Role.ERROR }) return
-        val t = JSONArray(trace.toString())
-        val cid = _chatId.value
-        val hasSummary = summary.isNotBlank()
-        io.launch {
-            val chip = Learning.review(cid, exchange, t, hasSummary) { id, s -> scope.launch { setSummary(id, s) } }
-            if (chip != null) scope.launch { addMeta(reply.id, chip); persist() }
-        }
-    }
-
-    private fun setSummary(id: String, s: String) {
-        if (id == _chatId.value) { summary = s; persist() }
-        else io.launch { ioLock.withLock { ChatStore.load(id)?.let { ChatStore.save(it.put("summary", s)) } } }
-    }
-
     /** True while Blaze's own screen is visible. */
     @Volatile var inForeground = false
 
     /** True while the assistant overlay or floating orb is open (replies show there, not as notifications). */
     @Volatile var overlayOpen = false
 
-    fun lastStep(): String = _messages.value.lastOrNull { it.role == Role.STEP }?.text ?: "Thinking"
 
-    /** When Blaze finishes while you're in another app, post its answer as a notification. */
-    private fun announce() {
-        Notifier.doneWorking()
-        val last = _messages.value.lastOrNull() ?: return
-        if (last.role != Role.BLAZE && last.role != Role.ERROR) return
-        if (Voice.lastTurnByVoice && Settings.speakReplies) Voice.speak(last.text)
-        try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
-        if (inForeground || overlayOpen) return
-        Notifier.reply(last.text, last.role == Role.ERROR)
+
+    /**
+     * One chat with its own agent. Several can run at once: leaving a chat (or starting a new
+     * one) never stops it or sends its answer to the wrong place.
+     */
+    class Session(val id: String) {
+        var title = ""
+        var pinned = false
+        /** One-line summary written by the learning review (used by search_past_chats). */
+        var summary = ""
+        val history = JSONArray()
+        val historyMark = HashMap<Long, Int>()
+        val trace = JSONArray()
+        @Volatile var currentStep = 0
+        var job: Job? = null
+
+        private var _msgs: List<ChatMessage> = emptyList()
+        var msgs: List<ChatMessage>
+            get() = _msgs
+            set(v) { _msgs = v; if (this === cur) _messages.value = v }
+        private var _mood = Mood.IDLE
+        var mood: Mood
+            get() = _mood
+            set(v) { _mood = v; if (this === cur) Agent._mood.value = v; refreshBusy() }
+        private var _thinking = ""
+        var thinking: String
+            get() = _thinking
+            set(v) { _thinking = v; if (this === cur) Agent._thinking.value = v }
+
+        val busy get() = job?.isActive == true
+
+        fun note(text: String, asReply: Boolean) { add(if (asReply) Role.BLAZE else Role.STEP, text) }
+
+        fun lastUserText(): String = msgs.lastOrNull { it.role == Role.USER }?.text.orEmpty()
+
+        fun stop() {
+            if (this === cur) _confirm.value?.answer?.complete(false)
+            job?.cancel()
+            job = null
+            mood = Mood.IDLE
+        }
+        fun add(role: Role, text: String, files: List<String> = emptyList()): Long {
+            val id = ids.getAndIncrement()
+            msgs = msgs + ChatMessage(id, role, text, files)
+            if (role == Role.STEP && !inForeground && mood != Mood.IDLE) Notifier.working(if (currentStep > 0) "Step $currentStep · $text" else text)
+            return id
+        }
+
+        fun replace(id: Long, role: Role, text: String) {
+            msgs = msgs.map { if (it.id == id) it.copy(role = role, text = text) else it }
+        }
+
+        fun addReply(liveId: Long, raw: String, thinking: String, fu: List<String> = emptyList(), meta: String = "") {
+            val p = ReplyParts.split(raw).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
+            val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
+            val text = p.text.ifEmpty { "Done." }
+            if (liveId >= 0) msgs = msgs.map {
+                if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta) else it }
+            else {
+                val id = ids.getAndIncrement()
+                msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta)
+            }
+        }
+
+        /** Adds a chip (e.g. "Memory updated") to a reply's footer. */
+        fun addMeta(id: Long, chip: String) {
+            msgs = msgs.map { if (it.id == id) it.copy(meta = listOf(it.meta, chip).filter { s -> s.isNotBlank() }.joinToString(" · ")) else it }
+        }
+
+        /** Save the current chat to disk (screenshots are dropped to keep files small). */
+        fun persist() {
+            if (msgs.none { it.role == Role.USER }) return
+            val arr = JSONArray()
+            for (m in msgs) {
+                arr.put(JSONObject().put("id", m.id).put("role", m.role.name).put("text", m.text)
+                    .put("files", JSONArray(m.files)).apply {
+                        historyMark[m.id]?.let { put("mark", it) }
+                        if (m.thinking.isNotEmpty()) put("thinking", m.thinking.take(20000))
+                        if (m.followups.isNotEmpty()) put("followups", JSONArray(m.followups))
+                        if (m.meta.isNotEmpty()) put("meta", m.meta)
+                    })
+            }
+            val hist = JSONArray()
+            for (i in 0 until history.length()) hist.put(stripImages(history.getJSONObject(i)))
+            val firstUser = msgs.first { it.role == Role.USER }.text
+            if (title.isEmpty()) title = firstUser.lineSequence().first().take(48)
+            val preview = msgs.lastOrNull { it.role == Role.BLAZE }?.text ?: firstUser
+            val doc = JSONObject().put("id", id).put("title", title).put("pinned", pinned)
+                .put("updated", System.currentTimeMillis()).put("preview", preview.take(90))
+                .put("messages", arr).put("history", hist).put("summary", summary)
+            if (this === cur) Settings.lastChatId = id
+            io.launch { ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list() }
+        }
+
+        /** Images become a short note in saved history; the words stay. */
+        fun stripImages(m: JSONObject): JSONObject {
+            val c = m.opt("content") as? JSONArray ?: return m
+            val out = JSONArray(); var dropped = 0
+            for (i in 0 until c.length()) {
+                val p = c.getJSONObject(i)
+                if (p.optString("type") == "image_url") dropped++ else out.put(p)
+            }
+            if (dropped == 0) return m
+            out.put(JSONObject().put("type", "text").put("text", "[$dropped image(s) were shared here earlier]"))
+            return JSONObject(m.toString()).put("content", out)
+        }
+
+        // ---------- Turns ----------
+
+        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
+            if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
+            Voice.lastTurnByVoice = byVoice
+            val shown = text.trim().ifEmpty { "Take a look at this." }
+            val id = add(Role.USER, shown, attachments.map { it.name })
+            historyMark[id] = history.length()
+            val content: Any = if (attachments.isEmpty()) shown else JSONArray().apply {
+                put(JSONObject().put("type", "text").put("text", shown))
+                attachments.forEach { a -> a.parts.forEach { put(it) } }
+            }
+            history.put(JSONObject().put("role", "user").put("content", content))
+            persist()   // so it shows in the chat list right away, even if you leave
+            val routine = shown.startsWith("[Scheduled routine")
+            job = scope.launch {
+                // Fast lane: direct commands run on-device in well under a second.
+                val offline = !FastLane.online(app)
+                if (attachments.isEmpty() && !routine && (FastLane.enabled(app) || IntentCache.size() > 0)) {
+                    mood = Mood.THINKING
+                    val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                    if (fast != null) {
+                        history.put(JSONObject().put("role", "assistant").put("content", fast.reply))
+                        addReply(-1, fast.reply, "", meta = if (fast.ms < 60) "⚡ instant · ${fast.ms} ms" else "⚡ on-device · ${fast.ms} ms")
+                        mood = Mood.IDLE
+                        persist(); announce()
+                        launch { kotlinx.coroutines.delay(5 * 60_000 + 5_000); FastLane.trimIfIdle() }
+                        return@launch
+                    }
+                }
+                if (offline && !Settings.customBase.contains("127.0.0.1") && !Settings.customBase.contains("localhost")) {
+                    add(Role.ERROR, if (FastLane.enabled(app)) "You're offline. I can still do direct commands like \u201copen WhatsApp\u201d, \u201cflashlight on\u201d or \u201cset a timer for 5 minutes\u201d." 
+                        else "You're offline. Turn on the fast lane in Settings → AI & model to use direct commands without internet.")
+                    mood = Mood.IDLE; persist(); return@launch
+                }
+                runLoop()
+            }
+        }
+
+        /**
+         * Retry from a message. On a user message: resend it. On a reply or error: regenerate
+         * the answer to the prompt before it. Everything after that prompt is discarded.
+         */
+        fun retry(messageId: Long) {
+            val list = msgs
+            val idx = list.indexOfFirst { it.id == messageId }
+            if (idx < 0) return
+            val userIdx = (idx downTo 0).firstOrNull { list[it].role == Role.USER } ?: return
+            val user = list[userIdx]
+            val mark = historyMark[user.id] ?: return
+            stop()
+            // Keep the original user turn (with any attachments) and drop everything after it.
+            while (history.length() > mark + 1) history.remove(history.length() - 1)
+            list.drop(userIdx + 1).forEach { historyMark.remove(it.id) }
+            msgs = list.take(userIdx + 1)
+            Voice.lastTurnByVoice = false
+            job = scope.launch { runLoop() }
+        }
+
+        /** Only the newest screenshot is sent as an image; older ones become a note. */
+        fun requestMessages(): JSONArray {
+            val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt(lastUserText())))
+            var lastShot = -1
+            for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
+            var lastScreen = -1
+            for (i in 0 until history.length()) if (history.getJSONObject(i).let { it.optString("role") == "tool" && it.optString("content").contains(SCREEN_MARK) }) lastScreen = i
+            for (i in 0 until history.length()) {
+                val m = history.getJSONObject(i)
+                msgs.put(when {
+                    isShot(m) && i != lastShot -> JSONObject().put("role", "user").put("content", "$SHOT_NOTE (older, removed)")
+                    // Only the newest screen readout is sent in full; older ones are stale anyway.
+                    i != lastScreen && m.optString("role") == "tool" && m.optString("content").contains(SCREEN_MARK) ->
+                        JSONObject(m.toString()).put("content", m.optString("content").substringBefore(SCREEN_MARK) + "[older screen omitted]")
+                    else -> m
+                })
+            }
+            return msgs
+        }
+
+        fun isShot(m: JSONObject): Boolean {
+            val c = m.opt("content") as? JSONArray ?: return false
+            return c.optJSONObject(0)?.optString("text") == SHOT_NOTE
+        }
+
+        suspend fun runLoop() {
+            try {
+                val tools = tools()
+                while (trace.length() > 0) trace.remove(0)
+                val turnThink = StringBuilder()
+                val turnStart = System.currentTimeMillis()
+                thinking = ""
+                for (step in 0 until MAX_STEPS) {
+                    currentStep = step + 1
+                    mood = Mood.THINKING
+                    var liveId = -1L
+                    val before = turnThink.toString()
+                    var pendingFollowups = emptyList<String>()
+                    val onText: ((String) -> Unit)? = if (Settings.streamReplies) { partial ->
+                        scope.launch {
+                            val p = ReplyParts.split(partial)
+                            if (p.thinking.isNotEmpty()) thinking = listOf(before, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
+                            if (p.text.isNotEmpty()) {
+                                if (liveId < 0) liveId = add(Role.BLAZE, p.text) else replace(liveId, Role.BLAZE, p.text)
+                            }
+                        }
+                    } else null
+                    val onThink: (String) -> Unit = { t -> scope.launch { thinking = listOf(before, t).filter { it.isNotBlank() }.joinToString("\n\n") } }
+
+                    val req = requestMessages()
+                    val reply = LlmClient.complete(req, tools, onText, onThink, if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS)
+                    reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
+                    reply.remove("_reasoning")
+                    try { Usage.record(req, reply, LlmClient.lastUsage) } catch (_: Exception) { }
+                    kotlinx.coroutines.yield()
+                    history.put(reply)
+
+                    // Keep reasoning and follow-up tags out of what's sent back next turn.
+                    (reply.opt("content") as? String)?.let { raw ->
+                        val p = ReplyParts.split(raw)
+                        if (p.text != raw.trim()) {
+                            reply.put("content", p.text)
+                            val parts = ReplyParts.split(raw)
+                            if (parts.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(parts.thinking) }
+                            if (parts.followups.isNotEmpty()) pendingFollowups = parts.followups
+                        }
+                    }
+                    val calls = reply.optJSONArray("tool_calls")
+                    val textOut = when (val content = reply.opt("content")) {
+                        is String -> content
+                        is JSONArray -> (0 until content.length()).joinToString("") {
+                            content.optJSONObject(it)?.optString("text") ?: ""
+                        }
+                        else -> ""
+                    }.trim()
+
+                    if (calls == null || calls.length() == 0) {
+                        kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
+                        val secs = (System.currentTimeMillis() - turnStart) / 1000.0
+                        com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
+                        addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
+                            if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model }, "%.1f s".format(secs),
+                                if (step > 0) "${step + 1} steps" else "").filter { it.isNotBlank() }.joinToString(" · ") else "")
+                        break
+                    }
+                    // Text that came with tool calls is narration, shown as a step; its reasoning joins the turn's.
+                    val narr = ReplyParts.split(textOut)
+                    if (narr.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(narr.thinking) }
+                    thinking = turnThink.toString()
+                    if (liveId >= 0) {
+                        if (narr.text.isNotEmpty()) replace(liveId, Role.STEP, narr.text)
+                        else msgs = msgs.filterNot { it.id == liveId }
+                    } else if (narr.text.isNotEmpty()) add(Role.STEP, narr.text)
+
+                    mood = Mood.ACTING
+                    val shots = mutableListOf<String>()
+                    for (i in 0 until calls.length()) {
+                        val call = calls.getJSONObject(i)
+                        val fn = call.getJSONObject("function")
+                        val name = fn.getString("name")
+                        val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
+                            catch (_: Exception) { JSONObject() }
+                        var result = runTool(name, args, shots)
+                        if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
+                        history.put(
+                            JSONObject().put("role", "tool")
+                                .put("tool_call_id", call.optString("id", "call_$step$i"))
+                                .put("name", name)
+                                .put("content", result)
+                        )
+                    }
+                    shots.lastOrNull()?.let { url ->
+                        history.put(JSONObject().put("role", "user").put("content", JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", SHOT_NOTE))
+                            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url)))))
+                    }
+                    if (step == MAX_STEPS - 1) add(Role.BLAZE, "I've taken a lot of steps on this one, so I'm pausing here. Tell me if you want me to keep going.")
+                }
+            } catch (e: CancellationException) {
+                add(Role.STEP, "Stopped.")
+                throw e
+            } catch (e: LlmClient.LlmException) {
+                add(Role.ERROR, e.message ?: "Something went wrong.")
+            } catch (e: Exception) {
+                com.blaze.assistant.device.CrashLog.error("agent loop", e)
+                add(Role.ERROR, "Something went wrong: ${e.message}")
+            } finally {
+                thinking = ""
+                mood = Mood.IDLE
+                currentStep = 0
+                persist()
+                announce()
+                learnAfterTurn()
+            }
+        }
+
+        /** Runs specialists: non-phone ones in parallel, phone ones one after another. */
+        suspend fun delegate(tasks: JSONArray): String = kotlinx.coroutines.coroutineScope {
+            val all = tools()
+            val jobs = (0 until minOf(tasks.length(), 6)).map { i ->
+                val o = tasks.getJSONObject(i)
+                val spec = Specialists.byId(o.optString("specialist")) ?: Specialists.builtIn.first()
+                Triple(i, spec, o.optString("task"))
+            }
+            val phoneLock = kotlinx.coroutines.sync.Mutex()
+            val results = jobs.map { (i, spec, task) ->
+                async {
+                    add(Role.STEP, "${spec.name} started: ${task.take(60)}")
+                    val r = try {
+                        if ("phone" in spec.groups) phoneLock.withLock { runSpecialist(spec, task, all) } else runSpecialist(spec, task, all)
+                    } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    add(Role.STEP, "${spec.name} finished")
+                    "## ${i + 1}. ${spec.name}\n$r"
+                }
+            }.map { it.await() }
+            results.joinToString("\n\n")
+        }
+
+        private suspend fun runSpecialist(spec: Specialists.Spec, task: String, all: JSONArray): String {
+            val tools = Specialists.filter(all, spec)
+            val msgs = JSONArray()
+                .put(JSONObject().put("role", "system").put("content", "You are Blaze's ${spec.name} specialist. ${spec.prompt}\nIt is ${SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())}." +
+                    Memory.promptBlock(task) + "\nWhen done, reply with the result only."))
+                .put(JSONObject().put("role", "user").put("content", task))
+            val shots = mutableListOf<String>()
+            for (step in 0 until 14) {
+                val reply = LlmClient.complete(msgs, if (tools.length() > 0) tools else null, null, null, LlmClient.Lane.STEPS)
+                reply.remove("_reasoning")
+                try { Usage.record(msgs, reply, LlmClient.lastUsage) } catch (_: Exception) { }
+                msgs.put(reply)
+                val calls = reply.optJSONArray("tool_calls")
+                if (calls == null || calls.length() == 0) return ReplyParts.split(reply.optString("content")).text.ifBlank { "(no result)" }
+                for (i in 0 until calls.length()) {
+                    val call = calls.getJSONObject(i)
+                    val fn = call.getJSONObject("function")
+                    val name = fn.getString("name")
+                    val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }
+                    var result = runTool(name, args, shots)
+                    if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
+                    msgs.put(JSONObject().put("role", "tool").put("tool_call_id", call.optString("id", "s$step$i")).put("name", name).put("content", result.take(12000)))
+                }
+                shots.lastOrNull()?.let { url -> shots.clear()
+                    msgs.put(JSONObject().put("role", "user").put("content", JSONArray()
+                        .put(JSONObject().put("type", "text").put("text", SHOT_NOTE))
+                        .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url))))) }
+            }
+            return "Stopped after 14 steps without finishing."
+        }
+
+        /** Fresh compact screen after an action, so the model doesn't spend a turn on read_screen. */
+        suspend fun screenAfter(result: String): String {
+            val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance ?: return ""
+            if (!Settings.phoneControl || result.startsWith("Error") || result.startsWith("No app") || result.startsWith("Phone control is off")) return ""
+            svc.settle(1500, 250)
+            return "\n\nScreen now:\n" + svc.readScreen()
+        }
+
+        suspend fun runTool(name: String, args: JSONObject, shots: MutableList<String>): String {
+            val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
+            // Record phone actions (with the element's label, since numbers change) for task replay.
+            if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "open_url", "search_in_app") && trace.length() < 40) {
+                val label = args.optString("text").takeIf { name == "tap" && it.isNotBlank() }
+                    ?: if (name == "tap" || name == "type_text") svc?.labelOf(args.optInt("element")).orEmpty() else ""
+                trace.put(JSONObject().put("tool", name).put("args", JSONObject(args.toString()).apply { remove("element") }).put("label", label))
+            }
+            return when (name) {
+                "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact")) }
+                "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
+                "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
+                "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
+                "delegate" -> delegate(args.optJSONArray("tasks") ?: JSONArray())
+                "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
+                "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
+                "look_at_screen" -> {
+                    add(Role.STEP, "Looking at a screenshot")
+                    val shot = PhoneTools.screenshot()
+                    if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
+                }
+                "create_routine", "list_routines", "delete_routine" -> {
+                    add(Role.STEP, if (name == "create_routine") "Scheduling \"${args.optString("name")}\"" else "Checking routines")
+                    try { com.blaze.assistant.routine.Routines.run(name, args) } catch (e: Exception) { "Error: ${e.message}" }
+                }
+                in com.blaze.assistant.phone.Skills.names -> {
+                    add(Role.STEP, com.blaze.assistant.phone.Skills.describe(name, args))
+                    com.blaze.assistant.phone.Skills.run(app, name, args)
+                }
+                in Learning.toolNames -> {
+                    add(Role.STEP, when (name) { "run_skill" -> "Replaying skill \"${args.optString("name")}\""; "skill_manage" -> "Saving a skill"; else -> "Searching past chats" })
+                    try { Learning.run(app, name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                }
+                "search_screen_memory" -> { add(Role.STEP, "Searching screen memory"); ScreenMemory.search(app, args.optString("query"), args.optString("app").ifBlank { null }) }
+                "recent_notifications" -> { add(Role.STEP, "Checking notifications"); com.blaze.assistant.notify.NotificationBrain.list(args.optString("app").ifBlank { null }, args.optDouble("hours", 6.0)) }
+                "reply_to_notification" -> { add(Role.STEP, "Replying"); com.blaze.assistant.notify.NotificationBrain.reply(app, args.optInt("number"), args.optString("text")) }
+                "do_actions" -> {
+                    val steps = args.optJSONArray("steps") ?: JSONArray()
+                    val log = StringBuilder()
+                    for (i in 0 until minOf(steps.length(), 8)) {
+                        val st = steps.getJSONObject(i)
+                        val act = st.optString("action").let { if (it == "type") "type_text" else it }
+                        val sub = JSONObject(st.toString()).apply { remove("action") }
+                        val r = runTool(act, sub, shots)
+                        log.append("${i + 1}. $act: ${r.take(200)}\n")
+                        if (r.startsWith("Error") || r.startsWith("No element") || r.contains("did NOT approve") || r.startsWith("Unknown")) { log.append("Stopped at step ${i + 1}."); break }
+                        if (i < steps.length() - 1 && act != "wait") svc?.settle(900, 200)
+                    }
+                    log.toString()
+                }
+                "tap" -> {
+                    add(Role.STEP, PhoneTools.describe(name, args))
+                    val label = args.optString("text").ifBlank { svc?.labelOf(args.optInt("element")).orEmpty() }
+                    if (Settings.confirmRisky && risky.containsMatchIn(label) &&
+                        !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap"))
+                        "The user did NOT approve tapping \"$label\". Don't retry; tell them it's ready for them to finish."
+                    else PhoneTools.run(app, name, args)
+                }
+                else -> when {
+                    com.blaze.assistant.connect.Mcp.handles(name) -> { add(Role.STEP, "Using ${name.removePrefix("mcp_").substringBefore('_')}"); com.blaze.assistant.connect.Mcp.call(name, args) }
+                    com.blaze.assistant.connect.Connectors.handles(name) -> { add(Role.STEP, com.blaze.assistant.connect.Connectors.describe(name)); com.blaze.assistant.connect.Connectors.run(app, name, args) }
+                    else -> { add(Role.STEP, PhoneTools.describe(name, args)); PhoneTools.run(app, name, args) }
+                }
+            }
+        }
+
+        /** After a turn: summary, memories and skills in the background (see Learning). */
+        fun learnAfterTurn() {
+            if (!Settings.autoLearn) return
+            val reply = msgs.lastOrNull { it.role == Role.BLAZE } ?: return
+            if (reply.meta.startsWith("⚡")) return
+            val all = msgs
+            val lastUser = msgs.indexOfLast { it.role == Role.USER }; if (lastUser < 0) return
+            val exchange = msgs.drop(maxOf(0, lastUser - 4)).joinToString("\n") { m ->
+                when (m.role) { Role.USER -> "User: "; Role.BLAZE -> "Blaze: "; Role.STEP -> "  (step) "; Role.ERROR -> "  (error) " } + m.text.take(1500) }
+            if (msgs.drop(lastUser).any { it.role == Role.ERROR }) return
+            val t = JSONArray(trace.toString())
+            val cid = id
+            val hasSummary = summary.isNotBlank()
+            io.launch {
+                val chip = Learning.review(cid, exchange, t, hasSummary) { _, s -> scope.launch { summary = s; persist() } }
+                if (chip != null) scope.launch { addMeta(reply.id, chip); persist() }
+            }
+        }
+
+        /** When Blaze finishes while you're in another app, post its answer as a notification. */
+        fun announce() {
+            if (sessions.values.none { it !== this && it.job?.isActive == true }) Notifier.doneWorking()
+            val last = msgs.lastOrNull() ?: return
+            if (last.role != Role.BLAZE && last.role != Role.ERROR) return
+            if (Voice.lastTurnByVoice && Settings.speakReplies) Voice.speak(last.text)
+            try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
+            if (this === cur && (inForeground || overlayOpen)) return
+            // A chat you left kept working: say which one finished.
+            Notifier.reply(if (this === cur) last.text else "${title.ifBlank { "A chat" }}: ${last.text}", last.role == Role.ERROR)
+        }
     }
 }

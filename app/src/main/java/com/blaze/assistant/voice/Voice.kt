@@ -101,7 +101,7 @@ object Voice {
     fun cancelListening() {
         recognizer?.let { it.cancel(); it.destroy() }
         recognizer = null
-        if (_state.value == State.LISTENING) _state.value = State.IDLE
+        if (_state.value == State.LISTENING) { _state.value = State.IDLE; WakeWordService.resume(app) }
     }
 
     fun speak(text: String) {

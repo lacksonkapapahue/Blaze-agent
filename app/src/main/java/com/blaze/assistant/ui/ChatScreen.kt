@@ -367,6 +367,7 @@ private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: ()
 private fun Sidebar(onClose: () -> Unit, onNew: () -> Unit, onAllChats: () -> Unit, onPage: (String) -> Unit, onOpenChat: (String) -> Unit) {
     val c = LocalBlaze.current
     val chats by Agent.chats.collectAsState()
+    val busy by Agent.busyChats.collectAsState()
     val current by Agent.chatId.collectAsState()
     var q by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { Agent.refreshChats() }
@@ -410,6 +411,7 @@ private fun Sidebar(onClose: () -> Unit, onNew: () -> Unit, onAllChats: () -> Un
                     if (ch.pinned) { Box(Modifier.size(5.dp).background(c.accent)); Spacer(Modifier.width(8.dp)) }
                     Text(ch.title.ifBlank { "Untitled" }, maxLines = 1, modifier = Modifier.weight(1f),
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.body))
+                    if (ch.id in busy) Label("Working", color = c.accent, size = 9.sp)
                 }
             }
             if (shown.isEmpty()) Text("No chats yet", modifier = Modifier.padding(20.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))

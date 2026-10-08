@@ -116,6 +116,20 @@ object Notifier {
         try { NotificationManagerCompat.from(app).notify(ID_WAKE, n) } catch (_: SecurityException) { }
     }
 
+    private const val ID_WAKE_BLOCKED = 6
+    /** Android silences a background mic; one tap brings Blaze forward and the wake word works again. */
+    fun wakeBlocked() {
+        if (!allowed()) return
+        val pi = PendingIntent.getActivity(app, 6, Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra("restart_wake", true), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val n = NotificationCompat.Builder(app, CH_REPLY).setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
+            .setContentTitle("\u201cHey Blaze\u201d is paused by Android")
+            .setContentText("Tap once to turn the wake word back on.")
+            .setAutoCancel(true).setContentIntent(pi).setOnlyAlertOnce(true).build()
+        try { NotificationManagerCompat.from(app).notify(ID_WAKE_BLOCKED, n) } catch (_: SecurityException) { }
+    }
+    fun clearWakeBlocked() = try { NotificationManagerCompat.from(app).cancel(ID_WAKE_BLOCKED) } catch (_: Exception) { }
+
     fun clearReplies() = NotificationManagerCompat.from(app).cancel(ID_REPLY)
 
     /** Approval request with Allow / Don't buttons. */

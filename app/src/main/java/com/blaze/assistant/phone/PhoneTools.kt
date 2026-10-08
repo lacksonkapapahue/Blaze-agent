@@ -29,12 +29,18 @@ object PhoneTools {
         put(fn("read_screen", "Read what is currently on the screen: the foreground app and a numbered list of elements. Call this before tapping or typing, and again after acting to check the result."))
         if (android.os.Build.VERSION.SDK_INT >= 30)
             put(fn("look_at_screen", "Take a screenshot and look at it. Use when read_screen isn't enough: images, maps, games, video, or to check how something looks."))
-        put(fn("tap", "Tap an element from the last read_screen.",
+        put(fn("tap", "Tap an element from the latest screen by its number, or by its visible text with 'text' (safer when numbers may be stale).",
             JSONObject().put("element", p("integer", "Element number"))
-                .put("long_press", p("boolean", "Long-press instead of tap")), listOf("element")))
-        put(fn("type_text", "Type text into a text field from the last read_screen (replaces its content).",
+                .put("text", p("string", "Visible text or description of the element, instead of a number"))
+                .put("long_press", p("boolean", "Long-press instead of tap"))))
+        put(fn("type_text", "Type into a text field (replaces its content). A search icon/bar works too: it's tapped first. Set submit=true to press Enter/Search after typing.",
             JSONObject().put("element", p("integer", "Element number of the field"))
-                .put("text", p("string", "Text to type")), listOf("element", "text")))
+                .put("text", p("string", "Text to type"))
+                .put("submit", p("boolean", "Press the keyboard's Enter/Search key after typing")), listOf("element", "text")))
+        put(fn("search_in_app", "Open an app straight to search results for a query, with no tapping: YouTube, YouTube Music, Spotify, Play Store, Google Maps, Google, Chrome, TikTok, X, Netflix, Amazon. Use play=true to start playing the top music/video match where the app supports it. Best first step for 'play X on Y' or 'search Y for X'.",
+            JSONObject().put("app", p("string", "App name, e.g. YouTube"))
+                .put("query", p("string", "What to search for"))
+                .put("play", p("boolean", "Try to start playing the first result (music/video apps)")), listOf("app", "query")))
         put(fn("scroll", "Scroll the screen or a scrollable element.",
             JSONObject().put("direction", JSONObject().put("type", "string")
                 .put("enum", JSONArray(listOf("up", "down", "left", "right"))))
@@ -73,6 +79,7 @@ object PhoneTools {
         "compose_sms" -> "Drafting a text"
         "set_alarm" -> "Setting an alarm for %02d:%02d".format(args.optInt("hour"), args.optInt("minute"))
         "set_timer" -> "Starting a timer"
+        "search_in_app" -> "Searching ${args.optString("app")} for \u201c${args.optString("query").take(40)}\u201d"
         "wait" -> "Waiting a moment"
         else -> name
     }
@@ -84,8 +91,14 @@ object PhoneTools {
             when (name) {
                 "open_app" -> openApp(ctx, args.getString("app_name"))
                 "read_screen" -> svc?.readScreen() ?: needSvc()
-                "tap" -> svc?.tap(args.getInt("element"), args.optBoolean("long_press")) ?: needSvc()
-                "type_text" -> svc?.type(args.getInt("element"), args.getString("text")) ?: needSvc()
+                "tap" -> when {
+                    svc == null -> needSvc()
+                    args.optString("text").isNotBlank() && !args.has("element") -> svc.tapText(args.optString("text"), args.optBoolean("long_press"))
+                    args.has("element") -> svc.tap(args.getInt("element"), args.optBoolean("long_press"))
+                    else -> "Give an element number or its text."
+                }
+                "type_text" -> svc?.type(args.getInt("element"), args.getString("text"), args.optBoolean("submit")) ?: needSvc()
+                "search_in_app" -> AppSearch.run(ctx, args.optString("app"), args.optString("query"), args.optBoolean("play"))
                 "scroll" -> svc?.scroll(args.getString("direction"),
                     if (args.has("element")) args.getInt("element") else null) ?: needSvc()
                 "press_button" -> svc?.press(args.getString("button")) ?: needSvc()
