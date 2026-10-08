@@ -168,7 +168,7 @@ object PhoneTools {
         val intent = pm.getLaunchIntentForPackage(best.first.activityInfo.packageName)
             ?: return "Couldn't open ${best.second}."
         start(ctx, intent)
-        delay(1200)
+        BlazeAccessibilityService.instance?.settle(maxMs = 2000, quietMs = 300) ?: delay(900)
         return "Opened ${best.second}."
     }
 }

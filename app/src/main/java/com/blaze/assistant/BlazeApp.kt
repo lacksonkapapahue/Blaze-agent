@@ -10,6 +10,8 @@ class BlazeApp : Application() {
         Settings.init(this)
         com.blaze.assistant.agent.Memory.init(this)
         com.blaze.assistant.agent.Usage.init(this)
+        com.blaze.assistant.agent.Learning.init(this)
+        com.blaze.assistant.connect.Mcp.load()
         Agent.init(this)
         com.blaze.assistant.routine.Routines.init(this)
         com.blaze.assistant.notify.Notifier.init(this)

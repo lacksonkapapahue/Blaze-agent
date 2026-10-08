@@ -104,10 +104,12 @@ fun BlazeTheme(content: @Composable () -> Unit) {
 
 /** Uppercase mono label, like the site's eyebrows and nav. */
 @Composable
-fun Label(text: String, color: Color = LocalBlaze.current.sub, size: TextUnit = 11.sp, modifier: Modifier = Modifier) {
+fun Label(text: String, color: Color = LocalBlaze.current.sub, size: TextUnit = 11.sp, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE) {
     Text(
         text.uppercase(),
         modifier = modifier,
+        maxLines = maxLines,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         style = TextStyle(fontFamily = Type.Mono, fontSize = size, letterSpacing = 0.14.em, color = color)
     )
 }

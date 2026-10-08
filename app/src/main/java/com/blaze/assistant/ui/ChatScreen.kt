@@ -665,6 +665,8 @@ private fun Actions(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, 
         Label("·", color = c.weak, size = 10.sp)
         Label("Retry", color = if (canAct) c.sub else c.weak, size = 10.sp, modifier = Modifier
             .clickable(enabled = canAct) { Agent.retry(m.id) }.padding(horizontal = 6.dp, vertical = 8.dp))
+        if (m.meta.isNotBlank()) Label(m.meta, color = if (m.meta.startsWith("⚡")) c.accent else c.weak, size = 9.sp,
+            modifier = Modifier.padding(start = 6.dp).weight(1f, fill = false), maxLines = 1)
     }
 }
 

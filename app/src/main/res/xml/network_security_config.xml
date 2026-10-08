@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS everywhere, except plain HTTP to this phone (on-device Needle runner, OAuth loopback)
+     and to a self-hosted gateway/MCP server the user adds (e.g. OmniRoute on their own PC). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

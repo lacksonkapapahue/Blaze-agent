@@ -59,13 +59,14 @@ data class SettingsPage(val id: String, val title: String, val sub: String)
 
 val settingsPages = listOf(
     SettingsPage("ai", "AI & model", "Provider, key, model, reasoning, follow-ups"),
+    SettingsPage("connections", "Connections", "Google, GitHub, Spotify, Notion, Slack, MCP"),
     SettingsPage("persona", "Personality", "How Blaze talks"),
     SettingsPage("control", "Phone control", "Accessibility, skills, permissions"),
     SettingsPage("commands", "Slash commands", "Your own /commands and prompt skills"),
     SettingsPage("voice", "Voice & wake word", "Hey Blaze, spoken replies, default assistant"),
     SettingsPage("orb", "Floating orb", "Keep Blaze over other apps"),
     SettingsPage("routines", "Routines", "Things Blaze does on a schedule"),
-    SettingsPage("memory", "Memory", "What Blaze remembers about you"),
+    SettingsPage("memory", "Memory & learning", "What Blaze remembers and has learned"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
     SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
     SettingsPage("backup", "Backup", "Export or import everything")
@@ -111,13 +112,14 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                     Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
                 }
                 "ai" -> AiPage()
+                "connections" -> ConnectionsPage()
                 "persona" -> PersonaSection()
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)
                 "commands" -> CommandsSection()
                 "voice" -> VoiceSection()
                 "orb" -> OrbSection()
                 "routines" -> RoutinesSection()
-                "memory" -> MemorySection()
+                "memory" -> { MemorySection(); LearningSection() }
                 "usage" -> UsageSection()
                 "privacy" -> SecuritySection()
                 "backup" -> BackupSection()
@@ -154,6 +156,9 @@ private fun AiPage() {
     Field("Your name", name, { name = it; Settings.userName = it }, "What should Blaze call you?")
     ProviderPicker(pid) { switchTo(it) }
     val prov = Providers.byId(pid)
+    if (pid == Providers.AUTO) {
+        AutoRouterSection()
+    } else {
     Field("${prov.name} key", key, { key = it; Settings.apiKey = it }, prov.keyHint, secret = true)
     if (prov.keyPage.isNotBlank()) {
         val uri = LocalUriHandler.current
@@ -167,9 +172,12 @@ private fun AiPage() {
         ModelPicker(model, key, pid, base) { model = it; Settings.model = it }
         QuotaPanel(key, pid, model, base)
     }
+    }
     Spacer(Modifier.height(10.dp))
     ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
     ToggleRow("Suggested follow-ups", "Three tap-to-send ideas under each answer", fu) { fu = !fu; Settings.followups = fu }
+    FastLaneSection()
+    StepsModelSection()
 }
 
 @Composable
@@ -190,6 +198,7 @@ private fun ControlPage(a11yOn: Boolean, onOpenAccessibility: () -> Unit) {
     if (!a11yOn) Text("If Android calls it a restricted setting: App info → Blaze → ⋮ → Allow restricted settings, then try again.",
         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 18.sp, color = c.sub), modifier = Modifier.padding(top = 8.dp))
     SkillsSection()
+    NotificationAccessRow()
 }
 
 @Composable
@@ -243,7 +252,7 @@ private fun SquareToggle(on: Boolean) {
 }
 
 @Composable
-private fun Field(label: String, value: String, onChange: (String) -> Unit, placeholder: String, secret: Boolean = false) {
+internal fun Field(label: String, value: String, onChange: (String) -> Unit, placeholder: String, secret: Boolean = false) {
     val c = LocalBlaze.current
     Label(label, modifier = Modifier.padding(bottom = 8.dp))
     Box(Modifier.fillMaxWidth().hairline(c.hair).padding(horizontal = 14.dp, vertical = 14.dp)) {
@@ -454,7 +463,7 @@ private fun QuotaPanel(key: String, pid: String, model: String, base: String) {
 
 
 @Composable
-private fun ToggleRow(title: String, sub: String, on: Boolean, onToggle: () -> Unit) {
+internal fun ToggleRow(title: String, sub: String, on: Boolean, onToggle: () -> Unit) {
     val c = LocalBlaze.current
     Row(
         Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable(onClick = onToggle).padding(vertical = 16.dp),

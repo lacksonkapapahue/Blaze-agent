@@ -41,7 +41,35 @@ class BlazeAccessibilityService : AccessibilityService() {
         if (com.blaze.assistant.agent.Settings.orbPinned) com.blaze.assistant.ui.Overlay.showOrb(this)
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    /** Time of the last screen change, so actions can wait for the UI to settle instead of sleeping. */
+    @Volatile private var lastEventAt = 0L
+    @Volatile private var lastWindowPkg = ""
+
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event == null) return
+        lastEventAt = android.os.SystemClock.uptimeMillis()
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString().orEmpty()
+            if (pkg.isNotEmpty() && pkg != lastWindowPkg && pkg != packageName) {
+                lastWindowPkg = pkg
+                com.blaze.assistant.agent.ScreenMemory.onWindow(this, pkg)
+            }
+        }
+    }
+
+    /**
+     * Wait until the screen has been quiet for [quietMs] (no content changes), at most [maxMs].
+     * Much faster than a fixed sleep when the app reacts quickly.
+     */
+    suspend fun settle(maxMs: Long = 1500, quietMs: Long = 250) {
+        val start = android.os.SystemClock.uptimeMillis()
+        kotlinx.coroutines.delay(80)
+        while (true) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastEventAt >= quietMs || now - start >= maxMs) return
+            kotlinx.coroutines.delay(50)
+        }
+    }
     override fun onInterrupt() {}
 
     override fun onDestroy() {
@@ -92,7 +120,8 @@ class BlazeAccessibilityService : AccessibilityService() {
         sb.append("Elements (use the number in [ ] with tap/type/scroll):\n")
         walk(root, sb, 0)
         if (elements.isEmpty()) sb.append("(nothing readable on screen)\n")
-        return sb.toString().take(12_000)
+        val out = sb.toString()
+        return if (out.length <= 6_000) out else out.take(6_000) + "\n…(more below; scroll to see it)"
     }
 
     private fun walk(node: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int) {
@@ -134,6 +163,14 @@ class BlazeAccessibilityService : AccessibilityService() {
     // ---------- Acting ----------
 
     /** The visible words of element [id], used to spot risky taps like "Send" or "Pay". */
+    /** After read_screen: the element whose text or description matches [label] best (for task replay). */
+    fun findByLabel(label: String): Int? {
+        val l = label.trim().lowercase(); if (l.isEmpty()) return null
+        val labels = elements.indices.map { labelOf(it).trim().lowercase() }
+        labels.indexOfFirst { it == l }.takeIf { it >= 0 }?.let { return it }
+        return labels.indexOfFirst { it.isNotEmpty() && (it.contains(l) || l.contains(it)) }.takeIf { it >= 0 }
+    }
+
     fun labelOf(id: Int): String {
         val n = element(id) ?: return ""
         val own = listOfNotNull(n.text?.toString(), n.contentDescription?.toString()).joinToString(" ").trim()
@@ -165,7 +202,7 @@ class BlazeAccessibilityService : AccessibilityService() {
         val node = element(id) ?: return "No element [$id]. Call read_screen again."
         if (!node.isEditable) {
             node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            delay(300)
+            settle(400, 120)
         }
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply {
