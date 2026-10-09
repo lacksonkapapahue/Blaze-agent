@@ -31,20 +31,22 @@ data class ChatMessage(val id: Long, val role: Role, val text: String, val files
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
 object ReplyParts {
     private val thinkRe = Regex("<(think|thought|thinking)>([\\s\\S]*?)(</\\1>|$)", RegexOption.IGNORE_CASE)
-    private val fuRe = Regex("<<\\s*follow-?ups?\\s*:([\\s\\S]*?)(>>|$)", RegexOption.IGNORE_CASE)
+    // Tolerant: "<<follow-ups: a | b>>", "<</follow-ups: a | b>>", "<follow ups: a|b>", "<<followups:a|b" at the end.
+    private val fuRe = Regex("<{1,2}\\s*/?\\s*follow[\\s_-]?ups?\\s*:([\\s\\S]*?)(>{1,2}|$)", RegexOption.IGNORE_CASE)
 
     data class Parts(val text: String, val thinking: String, val followups: List<String>)
 
-    fun split(raw: String): Parts {
+    fun split(raw: String, final: Boolean = false): Parts {
         val thinking = thinkRe.findAll(raw).joinToString("\n\n") { it.groupValues[2].trim() }
         var text = thinkRe.replace(raw, "")
         val fu = fuRe.find(text)
-        val followups = fu?.takeIf { it.groupValues[2] == ">>" }?.groupValues?.get(1)
-            ?.split('|')?.map { it.trim().trim('"', '-', '•', ' ') }?.filter { it.isNotEmpty() }?.take(3) ?: emptyList()
+        val followups = fu?.takeIf { it.groupValues[2].isNotEmpty() || (final && it.groupValues[1].contains('|')) }?.groupValues?.get(1)
+            ?.split('|')?.map { it.trim().trim('"', '-', '•', ' ', '<', '>', '/') }?.filter { it.isNotEmpty() }?.take(3) ?: emptyList()
         if (fu != null) text = text.substring(0, fu.range.first)
-        // Hide a half-typed "<<follow-ups" while streaming.
-        val cut = text.lastIndexOf("<<")
-        if (cut >= 0 && text.length - cut < 16) text = text.substring(0, cut)
+        // Hide a half-typed "<<follow-ups" / "</follow" while streaming.
+        val cut = text.lastIndexOf('<')
+        if (cut >= 0 && text.length - cut < 18 && Regex("^<{1,2}\\s*/?\\s*(f(o(l(l(o(w[\\s_-]?(u(ps?)?)?)?)?)?)?)?)?$", RegexOption.IGNORE_CASE).matches(text.substring(cut).trimEnd()))
+            text = text.substring(0, cut)
         return Parts(text.trim(), thinking, followups)
     }
 }
@@ -502,7 +504,7 @@ When you finish, say what you did in one short sentence.
         }
 
         fun addReply(liveId: Long, raw: String, thinking: String, fu: List<String> = emptyList(), meta: String = "") {
-            val p = ReplyParts.split(raw).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
+            val p = ReplyParts.split(raw, final = true).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
             val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
             val text = p.text.ifEmpty { "Done." }
             if (liveId >= 0) msgs = msgs.map {
@@ -709,6 +711,15 @@ When you finish, say what you did in one short sentence.
             return c.optJSONObject(0)?.optString("text") == SHOT_NOTE
         }
 
+        private var repairedThisStep: List<String> = emptyList()
+
+        /** Rough closeness of two tool names, for "did you mean" hints. */
+        private fun levGuess(a: String, b: String): Int {
+            val x = a.lowercase(); val y = b.lowercase()
+            val common = x.split('_').count { it.isNotBlank() && y.contains(it) }
+            return kotlin.math.abs(x.length - y.length) - common * 6
+        }
+
         suspend fun runLoop() {
             try {
                 val allTools = tools().apply { put(ToolRouter.loadTool()) }
@@ -765,15 +776,30 @@ When you finish, say what you did in one short sentence.
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
                     reply.remove("_reasoning")
                     try { Usage.record(req, reply, LlmClient.lastUsage) } catch (_: Exception) { }
+                    // Gatekeeper: a call written as text becomes a real call; glued/typo'd names,
+                    // broken JSON and wrong types are repaired before anything runs or is sent back.
+                    var unknownCalls: Set<String> = emptySet()
+                    try {
+                        if ((reply.optJSONArray("tool_calls")?.length() ?: 0) == 0) {
+                            val txt = reply.opt("content") as? String
+                            if (txt != null) ToolCalls.fromText(ReplyParts.split(txt).text, allTools)?.let { (c, rest) ->
+                                reply.put("tool_calls", c); reply.put("content", if (rest.isBlank()) JSONObject.NULL else rest)
+                                for (k in 0 until c.length()) ToolStats.add(c.getJSONObject(k).getJSONObject("function").getString("name"), "text_call")
+                            }
+                        }
+                        val rep = ToolCalls.normalize(reply, allTools)
+                        unknownCalls = rep.unknown
+                        repairedThisStep = rep.repaired
+                    } catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("tool gatekeeper", e) }
                     kotlinx.coroutines.yield()
                     history.put(reply)
 
                     // Keep reasoning and follow-up tags out of what's sent back next turn.
                     (reply.opt("content") as? String)?.let { raw ->
-                        val p = ReplyParts.split(raw)
+                        val p = ReplyParts.split(raw, final = true)
                         if (p.text != raw.trim()) {
                             reply.put("content", p.text)
-                            val parts = ReplyParts.split(raw)
+                            val parts = ReplyParts.split(raw, final = true)
                             if (parts.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(parts.thinking) }
                             if (parts.followups.isNotEmpty()) pendingFollowups = parts.followups
                         }
@@ -841,7 +867,10 @@ When you finish, say what you did in one short sentence.
                         val name = fn.getString("name")
                         val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
                             catch (_: Exception) { JSONObject() }
-                        var result = if (pre.containsKey(i)) pre.getValue(i) else if (name == "find_tool") {
+                        var result = if (pre.containsKey(i)) pre.getValue(i) else if (name in unknownCalls) {
+                            val close = ToolCalls.names(allTools).sortedBy { n -> levGuess(n, name) }.take(4)
+                            "Error: there is no tool called \"$name\". Closest real tools: ${close.joinToString(", ")}. Call one of those (exact name), or find_tool to search."
+                        } else if (name == "find_tool") {
                             add(Role.STEP, "Looking for the right tool")
                             val (txt, g) = Autonomy.findTool(allTools, args.optString("need"))
                             groupsOn += g
@@ -854,6 +883,12 @@ When you finish, say what you did in one short sentence.
                         } else if (name == "ask_user") runTool(name, args, shots)
                         else kotlinx.coroutines.withTimeoutOrNull(Settings.str("tool_timeout_s", "180").toLongOrNull()?.coerceIn(30, 900)?.times(1000) ?: 180_000L) { runTool(name, args, shots) }
                             ?: "Error: $name took too long and was stopped. Try a quicker way or run it as a background job." 
+                        ToolStats.add(name, when {
+                            name in unknownCalls -> "unknown"
+                            repairedThisStep.any { it.startsWith(name) || it.contains("→ $name") || (it.startsWith("split") && it.contains(name)) } -> "repaired"
+                            result.startsWith("Error") || result.startsWith("Couldn't") -> "error"
+                            else -> "ok"
+                        })
                         // A tool from a group pulls in the rest of that group (e.g. a stuck run_plan brings tap/scroll).
                         ToolRouter.groupOf(name)?.let { groupsOn += it }
                         if (name !in parallelSafe && name !in setOf("find_tool", "load_tools", "goal", "processes")) actedThisTurn = true
@@ -926,6 +961,11 @@ When you finish, say what you did in one short sentence.
                 val reply = LlmClient.complete(msgs, if (tools.length() > 0) tools else null, null, null, LlmClient.Lane.STEPS)
                 reply.remove("_reasoning")
                 try { Usage.record(msgs, reply, LlmClient.lastUsage) } catch (_: Exception) { }
+                val unknown = try {
+                    if ((reply.optJSONArray("tool_calls")?.length() ?: 0) == 0) (reply.opt("content") as? String)?.let { txt ->
+                        ToolCalls.fromText(txt, all)?.let { (c, rest) -> reply.put("tool_calls", c); reply.put("content", if (rest.isBlank()) JSONObject.NULL else rest) } }
+                    ToolCalls.normalize(reply, all).unknown
+                } catch (_: Exception) { emptySet() }
                 msgs.put(reply)
                 val calls = reply.optJSONArray("tool_calls")
                 if (calls == null || calls.length() == 0) return ReplyParts.split(reply.optString("content")).text.ifBlank { "(no result)" }
@@ -934,7 +974,7 @@ When you finish, say what you did in one short sentence.
                     val fn = call.getJSONObject("function")
                     val name = fn.getString("name")
                     val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }
-                    var result = runTool(name, args, shots)
+                    var result = if (name in unknown) "Error: there is no tool called \"$name\". Use one of the tools you were given (exact name)." else runTool(name, args, shots)
                     if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
                     msgs.put(JSONObject().put("role", "tool").put("tool_call_id", call.optString("id", "s$step$i")).put("name", name).put("content", result.take(12000)))
                 }

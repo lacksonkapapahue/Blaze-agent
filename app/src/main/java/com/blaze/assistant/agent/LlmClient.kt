@@ -55,6 +55,24 @@ object LlmClient {
      */
     suspend fun complete(messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)? = null,
                          onThink: ((String) -> Unit)? = null, lane: Lane = Lane.MAIN): JSONObject {
+        // Every request goes out clean (each tool call answered once, valid JSON, no orphans).
+        // If the provider still refuses its shape (400 INVALID_ARGUMENT and friends), retry once
+        // with the tool turns flattened to plain text, which every provider accepts.
+        val clean = try { ToolCalls.clean(messages) } catch (_: Exception) { messages }
+        return try { completeRaw(clean, tools, onText, onThink, lane) }
+        catch (e: LlmException) {
+            if (!ToolCalls.isShapeError(e)) throw e
+            lastHealed = e.message.orEmpty()
+            try { completeRaw(ToolCalls.flatten(clean), tools, onText, onThink, lane).also { lastRoute = "$lastRoute · healed" } }
+            catch (e2: LlmException) { throw LlmException(ToolCalls.friendly(e2) + "\n\n(" + (e2.message ?: "").take(200) + ")", e2.code, e2.retryAfterSec) }
+        }
+    }
+
+    /** The provider error the last self-heal recovered from (diagnostics). */
+    @Volatile var lastHealed: String = ""
+
+    private suspend fun completeRaw(messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)?,
+                         onThink: ((String) -> Unit)?, lane: Lane): JSONObject {
         // Steps model: a separate, optional model for in-between phone turns. If it fails, the
         // turn falls back to the user's main model instead of surfacing another provider's error.
         val mainAuto = Settings.providerId == Providers.AUTO
@@ -206,7 +224,7 @@ object LlmClient {
                 if (alts.isNotEmpty()) put("models", JSONArray(listOf(t.model) + alts))
             }
             if (tools != null && tools.length() > 0) {
-                put("tools", tools)
+                put("tools", try { ToolCalls.adapt(tools, t.pid, t.model) } catch (_: Exception) { tools })
                 put("tool_choice", "auto")
             }
         }
@@ -263,7 +281,8 @@ object LlmClient {
     private fun readStream(conn: HttpURLConnection, onText: (String) -> Unit, onThink: ((String) -> Unit)?): JSONObject {
         val content = StringBuilder()
         val think = StringBuilder()
-        val calls = sortedMapOf<Int, JSONObject>()
+        val calls = ArrayList<JSONObject>()
+        val slotOf = HashMap<Int, Int>()
         var lastEmit = 0L
         conn.inputStream.bufferedReader().useLines { lines ->
             for (raw in lines) {
@@ -290,17 +309,40 @@ object LlmClient {
                 markFirst()
                 for (i in 0 until tc.length()) {
                     val d = tc.getJSONObject(i)
-                    val idx = d.optInt("index", i)
-                    val acc = calls.getOrPut(idx) {
-                        JSONObject().put("type", "function").put("function", JSONObject().put("name", "").put("arguments", ""))
+                    // Providers disagree on "index": Gemini sends each parallel call whole, in its own
+                    // chunk, often all with index 0. So a chunk that brings a NEW id, or a name for a
+                    // call that already has a finished name + arguments, starts a new call instead of
+                    // being glued onto the last one (that glue produced "device_statusgmail_search").
+                    val idx = if (d.has("index") && !d.isNull("index")) d.optInt("index", i) else i
+                    val newId = d.optString("id", "").takeIf { d.has("id") && !d.isNull("id") && it.isNotBlank() }
+                    val f = d.optJSONObject("function")
+                    val newName = f?.optString("name", "")?.takeIf { f.has("name") && !f.isNull("name") && it.isNotBlank() }
+                    var slot = slotOf[idx]
+                    val cur = slot?.let { calls[it] }
+                    if (cur != null) {
+                        val curId = cur.optString("id", "")
+                        val curFn = cur.getJSONObject("function")
+                        val idChanged = newId != null && curId.isNotBlank() && newId != curId
+                        val nameRestart = newName != null && curFn.optString("name").isNotBlank() &&
+                            ToolCalls.completeJson(curFn.optString("arguments"))
+                        if (idChanged || nameRestart) slot = null
                     }
-                    if (d.has("id") && !d.isNull("id")) acc.put("id", d.getString("id"))
-                    d.optJSONObject("function")?.let { f ->
+                    if (slot == null) {
+                        slot = calls.size
+                        calls.add(JSONObject().put("type", "function").put("function", JSONObject().put("name", "").put("arguments", "")))
+                        slotOf[idx] = slot
+                    }
+                    val acc = calls[slot]
+                    if (newId != null) acc.put("id", newId)
+                    f?.let { fn ->
                         val af = acc.getJSONObject("function")
-                        if (f.has("name") && !f.isNull("name")) af.put("name", af.getString("name") + f.getString("name"))
-                        if (f.has("arguments") && !f.isNull("arguments")) af.put("arguments", af.getString("arguments") + f.getString("arguments"))
+                        if (newName != null) af.put("name", af.getString("name") + newName)
+                        if (fn.has("arguments") && !fn.isNull("arguments")) {
+                            val a = fn.opt("arguments")
+                            af.put("arguments", af.getString("arguments") + (if (a is JSONObject) a.toString() else a.toString()))
+                        }
                     }
-                    // Gemini sends a call whole; keep any extra fields (e.g. thought signatures) it adds.
+                    // Keep each call's own extra fields (Gemini 3 thought signatures must be echoed back).
                     d.optJSONObject("extra_content")?.let { acc.put("extra_content", it) }
                 }
             }
@@ -310,8 +352,15 @@ object LlmClient {
         if (think.isNotEmpty()) msg.put("_reasoning", think.toString())
         if (calls.isNotEmpty()) {
             val arr = JSONArray()
-            calls.values.forEachIndexed { i, c -> if (!c.has("id")) c.put("id", "call_$i"); arr.put(c) }
-            msg.put("tool_calls", arr)
+            val seen = HashSet<String>()
+            calls.forEachIndexed { i, c ->
+                if (c.getJSONObject("function").optString("name").isBlank()) return@forEachIndexed
+                var id = c.optString("id", "").ifBlank { "call_$i" }
+                if (!seen.add(id)) { id = "${id}_$i"; seen.add(id) }
+                c.put("id", id); arr.put(c)
+            }
+            if (arr.length() > 0) msg.put("tool_calls", arr)
+            else if (msg.isNull("content")) msg.put("content", "")
         }
         return msg
     }

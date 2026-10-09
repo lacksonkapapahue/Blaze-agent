@@ -22,6 +22,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.agent.Processes.init(this)
         com.blaze.assistant.agent.Memory.init(this)
         com.blaze.assistant.agent.Usage.init(this)
+        try { com.blaze.assistant.agent.ToolStats.init(this) } catch (_: Exception) { }
         com.blaze.assistant.agent.Learning.init(this)
         com.blaze.assistant.connect.Mcp.load()
         com.blaze.assistant.agent.Traces.init(this)
