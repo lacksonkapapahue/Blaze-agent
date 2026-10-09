@@ -2,11 +2,9 @@ package com.blaze.assistant.phone
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.LocationManager
-import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -21,13 +19,11 @@ object Location {
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()).put("required", JSONArray())))
 
     @Suppress("MissingPermission", "DEPRECATION")
-    fun run(ctx: Context): String {
-        val fine = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    suspend fun run(ctx: Context): String {
         val coarse = ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!fine && !coarse) {
-            try { ctx.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
-            return "Blaze doesn't have location permission. I opened Blaze's App info: Permissions → Location → Allow while using the app. Tell the user that, briefly."
-        }
+        if (!coarse && !com.blaze.assistant.device.Perms.ensure(ctx, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            && ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+            return com.blaze.assistant.device.Perms.denied("location")
         val lm = ctx.getSystemService(LocationManager::class.java)
         if (lm == null || !(try { lm.isLocationEnabled } catch (_: Exception) { true })) return "Location is switched off on the phone (Quick Settings → Location)."
         val best = lm.getProviders(true).mapNotNull { p -> try { lm.getLastKnownLocation(p) } catch (_: Exception) { null } }

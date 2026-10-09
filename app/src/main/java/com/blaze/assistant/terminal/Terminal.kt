@@ -63,66 +63,131 @@ object Terminal {
     private fun builder(cmd: String) = ProcessBuilder("/system/bin/sh", "-c", cmd).directory(home()).redirectErrorStream(true)
         .also { pb -> pb.environment().putAll(env()) }
 
-    // ---------- Interactive session (Terminal screen) ----------
+    // ---------- Interactive sessions (Terminal screen tabs) ----------
 
-    private val _out = MutableStateFlow("")
-    val output: StateFlow<String> = _out
-    private var shell: Process? = null
-    val cwdName get() = "~"
+    /** One shell tab. "phone" = Android sh + BusyBox, "linux" = Alpine via PRoot. */
+    class Session(val id: Int, initialMode: String) {
+        val out = MutableStateFlow("")
+        val mode = MutableStateFlow(initialMode)
+        @Volatile var shell: Process? = null
+        val history = ArrayList<String>()
+        fun append(s: String) { val v = out.value + s; out.value = if (v.length > 120_000) v.takeLast(100_000) else v }
+        val title get() = "${if (mode.value == "linux") "linux" else "sh"} $id"
+    }
 
-    private fun append(s: String) { val v = _out.value + s; _out.value = if (v.length > 120_000) v.takeLast(100_000) else v }
+    private var nextSession = 1
+    val sessions = MutableStateFlow(listOf(Session(nextSession++, "phone")))
+    val active = MutableStateFlow(sessions.value.first())
 
-    /** "phone" = Android sh + BusyBox, "linux" = Alpine via PRoot. */
-    val mode = MutableStateFlow("phone")
+    /** Read-only tab: every command Blaze itself runs, with its output, live. */
+    val agentLog = MutableStateFlow("")
+    fun logAgent(cmd: String, result: String) {
+        val stamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val v = agentLog.value + "[$stamp] $cmd\n${result.take(4000)}\n\n"
+        agentLog.value = if (v.length > 100_000) v.takeLast(80_000) else v
+    }
 
-    fun startShell() {
-        if (shell?.isAlive == true) return
-        if (_out.value.isEmpty()) append(banner())
+    // Back-compat for the active tab.
+    val output: StateFlow<String> get() = active.value.out
+    val mode: MutableStateFlow<String> get() = active.value.mode
+
+    fun newSession(m: String = "phone"): Session {
+        val s = Session(nextSession++, if (m == "linux" && Linux.installed()) "linux" else "phone")
+        sessions.value = sessions.value + s
+        active.value = s
+        startShell()
+        return s
+    }
+
+    fun select(s: Session) { active.value = s; startShell() }
+
+    fun closeSession(s: Session) {
+        s.shell?.destroy(); s.shell = null
+        val left = sessions.value - s
+        sessions.value = left.ifEmpty { listOf(Session(nextSession++, "phone")) }
+        if (active.value == s) active.value = sessions.value.last()
+        startShell()
+    }
+
+    fun startShell(sess: Session = active.value) {
+        if (sess.shell?.isAlive == true) return
+        if (sess.out.value.isEmpty()) sess.append(banner(sess))
         scope.launch {
-            synchronized(this@Terminal) {
-                if (shell?.isAlive == true) return@launch
+            synchronized(sess) {
+                if (sess.shell?.isAlive == true) return@launch
                 try {
                     setup()
-                    val linux = mode.value == "linux" && Linux.installed()
+                    val linux = sess.mode.value == "linux" && Linux.installed()
                     val pb = if (linux) ProcessBuilder(Linux.command(null)).also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }
                              else ProcessBuilder("/system/bin/sh").also { it.environment().putAll(env()) }
                     val p = pb.directory(home()).redirectErrorStream(true).start()
-                    shell = p
-                    append(if (linux) "[Alpine Linux — apk add <package> to install software]\n" else "[phone shell ready]\n")
+                    sess.shell = p
+                    sess.append(if (linux) "[Alpine Linux — apk add <package> to install software]\n" else "[phone shell ready]\n")
                     launch {
                         val buf = CharArray(4096)
                         val r = p.inputStream.bufferedReader()
-                        try { while (true) { val n = r.read(buf); if (n < 0) break; append(String(buf, 0, n)) } } catch (_: Exception) { }
-                        append("\n[shell exited${try { " with code " + p.exitValue() } catch (_: Exception) { "" }}]\n")
+                        try { while (true) { val n = r.read(buf); if (n < 0) break; sess.append(String(buf, 0, n)) } } catch (_: Exception) { }
+                        sess.append("\n[shell exited${try { " with code " + p.exitValue() } catch (_: Exception) { "" }}]\n")
                     }
                 } catch (e: Exception) {
-                    append("Couldn't start the shell: ${e.message}\n")
+                    sess.append("Couldn't start the shell: ${e.message}\n")
                 }
             }
         }
     }
 
-    private fun banner() = "Blaze terminal · ${if (mode.value == "linux") "Alpine Linux" else "sh + BusyBox"} · home is ~\n"
+    private fun banner(s: Session) = "Blaze terminal · ${if (s.mode.value == "linux") "Alpine Linux" else "sh + BusyBox"} · home is ~\n"
 
     fun switchMode(m: String) {
-        if (mode.value == m) return
-        mode.value = m
-        shell?.destroy(); shell = null
-        append("\n— switching to ${if (m == "linux") "Alpine Linux" else "phone shell"} —\n")
-        startShell()
+        val s = active.value
+        if (s.mode.value == m) return
+        s.mode.value = m
+        s.shell?.destroy(); s.shell = null
+        s.append("\n— switching to ${if (m == "linux") "Alpine Linux" else "phone shell"} —\n")
+        startShell(s)
     }
 
     fun input(line: String) {
-        append("$ $line\n")
-        val p = shell
-        if (p == null || !p.isAlive) { startShell(); scope.launch { kotlinx.coroutines.delay(1200); write(line) } } else scope.launch { write(line) }
-    }
-    private fun write(line: String) {
-        try { shell?.outputStream?.let { it.write((line + "\n").toByteArray()); it.flush() } } catch (e: Exception) { append("error: ${e.message}\n") }
+        val s = active.value
+        s.append("$ $line\n")
+        if (line.isNotBlank() && s.history.lastOrNull() != line) { s.history += line; if (s.history.size > 200) s.history.removeAt(0) }
+        val p = s.shell
+        if (p == null || !p.isAlive) { startShell(s); scope.launch { kotlinx.coroutines.delay(1200); write(s, line + "\n") } } else scope.launch { write(s, line + "\n") }
     }
 
-    fun interrupt() { shell?.destroy(); shell = null; append("^C\n"); startShell() }
-    fun clearScreen() { _out.value = "" }
+    /** Raw bytes (control keys): Ctrl-D closes input, others pass through. */
+    fun sendRaw(text: String) { val s = active.value; scope.launch { write(s, text) } }
+    fun eof() { val s = active.value; try { s.shell?.outputStream?.close() } catch (_: Exception) { }; s.append("^D\n") }
+
+    private fun write(s: Session, text: String) {
+        try { s.shell?.outputStream?.let { it.write(text.toByteArray()); it.flush() } } catch (e: Exception) { s.append("error: ${e.message}\n") }
+    }
+
+    fun interrupt() { val s = active.value; s.shell?.destroy(); s.shell = null; s.append("^C\n"); startShell(s) }
+    fun clearScreen() { active.value.out.value = "" }
+
+    /** Tab completion against files in ~ (the interactive shell has no TTY, so we do it here). */
+    fun complete(line: String): String {
+        val token = line.substringAfterLast(' ')
+        val dirPart = token.substringBeforeLast('/', "")
+        val prefix = token.substringAfterLast('/')
+        val dir = when {
+            dirPart.startsWith("~") -> File(home(), dirPart.removePrefix("~").trimStart('/'))
+            dirPart.startsWith("/") -> File(dirPart)
+            dirPart.isEmpty() && token.startsWith("/") -> File("/")
+            else -> File(home(), dirPart)
+        }
+        val matches = (dir.list() ?: emptyArray()).filter { it.startsWith(prefix) }.sorted()
+        if (matches.isEmpty()) return line
+        if (matches.size > 1) {
+            active.value.append(matches.take(40).joinToString("  ") + "\n")
+            val common = matches.reduce { acc, m -> acc.commonPrefixWith(m) }
+            return line.dropLast(prefix.length) + common
+        }
+        val m = matches.first()
+        val isDir = File(dir, m).isDirectory
+        return line.dropLast(prefix.length) + m + if (isDir) "/" else " "
+    }
 
     // ---------- For the agent ----------
 
@@ -152,7 +217,7 @@ object Terminal {
         val out = StringBuilder()
         val reader = launch { try { p.inputStream.bufferedReader().forEachLine { if (out.length < 200_000) out.append(it).append('\n') } } catch (_: Exception) { } }
         val done = withTimeoutOrNull(timeoutSec.coerceIn(1, 600) * 1000L) { while (p.isAlive) kotlinx.coroutines.delay(50); true }
-        if (done == null) { p.destroy(); reader.cancel(); return@withContext out.toString().replace(Regex("$MARK.*\n?"), "").takeLast(8000) + "\n[stopped after ${timeoutSec}s; rerun with background=true for servers or long work, then job_log]" }
+        if (done == null) { p.destroy(); reader.cancel(); return@withContext out.toString().replace(Regex("$MARK.*\n?"), "").takeLast(8000) + "\n[stopped after ${timeoutSec}s; rerun with background=true for servers or long work, then terminal_jobs id=N]" }
         reader.join()
         val code = p.exitValue()
         var raw = out.toString()
@@ -167,7 +232,9 @@ object Terminal {
             else -> ""
         }
         val where = if (linux) linuxCwd else agentCwd().absolutePath.replace(home().absolutePath, "~")
-        "exit $code · cwd $where\n$text".trimEnd() + hint
+        val result = "exit $code · cwd $where\n$text".trimEnd() + hint
+        logAgent("${if (linux) "linux" else "sh"} $ ${cmd.take(300)}", result)
+        result
     }
 
     fun jobLog(id: Int, lines: Int): String = synchronized(jobs) {
@@ -200,8 +267,11 @@ object Terminal {
         synchronized(jobs) { jobs[j.id] = j }
         JobKeeper.start(app)
         scope.launch { try { p.inputStream.bufferedReader().forEachLine { synchronized(j.log) { j.log.append(it).append('\n'); if (j.log.length > 50_000) j.log.delete(0, 20_000) } } } catch (_: Exception) { } }
-        Thread.sleep(800)
-        return "Started job ${j.id} [ID $pid]: $cmd\n" + (if (!p.isAlive) "It already exited (code ${p.exitValue()}).\n" else "") + synchronized(j.log) { j.log.toString().takeLast(1500) }
+        Thread.sleep(1500)
+        logAgent("job ${j.id} $ ${cmd.take(300)}", "(running in background)")
+        val port = Regex("""(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::\]|port)[: ]+(\d{2,5})""", RegexOption.IGNORE_CASE).find(synchronized(j.log) { j.log.toString() } + " " + cmd)?.groupValues?.get(1)
+        val preview = port?.let { "\n[server on port $it: call preview_server port=$it to open it in Blaze's browser]" } ?: ""
+        return "Started job ${j.id} [ID $pid]: $cmd\n" + (if (!p.isAlive) "It already exited (code ${p.exitValue()}).\n" else "") + synchronized(j.log) { j.log.toString().takeLast(1500) } + preview
     }
 
     fun listJobs(): String = synchronized(jobs) {
@@ -252,7 +322,7 @@ object Terminal {
 
     // ---------- Tool definitions ----------
 
-    val names = setOf("run_shell", "terminal_jobs", "terminal_stop", "termux_run", "linux_install")
+    val names = setOf("run_shell", "terminal_jobs", "terminal_stop", "termux_run", "linux_install", "preview_server")
     private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
         JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
     private fun p(t: String, d: String) = JSONObject().put("type", t).put("description", d)
@@ -262,7 +332,10 @@ object Terminal {
             JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job")).put("max_minutes", p("integer", "Time budget for a background job; 0 = none"))
             .put("linux", p("boolean", "Run inside Blaze's Alpine Linux (apk add python3/nodejs/git/openjdk17…) instead of the phone shell")), listOf("command")))
         add(fn("linux_install", "Download and set up Alpine Linux inside Blaze (one time, ~3.5 MB, no root).", JSONObject(), emptyList()))
-        add(fn("terminal_jobs", "List background shell jobs with a short tail of output (job_log for more, job_input to type into one).", JSONObject(), emptyList()))
+        add(fn("terminal_jobs", "Background shell jobs. No id: list them with a short tail of output. With id: that job's latest output (lines, default 80). Type into one with job_input, stop with terminal_stop.",
+            JSONObject().put("id", p("integer", "Job number for its full output")).put("lines", p("integer", "Last N lines, default 80")), emptyList()))
+        add(fn("preview_server", "Open a local server running on the phone (e.g. a dev server started as a background job) in Blaze's built-in browser and show it to the user.",
+            JSONObject().put("port", p("integer", "Port, e.g. 8000")).put("path", p("string", "Optional path, e.g. /index.html")), listOf("port")))
         add(fn("terminal_stop", "Stop a background shell job.", JSONObject().put("id", p("integer", "Job number")), listOf("id")))
         if (termuxInstalled(ctx)) add(fn("termux_run", "Run a command in Termux (full Linux: pkg install python nodejs git openjdk-17 gradle, build Android apps, etc.).",
             JSONObject().put("command", p("string", "bash command")).put("background", p("boolean", "Run without opening a Termux window")), listOf("command")))

@@ -14,7 +14,7 @@ object ToolRouter {
 
     /** Always sent. */
     private val core = setOf(
-        "remember", "forget", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user",
+        "remember", "forget", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user", "self_test",
         "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
         // Basic phone control stays in core: it's the most common thing people ask for.
         "run_plan", "open_app", "search_in_app", "read_screen"
@@ -31,14 +31,14 @@ object ToolRouter {
         Group("messages", "texts, calls, contacts, WhatsApp/Telegram, notifications, USSD",
             r("""\b(text|sms|message|whatsapp|telegram|reply|call|ring|dial|phone|contact|number|notification|missed|unread|airtime|bundle|balance|ussd|mtn|airtel|zamtel|mobile money|momo)\b|\*\d"""),
             { it in setOf("send_sms", "compose_sms", "read_messages", "call_contact", "call_number", "dial", "find_contact", "recent_calls",
-                "message_contact", "send_text", "reply_to_notification", "recent_notifications", "run_ussd") }),
+                "message_contact", "send_text", "reply_to_notification", "recent_notifications", "run_ussd", "add_contact", "edit_contact") }),
         Group("device", "alarms, timers, volume, settings toggles, battery, media",
             r("""\b(alarm|timer|volume|mute|loud|wifi|wi-fi|bluetooth|torch|flash|brightness|dnd|disturb|airplane|battery|setting|pause|play|next|skip|music|song|clipboard|copy|paste|notif\w*|share|ringer|silent|vibrate|rotat\w*|hotspot|nfc|location|split|power|screenshot|lock|usage|uninstall|camera|qr|photo|installed|apps?|secure folder|private space|phone model|android version|where am i|near me|nearby|gps|my location|address)\b"""),
             { it in setOf("set_alarm", "set_timer", "set_volume", "toggle_setting", "device_setting", "battery_level", "media_control", "get_location") || it in com.blaze.assistant.phone.AndroidControl.names }),
         Group("schedule", "calendar, routines, triggers (when X do Y)",
             r("""\b(calendar|event|meeting|schedule|remind|reminder|every|daily|tomorrow|tonight|morning|routine|when|whenever|appointment)\b"""),
-            { it in setOf("calendar_events", "add_calendar_event", "gcal_events", "gcal_create", "create_routine", "list_routines", "delete_routine",
-                "create_trigger", "list_triggers", "delete_trigger") }),
+            { it in setOf("calendar_events", "add_calendar_event", "gcal_events", "gcal_create", "create_routine", "list_routines", "delete_routine", "schedule_command",
+                "create_trigger", "list_triggers", "delete_trigger", "move_event", "delete_event") }),
         Group("google", "Gmail, Drive, Google contacts",
             r("""\b(e-?mail|gmail|inbox|mail|drive|doc|document|file)\b"""),
             { it.startsWith("gmail_") || it == "drive_search" || it == "gcontacts_search" }),
@@ -47,7 +47,7 @@ object ToolRouter {
             { it.startsWith("browser_") }),
         Group("terminal", "Linux shell, code, files, Termux",
             r("""\b(shell|terminal|linux|command|script|code|coding|python|node|js|javascript|npm|pip|git|github|repo|clone|commit|push|pull|branch|api|json|csv|http|curl|download|install|file|files|folder|termux|run|compile|build|debug|server|program|calculate|convert)\b"""),
-            { it in setOf("run_shell", "linux_install", "terminal_jobs", "terminal_stop", "termux_run", "git") || it in com.blaze.assistant.terminal.DevTools.names }),
+            { it in setOf("run_shell", "linux_install", "terminal_jobs", "terminal_stop", "termux_run", "git", "schedule_command", "preview_server") || it in com.blaze.assistant.terminal.DevTools.names }),
         Group("apps", "GitHub, Notion, Slack, Spotify connectors",
             r("""\b(github|repo|issue|pull request|pr|notion|slack|spotify|playlist|song|music)\b"""),
             { it.startsWith("github_") || it.startsWith("notion_") || it.startsWith("slack_") || it.startsWith("spotify_") }),

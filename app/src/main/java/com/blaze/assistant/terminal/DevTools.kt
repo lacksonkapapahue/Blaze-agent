@@ -24,7 +24,7 @@ import java.net.URL
 object DevTools {
 
     val names = setOf("file_read", "file_write", "file_edit", "file_list", "file_search", "file_delete",
-        "run_code", "job_log", "job_input", "http_request", "download_file", "export_file", "terminal_status")
+        "run_code", "job_input", "http_request", "download_file", "export_file", "terminal_status")
 
     private lateinit var app: Context
     private fun home() = Terminal.home()
@@ -62,7 +62,6 @@ object DevTools {
                 "file_search" -> search(a)
                 "file_delete" -> delete(a)
                 "run_code" -> runCode(a)
-                "job_log" -> Terminal.jobLog(a.optInt("id"), a.optInt("lines", 80))
                 "job_input" -> Terminal.jobInput(a.optInt("id"), a.optString("text"), a.optBoolean("enter", true))
                 "http_request" -> http(a)
                 "download_file" -> download(a)
@@ -289,8 +288,6 @@ object DevTools {
             JSONObject().put("language", JSONObject().put("type", "string").put("enum", JSONArray(listOf("python", "node", "sh"))))
                 .put("code", p("string", "Full program")).put("packages", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string")).put("description", "pip/npm packages to install first"))
                 .put("timeout_seconds", p("integer", "Default 120, max 600")), listOf("language", "code")),
-        fn("job_log", "Read the latest output of a background job (run_shell background=true).",
-            JSONObject().put("id", p("integer", "Job number")).put("lines", p("integer", "Last N lines, default 80")), listOf("id")),
         fn("job_input", "Type into a running background job's input (answer a y/n prompt, send a command to a REPL or server console).",
             JSONObject().put("id", p("integer", "Job number")).put("text", p("string", "Text to send")).put("enter", p("boolean", "Press Enter after, default true")), listOf("id", "text")),
         fn("http_request", "Call any HTTP API: method, headers, JSON or form body. Returns status and body (JSON pretty-printed). Use for APIs; fetch_page is for reading web pages.",

@@ -368,7 +368,7 @@ When you finish, say what you did in one short sentence.
                 "and facts about them from memory. Answer for THIS phone specifically (exact menu names for its make and Android version), not a list of options for every brand. " +
                 "Ask only for things that live in their head: preferences, choices, consent.")
             append("\nTERMINAL: check terminal_status before assuming a tool exists. Write files with file_write/file_edit (never echo or heredocs), read with file_read, find with file_search. " +
-                "Run programs with run_code (it installs Python/Node and packages itself). Anything over ~30 s or a server goes in background (run_shell background=true), then job_log / job_input. " +
+                "Run programs with run_code (it installs Python/Node and packages itself). Anything over ~30 s or a server goes in background (run_shell background=true), then terminal_jobs id=N / job_input; preview web servers with preview_server; repeat scripts on a schedule with schedule_command. " +
                 "Use the git tool for repos (already signed in to their GitHub). Call APIs with http_request. On an error, read it, fix the cause and retry (up to 3 times) before telling the user; a [hint] line tells you what to try. Give the user results with export_file.")
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
@@ -401,6 +401,8 @@ When you finish, say what you did in one short sentence.
         if (Settings.bool("terminal_tools", true)) com.blaze.assistant.terminal.Terminal.tools(app).forEach { t.put(it) }
         if (Settings.bool("terminal_tools", true)) com.blaze.assistant.terminal.DevTools.tools().forEach { t.put(it) }
         if (Settings.bool("terminal_tools", true)) t.put(com.blaze.assistant.terminal.Git.tool())
+        com.blaze.assistant.phone.PimEdit.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.device.SelfCheck.tool())
         t.put(com.blaze.assistant.phone.Location.tool())
         if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
@@ -434,7 +436,7 @@ When you finish, say what you did in one short sentence.
         com.blaze.assistant.routine.Routines.tools().forEach { t.put(it) }
         com.blaze.assistant.phone.Skills.definitions().forEach { t.put(it) }
         if (Settings.phoneControl) { val p = PhoneTools.definitions(); for (i in 0 until p.length()) t.put(p.get(i)) }
-        return t
+        return ToolGuide.apply(t)
     }
 
     /** True while Blaze's own screen is visible. */
@@ -952,7 +954,15 @@ When you finish, say what you did in one short sentence.
             return "\n\nScreen now:\n" + svc.readScreen(diff = true) + com.blaze.assistant.phone.Watchers.drain()
         }
 
+        /** Every tool call goes through here: a crash or an empty result becomes a plain error with a fix. */
         suspend fun runTool(name: String, args: JSONObject, shots: MutableList<String>): String {
+            val r = try { runToolRaw(name, args, shots) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
+            return if (r.isBlank()) ToolGuide.empty(name) else r
+        }
+
+        suspend fun runToolRaw(name: String, args: JSONObject, shots: MutableList<String>): String {
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
             // Record phone actions (with the element's label, since numbers change) for task replay.
             if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "run_plan", "do_actions", "search_in_app", "read_screen")) com.blaze.assistant.phone.Watchers.taskTick()
@@ -1004,6 +1014,12 @@ When you finish, say what you did in one short sentence.
                     if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete")) "The user did NOT approve deleting that."
                     else com.blaze.assistant.terminal.DevTools.run(app, name, args)
                 }
+                in com.blaze.assistant.phone.PimEdit.names -> {
+                    val (title, detail) = com.blaze.assistant.phone.PimEdit.describe(name, args)
+                    add(Role.STEP, title.removeSuffix("?"))
+                    if (!confirm(title, detail.take(200), if (name == "delete_event") "Delete" else "Save")) "The user did NOT approve that change."
+                    else kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.phone.PimEdit.run(app, name, args) }
+                }
                 com.blaze.assistant.terminal.Git.NAME -> {
                     add(Role.STEP, "git ${args.optString("action")} ${args.optString("repo").ifBlank { args.optString("branch") }}".trim())
                     if (com.blaze.assistant.terminal.Git.risky(args) && !confirm("Run this git command?", "git " + args.optString("args").take(200), "Run")) "The user did NOT approve that git command."
@@ -1011,7 +1027,17 @@ When you finish, say what you did in one short sentence.
                 }
                 com.blaze.assistant.phone.Location.NAME -> { add(Role.STEP, "Checking location"); kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.phone.Location.run(app) } }
                 "linux_install" -> { add(Role.STEP, "Installing Alpine Linux"); com.blaze.assistant.terminal.Linux.install() }
-                "terminal_jobs" -> kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.listJobs() }
+                "terminal_jobs" -> kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    if (args.optInt("id", 0) > 0) com.blaze.assistant.terminal.Terminal.jobLog(args.optInt("id"), args.optInt("lines", 80)) else com.blaze.assistant.terminal.Terminal.listJobs() }
+                "preview_server" -> {
+                    val port = args.optInt("port")
+                    val url = "http://127.0.0.1:$port" + args.optString("path").let { if (it.isBlank()) "" else if (it.startsWith("/")) it else "/$it" }
+                    add(Role.STEP, "Opening localhost:$port")
+                    val r = try { com.blaze.assistant.browser.BrowserEngine.open(app, url, true) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.browser.BrowserTools.show(app) }
+                    if (r.contains("ERR_CONNECTION_REFUSED", true) || r.contains("net::ERR", true)) "Nothing is answering on port $port yet. Check the job with terminal_jobs, or start the server with run_shell background=true.\n$r" else r
+                }
+                "self_test" -> { add(Role.STEP, "Running a self-check"); com.blaze.assistant.device.SelfCheck.report(app) }
                 "terminal_stop" -> com.blaze.assistant.terminal.Terminal.stopJob(args.optInt("id"))
                 "termux_run" -> { add(Role.STEP, "Termux: " + args.optString("command").take(60)); com.blaze.assistant.terminal.Terminal.runInTermux(app, args.optString("command"), args.optBoolean("background", true)) }
                 "delegate" -> delegate(args.optJSONArray("tasks") ?: JSONArray())
@@ -1042,8 +1068,8 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, if (name == "processes") "Checking what's running" else "${args.optString("action").replaceFirstChar { it.uppercase() }} ${args.optString("id")}")
                     try { Processes.run(app, name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
-                "create_routine", "list_routines", "delete_routine" -> {
-                    add(Role.STEP, if (name == "create_routine") "Scheduling \"${args.optString("name")}\"" else "Checking routines")
+                "create_routine", "list_routines", "delete_routine", "schedule_command" -> {
+                    add(Role.STEP, if (name == "create_routine" || name == "schedule_command") "Scheduling \"${args.optString("name")}\"" else "Checking routines")
                     try { com.blaze.assistant.routine.Routines.run(name, args) } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 in com.blaze.assistant.phone.Skills.names -> {

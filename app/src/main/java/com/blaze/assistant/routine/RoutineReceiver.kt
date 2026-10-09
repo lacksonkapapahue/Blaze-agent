@@ -49,6 +49,17 @@ class RoutineService : Service() {
     companion object {
         suspend fun runRoutine(id: Int) {
             val r = Routines.get(id) ?: return
+            if (r.isCommand) {
+                val out = try { com.blaze.assistant.terminal.Terminal.run(r.command, 600, r.linux) } catch (e: Exception) { "exit 1\nError: ${e.message}" }
+                val failed = !out.startsWith("exit 0")
+                com.blaze.assistant.terminal.Terminal.logAgent("[scheduled: ${r.name}] $ ${r.command}", out)
+                if (r.notify == "always" || (r.notify == "on_failure" && failed)) {
+                    val tail = out.lines().drop(1).filter { it.isNotBlank() && !it.startsWith("[hint") }.takeLast(4).joinToString("\n").take(300)
+                    com.blaze.assistant.notify.Notifier.proactive("${if (failed) "\u26A0 " else ""}${r.name} ${if (failed) "failed" else "done"}${if (tail.isNotBlank()) "\n$tail" else ""}", "", failed)
+                }
+                Routines.ran(id)
+                return
+            }
             // Let anything already running finish first.
             withTimeoutOrNull(120_000) { while (Agent.mood.value != Mood.IDLE) delay(1000) }
             Agent.runRoutine(r.name, r.prompt)

@@ -736,7 +736,7 @@ private fun RoutinesSection() {
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(r.name, style = TextStyle(fontFamily = Type.Display, fontSize = 15.sp, color = if (r.enabled) c.ink else c.weak))
-                    Label("${r.timeLabel()} · ${r.daysLabel()}", size = 9.sp)
+                    Label("${if (r.everyMinutes > 0) "" else r.timeLabel() + " · "}${r.daysLabel()}${if (r.isCommand) " · $ " + r.command.take(40) else ""}", size = 9.sp)
                 }
                 Box(Modifier.clickable { com.blaze.assistant.routine.Routines.setEnabled(r.id, !r.enabled) }.padding(10.dp)) {
                     Label(if (r.enabled) "On" else "Off", color = if (r.enabled) c.accent else c.sub, size = 10.sp)

@@ -87,8 +87,21 @@ object Skills {
         else -> name
     }
 
+    /** The runtime permissions each tool needs: asked for in-app the first time instead of failing. */
+    private val needs = mapOf(
+        "find_contact" to arrayOf(Manifest.permission.READ_CONTACTS),
+        "read_messages" to arrayOf(Manifest.permission.READ_SMS),
+        "send_sms" to arrayOf(Manifest.permission.SEND_SMS),
+        "recent_calls" to arrayOf(Manifest.permission.READ_CALL_LOG),
+        "calendar_events" to arrayOf(Manifest.permission.READ_CALENDAR),
+        "add_calendar_event" to arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR),
+    )
+
     suspend fun run(ctx: Context, name: String, a: JSONObject): String = try {
-        when (name) {
+        val want = needs[name]
+        val denied = if (want != null && !com.blaze.assistant.device.Perms.ensure(ctx, *want) && name != "add_calendar_event")
+            com.blaze.assistant.device.Perms.denied(name.replace('_', ' ')) else null
+        denied ?: when (name) {
             "find_contact" -> findContact(ctx, a.getString("name"))
             "read_messages" -> readSms(ctx, a.optString("from").ifBlank { null }, a.optInt("limit", 10))
             "send_sms" -> sendSms(ctx, a.getString("to"), a.getString("message"))

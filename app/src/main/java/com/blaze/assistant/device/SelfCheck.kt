@@ -15,17 +15,51 @@ import org.json.JSONObject
 object SelfCheck {
     data class Item(val name: String, val ok: Boolean, val detail: String, val fix: String = "")
 
-    suspend fun run(ctx: Context): List<Item> {
+    suspend fun run(ctx: Context, includeAi: Boolean = true): List<Item> {
         val out = mutableListOf<Item>()
         // AI
         val t0 = System.currentTimeMillis()
-        val ai = try {
+        if (includeAi) out += try {
             withTimeoutOrNull(25_000) {
                 LlmClient.complete(JSONArray().put(JSONObject().put("role", "user").put("content", "Reply with the single word OK.")), null, null, null, LlmClient.Lane.BACKGROUND)
             }?.let { Item("AI model", true, "${LlmClient.lastRoute.ifBlank { Settings.model }} answered in ${System.currentTimeMillis() - t0} ms") }
                 ?: Item("AI model", false, "No answer in 25 s. Check your connection or try another model.")
         } catch (e: Exception) { Item("AI model", false, e.message?.take(160) ?: "Failed") }
-        out += ai
+        val pid = Settings.providerId
+        val needsKey = pid !in setOf(com.blaze.assistant.agent.Providers.AUTO, "pollinations", com.blaze.assistant.agent.Providers.CUSTOM)
+        val hasKey = !needsKey || Settings.keyFor(pid).isNotBlank()
+        out += Item("API key", hasKey, if (hasKey) "Key present for ${pid}" else "No key saved for $pid (Settings → AI & model).", "settings ai")
+        // Internet
+        val net = try {
+            withTimeoutOrNull(8_000) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                (java.net.URL("https://www.google.com/generate_204").openConnection() as java.net.HttpURLConnection).run { connectTimeout = 6000; readTimeout = 6000; responseCode in 200..399 } } } == true
+        } catch (_: Exception) { false }
+        out += Item("Internet", net, if (net) "Online" else "Can't reach the internet: cloud models, search and downloads won't work.")
+        // Terminal
+        val T = com.blaze.assistant.terminal.Terminal
+        val sh = try { withTimeoutOrNull(10_000) { T.run("echo blaze-ok", 8) }?.contains("blaze-ok") == true } catch (_: Exception) { false }
+        out += Item("Terminal", sh, if (sh) "Phone shell works${if (T.hasBusybox()) " · BusyBox tools ready" else " · BusyBox missing (fewer tools)"}" else "The phone shell didn't answer.")
+        val L = com.blaze.assistant.terminal.Linux
+        val linuxOk = if (L.installed()) try { withTimeoutOrNull(30_000) { T.run("echo linux-ok", 25, true) }?.contains("linux-ok") == true } catch (_: Exception) { false } else false
+        out += Item("Linux", linuxOk || !L.supported(), when {
+            !L.supported() -> "Not supported on this CPU (Termux can be used instead)."
+            !L.installed() -> "Not installed yet. run_code and git set it up automatically, or install it in Settings → Terminal."
+            linuxOk -> "Alpine runs (${L.sizeMb()} MB)"
+            else -> "Installed but didn't start. Reinstall it in Settings → Terminal." }, if (L.supported() && !linuxOk) "settings terminal" else "")
+        val gh = com.blaze.assistant.connect.Connectors.connected("github")
+        out += Item("Git / GitHub", true, if (gh) "GitHub connected: git can push and pull private repos" else "GitHub not connected: git works for public repos only (Settings → Connections).")
+        val free = ctx.filesDir.usableSpace / 1e9
+        out += Item("Storage", free > 0.5, "%.1f GB free for Blaze".format(free))
+        // Runtime permissions
+        val P = Manifest.permission.READ_CONTACTS
+        listOf("Contacts" to arrayOf(P), "Calendar" to arrayOf(Manifest.permission.READ_CALENDAR), "SMS" to arrayOf(Manifest.permission.READ_SMS),
+            "Call log" to arrayOf(Manifest.permission.READ_CALL_LOG), "Location" to arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION)).forEach { (label, perms) ->
+            val ok = Perms.has(ctx, *perms)
+            out += Item("$label permission", true, if (ok) "Allowed" else "Not yet allowed: Blaze will ask the first time it needs it.")
+        }
+        val am = ctx.getSystemService(android.app.AlarmManager::class.java)
+        val exact = android.os.Build.VERSION.SDK_INT < 31 || am?.canScheduleExactAlarms() == true
+        out += Item("Exact alarms", exact, if (exact) "Routines and scheduled jobs run on time" else "Not allowed: routines may run a few minutes late.", "exact_alarms")
         out += Item("Fast lane", FastLane.ready(ctx), when {
             !FastLane.supported(ctx) -> "This phone's chip isn't supported."
             !FastLane.ready(ctx) -> "Model not downloaded (Settings → AI & model)."
@@ -66,4 +100,17 @@ object SelfCheck {
         out += Item("Phone health", w.isEmpty(), if (w.isEmpty()) "Battery ${s.battery}%, ${"%.1f".format(s.freeStorageGb)} GB free" else w.joinToString("; "))
         return out
     }
+
+    /** Text report for the agent's self_test tool. */
+    suspend fun report(ctx: Context): String {
+        val r = run(ctx, includeAi = false)
+        val bad = r.filter { !it.ok }
+        return "Self-check: ${r.size - bad.size}/${r.size} passed.\n" +
+            (if (bad.isEmpty()) "Everything works." else "Problems:\n" + bad.joinToString("\n") { "- ${it.name}: ${it.detail}" }) +
+            "\nOK: " + r.filter { it.ok }.joinToString(", ") { it.name }
+    }
+
+    fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", "self_test")
+        .put("description", "Check Blaze itself: API key, internet, terminal, Linux, git, phone control, notifications, permissions, storage, voice. Use when something isn't working or before a long task; then tell the user exactly what to fix.")
+        .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()).put("required", JSONArray())))
 }

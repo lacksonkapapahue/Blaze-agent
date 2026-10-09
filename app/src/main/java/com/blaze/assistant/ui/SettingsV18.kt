@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -137,21 +138,51 @@ fun DevicePage() {
 fun TerminalPage() {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
-    val out by com.blaze.assistant.terminal.Terminal.output.collectAsState()
-    var line by remember { mutableStateOf("") }
+    val T = com.blaze.assistant.terminal.Terminal
+    val sessions by T.sessions.collectAsState()
+    val sess by T.active.collectAsState()
+    var showBlaze by remember { mutableStateOf(false) }
+    val out by sess.out.collectAsState()
+    val agentOut by T.agentLog.collectAsState()
+    var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue("")) }
+    var histPos by remember { mutableStateOf(-1) }
+    var ctrl by remember { mutableStateOf(false) }
     val scroll = androidx.compose.foundation.rememberScrollState()
-    val mode by com.blaze.assistant.terminal.Terminal.mode.collectAsState()
+    val mode by sess.mode.collectAsState()
     val L = com.blaze.assistant.terminal.Linux
     val lstatus by L.status.collectAsState()
     val installing by L.installing.collectAsState()
     var linuxReady by remember { mutableStateOf(L.installed()) }
     val tscope = androidx.compose.runtime.rememberCoroutineScope()
-    LaunchedEffect(Unit) { com.blaze.assistant.terminal.Terminal.startShell() }
-    LaunchedEffect(out.length) { scroll.animateScrollTo(scroll.maxValue) }
-    Row(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+    LaunchedEffect(sess) { T.startShell(sess) }
+    LaunchedEffect(out.length, agentOut.length, showBlaze) { scroll.animateScrollTo(scroll.maxValue) }
+    fun setLine(t: String) { field = androidx.compose.ui.text.input.TextFieldValue(t, androidx.compose.ui.text.TextRange(t.length)) }
+    fun send() { val l = field.text; if (l.isNotBlank()) { T.input(l); setLine(""); histPos = -1 } }
+    fun insert(t: String) {
+        val v = field
+        val nt = v.text.substring(0, v.selection.start) + t + v.text.substring(v.selection.end)
+        field = androidx.compose.ui.text.input.TextFieldValue(nt, androidx.compose.ui.text.TextRange(v.selection.start + t.length))
+    }
+
+    // Tabs: one per shell session, plus a read-only "Blaze" tab with every command Blaze runs.
+    Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        sessions.forEach { s ->
+            val on = !showBlaze && s == sess
+            Row(Modifier.padding(end = 6.dp).height(34.dp).background(if (on) c.ink else c.paper).hairline(c.hair)
+                .clickable { showBlaze = false; T.select(s) }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Label(s.title, color = if (on) c.paper else c.ink, size = 10.sp)
+                if (sessions.size > 1) Label("  ×", color = if (on) c.paper else c.weak, size = 10.sp, modifier = Modifier.clickable { T.closeSession(s) })
+            }
+        }
+        Box(Modifier.padding(end = 6.dp).height(34.dp).hairline(c.hair).clickable { showBlaze = false; T.newSession(mode) }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+            Label("+", color = c.accent, size = 12.sp) }
+        Box(Modifier.height(34.dp).background(if (showBlaze) c.accent else c.paper).hairline(c.accent).clickable { showBlaze = true }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+            Label("Blaze", color = if (showBlaze) c.paper else c.accent, size = 10.sp) }
+    }
+    if (!showBlaze) Row(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         listOf("phone" to "Phone shell", "linux" to "Linux (Alpine)").forEach { (id, label) ->
             Box(Modifier.weight(1f).height(40.dp).background(if (mode == id) c.ink else c.paper).hairline(c.hair)
-                .clickable { if (id == "phone" || linuxReady) com.blaze.assistant.terminal.Terminal.switchMode(id) }, contentAlignment = Alignment.Center) {
+                .clickable { if (id == "phone" || linuxReady) T.switchMode(id) }, contentAlignment = Alignment.Center) {
                 Label(label, color = if (mode == id) c.paper else if (id == "linux" && !linuxReady) c.weak else c.ink, size = 10.sp) }
         }
     }
@@ -162,35 +193,76 @@ fun TerminalPage() {
                 style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 18.sp, color = c.sub))
             Spacer(Modifier.height(8.dp))
             V18Button(if (installing) "Installing…" else "Install Linux") {
-                if (!installing) tscope.launch { L.install(); linuxReady = L.installed(); if (linuxReady) com.blaze.assistant.terminal.Terminal.switchMode("linux") }
+                if (!installing) tscope.launch { L.install(); linuxReady = L.installed(); if (linuxReady) T.switchMode("linux") }
             }
         }
         Spacer(Modifier.height(10.dp))
     }
-    V18Note(if (mode == "linux") "Alpine Linux. Try: apk update && apk add python3, then python3. Your phone's Blaze files are in ~/phone."
-        else "Android sh plus ~300 BusyBox tools (vi, wget, tar, grep, awk, nc, httpd…). Blaze can use it too.")
+    V18Note(when {
+        showBlaze -> "Every command Blaze runs for you, live, with its output. Read-only."
+        mode == "linux" -> "Alpine Linux. Try: apk update && apk add python3, then python3. Your phone's Blaze files are in ~/phone."
+        else -> "Android sh plus ~300 BusyBox tools (vi, wget, tar, grep, awk, nc, httpd…). Tab completes file names; ↑ ↓ walk your history." })
     Box(Modifier.fillMaxWidth().height(380.dp).background(androidx.compose.ui.graphics.Color(0xFF111110)).padding(10.dp)) {
-        Text(out.ifEmpty { "Starting the shell…" }, modifier = Modifier.verticalScroll(scroll),
+        Text(if (showBlaze) agentOut.ifEmpty { "Nothing yet. When Blaze runs a command, it shows up here." } else out.ifEmpty { "Starting the shell…" },
+            modifier = Modifier.verticalScroll(scroll),
             style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, lineHeight = 17.sp, color = androidx.compose.ui.graphics.Color(0xFFF0F0EE)))
     }
-    Row(Modifier.fillMaxWidth().hairline(c.ink), verticalAlignment = Alignment.CenterVertically) {
-        Label("$", color = c.accent, size = 12.sp, modifier = Modifier.padding(start = 12.dp))
-        Box(Modifier.weight(1f).padding(12.dp)) {
-            if (line.isEmpty()) Text("command", style = TextStyle(fontFamily = Type.Mono, fontSize = 14.sp, color = c.weak))
-            androidx.compose.foundation.text.BasicTextField(line, { line = it }, singleLine = true,
-                textStyle = TextStyle(fontFamily = Type.Mono, fontSize = 14.sp, color = c.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send, autoCorrectEnabled = false),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { if (line.isNotBlank()) { com.blaze.assistant.terminal.Terminal.input(line); line = "" } }),
-                modifier = Modifier.fillMaxWidth())
+    if (!showBlaze) {
+        // Extra keys, like Termux: modifiers, navigation, and the symbols phone keyboards hide.
+        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).background(androidx.compose.ui.graphics.Color(0xFF1C1C1A))) {
+            val keys = listOf("ESC", "CTRL", "TAB", "↑", "↓", "←", "→", "|", "~", "/", "-", ">", "&", ";", "$", "*", "\"")
+            keys.forEach { k ->
+                Box(Modifier.height(40.dp).width(46.dp).background(if (k == "CTRL" && ctrl) c.accent else androidx.compose.ui.graphics.Color.Transparent).clickable {
+                    when (k) {
+                        "ESC" -> { setLine(""); histPos = -1 }
+                        "CTRL" -> ctrl = !ctrl
+                        "TAB" -> setLine(T.complete(field.text))
+                        "↑" -> { val h = sess.history; if (h.isNotEmpty()) { histPos = if (histPos < 0) h.size - 1 else (histPos - 1).coerceAtLeast(0); setLine(h[histPos]) } }
+                        "↓" -> { val h = sess.history; if (histPos >= 0) { histPos++; if (histPos >= h.size) { histPos = -1; setLine("") } else setLine(h[histPos]) } }
+                        "←" -> field = field.copy(selection = androidx.compose.ui.text.TextRange((field.selection.start - 1).coerceAtLeast(0)))
+                        "→" -> field = field.copy(selection = androidx.compose.ui.text.TextRange((field.selection.end + 1).coerceAtMost(field.text.length)))
+                        else -> insert(k)
+                    }
+                }, contentAlignment = Alignment.Center) {
+                    Text(k, style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, color = androidx.compose.ui.graphics.Color(0xFFF0F0EE)))
+                }
+            }
         }
-        Box(Modifier.height(46.dp).width(64.dp).background(c.ink).clickable { if (line.isNotBlank()) { com.blaze.assistant.terminal.Terminal.input(line); line = "" } },
-            contentAlignment = Alignment.Center) { Label("Run", color = c.paper, size = 11.sp) }
-    }
-    Spacer(Modifier.height(8.dp))
-    Row(Modifier.fillMaxWidth()) {
-        V18Button("Ctrl-C", primary = false, modifier = Modifier.weight(1f)) { com.blaze.assistant.terminal.Terminal.interrupt() }
-        Spacer(Modifier.width(8.dp))
-        V18Button("Clear", primary = false, modifier = Modifier.weight(1f)) { com.blaze.assistant.terminal.Terminal.clearScreen() }
+        Row(Modifier.fillMaxWidth().hairline(c.ink), verticalAlignment = Alignment.CenterVertically) {
+            Label(if (ctrl) "^" else "$", color = c.accent, size = 12.sp, modifier = Modifier.padding(start = 12.dp))
+            Box(Modifier.weight(1f).padding(12.dp)) {
+                if (field.text.isEmpty()) Text(if (ctrl) "ctrl + letter (c, d, l, z)" else "command", style = TextStyle(fontFamily = Type.Mono, fontSize = 14.sp, color = c.weak))
+                androidx.compose.foundation.text.BasicTextField(field, { v ->
+                    if (ctrl && v.text.length == field.text.length + 1) {
+                        // CTRL is armed: the next letter is a control key, not text.
+                        when (v.text[v.selection.start.coerceAtLeast(1) - 1].lowercaseChar()) {
+                            'c' -> T.interrupt()
+                            'd' -> T.eof()
+                            'l' -> T.clearScreen()
+                            'z' -> T.sendRaw("\u001A")
+                            'u' -> setLine("")
+                            else -> {}
+                        }
+                        ctrl = false
+                    } else field = v
+                }, singleLine = true,
+                    textStyle = TextStyle(fontFamily = Type.Mono, fontSize = 14.sp, color = c.ink), cursorBrush = androidx.compose.ui.graphics.SolidColor(c.accent),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send, autoCorrectEnabled = false),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
+                    modifier = Modifier.fillMaxWidth())
+            }
+            Box(Modifier.height(46.dp).width(64.dp).background(c.ink).clickable { send() },
+                contentAlignment = Alignment.Center) { Label("Run", color = c.paper, size = 11.sp) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth()) {
+            V18Button("Ctrl-C", primary = false, modifier = Modifier.weight(1f)) { T.interrupt() }
+            Spacer(Modifier.width(8.dp))
+            V18Button("Clear", primary = false, modifier = Modifier.weight(1f)) { T.clearScreen() }
+        }
+    } else {
+        Spacer(Modifier.height(8.dp))
+        V18Button("Clear Blaze log", primary = false) { T.agentLog.value = "" }
     }
     V18Section("Jobs")
     var jobs by remember { mutableStateOf("") }
@@ -203,7 +275,7 @@ fun TerminalPage() {
         V18Section("Linux")
         Mono("Alpine · ${L.sizeMb()} MB on disk")
         Spacer(Modifier.height(8.dp))
-        V18Button("Remove Linux", primary = false) { L.uninstall(); linuxReady = false; com.blaze.assistant.terminal.Terminal.switchMode("phone") }
+        V18Button("Remove Linux", primary = false) { L.uninstall(); linuxReady = false; T.switchMode("phone") }
     }
     V18Section("Termux (optional)")
     val termux = com.blaze.assistant.terminal.Terminal.termuxInstalled(ctx)
