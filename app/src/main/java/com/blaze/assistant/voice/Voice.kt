@@ -44,6 +44,8 @@ object Voice {
                 tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                     override fun onStart(id: String?) { _state.value = State.SPEAKING }
                     override fun onDone(id: String?) {
+                        // A streamed sentence finished: the rest of the reply is still coming, so keep the mic paused.
+                        if (id?.startsWith("part-") == true) { if (tts?.isSpeaking != true) _state.value = State.IDLE; return }
                         _state.value = State.IDLE
                         // Hands-free: after answering a spoken question, listen again for the follow-up.
                         if (com.blaze.assistant.agent.Settings.bool("voice_loop", false) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
@@ -113,11 +115,20 @@ object Voice {
         if (_state.value == State.LISTENING) { _state.value = State.IDLE; WakeWordService.resume(app) }
     }
 
-    fun speak(text: String) {
+    fun speak(text: String, queue: Boolean = false) {
         if (!ttsReady) return
         WakeWordService.pause(app)
         val clean = com.blaze.assistant.ui.Md.plain(text).replace(Regex("[*_`#>•]"), "").take(3900)
-        tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "blaze-${System.currentTimeMillis()}")
+        tts?.speak(clean, if (queue) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH, null, "blaze-${System.currentTimeMillis()}")
+    }
+
+    /** A sentence spoken while the reply is still streaming (queued; the final part follows via speak(queue = true)). */
+    fun speakPart(text: String) {
+        if (!ttsReady) return
+        WakeWordService.pause(app)
+        val clean = com.blaze.assistant.ui.Md.plain(text).replace(Regex("[*_`#>•]"), "").trim().take(3900)
+        if (clean.isBlank()) return
+        tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, "part-${System.currentTimeMillis()}")
     }
 
     fun stopSpeaking() {

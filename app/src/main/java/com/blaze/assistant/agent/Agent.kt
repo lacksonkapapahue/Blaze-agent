@@ -66,6 +66,12 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     private const val MAX_STEPS = 30
     private const val SHOT_NOTE = "[Screenshot of the phone screen]"
     private const val SCREEN_MARK = "Foreground app:"
+    /** Read-only tools that are safe to run side by side. */
+    private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "search_past_chats", "gmail_search", "gmail_read",
+        "gcal_events", "calendar_events", "drive_search", "gcontacts_search", "find_contact", "recent_notifications", "read_messages",
+        "recent_calls", "device_status", "battery_level", "github_issues", "github_my_prs", "github_notifications", "github_search_repos",
+        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing")
+
     private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url", "search_in_app")
     private val ids = AtomicLong(1)
     private lateinit var app: Context
@@ -410,6 +416,9 @@ When you finish, say what you did in one short sentence.
      * one) never stops it or sends its answer to the wrong place.
      */
     class Session(val id: String) {
+        /** Speed plan step 11: text of the current step already handed to TTS while it streamed. */
+        var spokenPrefix = ""
+        var streamedVoice = false
         var title = ""
         var pinned = false
         /** One-line summary written by the learning review (used by search_past_chats). */
@@ -613,6 +622,22 @@ When you finish, say what you did in one short sentence.
             return msgs
         }
 
+        /**
+         * Speak whole sentences while the rest of the reply is still streaming in. The last sentence
+         * is always held back for announce(), which speaks it as the final utterance.
+         */
+        fun speakAsItStreams(text: String) {
+            if (!(Voice.lastTurnByVoice && Settings.speakReplies && Settings.bool("speak_streaming", true))) return
+            if (!text.startsWith(spokenPrefix)) return
+            val ends = Regex("[.!?](\\s|$)|\n").findAll(text, spokenPrefix.length).map { it.range.first + 1 }
+                .filter { e -> text.substring(e).isNotBlank() }.toList()
+            val end = ends.lastOrNull() ?: return
+            if (end - spokenPrefix.length < 2) return
+            Voice.speakPart(text.substring(spokenPrefix.length, end))
+            spokenPrefix = text.substring(0, end)
+            streamedVoice = true
+        }
+
         /** First history index to send: 0 for short chats, else a user message 24 to 48 messages back. */
         fun windowStart(): Int {
             val n = history.length()
@@ -645,6 +670,7 @@ When you finish, say what you did in one short sentence.
                 }
                 var tools = ToolRouter.select(allTools, groupsOn)
                 var firstMs = -1L
+                streamedVoice = false
                 while (trace.length() > 0) trace.remove(0)
                 val turnThink = StringBuilder()
                 val turnStart = System.currentTimeMillis()
@@ -653,6 +679,7 @@ When you finish, say what you did in one short sentence.
                     currentStep = step + 1
                     mood = Mood.THINKING
                     var liveId = -1L
+                    spokenPrefix = ""
                     val before = turnThink.toString()
                     var pendingFollowups = emptyList<String>()
                     val onText: ((String) -> Unit)? = if (Settings.streamReplies) { partial ->
@@ -661,6 +688,7 @@ When you finish, say what you did in one short sentence.
                             if (p.thinking.isNotEmpty()) thinking = listOf(before, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
                             if (p.text.isNotEmpty()) {
                                 if (liveId < 0) liveId = add(Role.BLAZE, p.text) else replace(liveId, Role.BLAZE, p.text)
+                                speakAsItStreams(p.text)
                             }
                         }
                     } else null
@@ -720,13 +748,21 @@ When you finish, say what you did in one short sentence.
 
                     mood = Mood.ACTING
                     val shots = mutableListOf<String>()
+                    // Speed plan step 8: several read-only lookups in one step run at the same time.
+                    fun callName(i: Int) = calls.getJSONObject(i).getJSONObject("function").getString("name")
+                    fun callArgs(i: Int) = try { JSONObject(calls.getJSONObject(i).getJSONObject("function").optString("arguments", "{}").ifBlank { "{}" }) }
+                        catch (_: Exception) { JSONObject() }
+                    val pre: Map<Int, String> = if (calls.length() > 1 && (0 until calls.length()).all { callName(it) in parallelSafe })
+                        (0 until calls.length()).map { i -> scope.async { i to runTool(callName(i), callArgs(i), shots) } }
+                            .map { it.await() }.toMap()
+                    else emptyMap()
                     for (i in 0 until calls.length()) {
                         val call = calls.getJSONObject(i)
                         val fn = call.getJSONObject("function")
                         val name = fn.getString("name")
                         val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
                             catch (_: Exception) { JSONObject() }
-                        var result = if (name == "load_tools") {
+                        var result = if (pre.containsKey(i)) pre.getValue(i) else if (name == "load_tools") {
                             val g = args.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
                             groupsOn += g
                             add(Role.STEP, "Loading ${g.joinToString(", ")} tools")
@@ -1059,7 +1095,12 @@ When you finish, say what you did in one short sentence.
             if (sessions.values.none { it !== this && it.job?.isActive == true }) Notifier.doneWorking()
             val last = msgs.lastOrNull() ?: return
             if (last.role != Role.BLAZE && last.role != Role.ERROR) return
-            if (Voice.lastTurnByVoice && Settings.speakReplies) Voice.speak(last.text)
+            if (Voice.lastTurnByVoice && Settings.speakReplies) {
+                if (streamedVoice) {
+                    val rest = if (spokenPrefix.isNotEmpty() && last.text.startsWith(spokenPrefix)) last.text.substring(spokenPrefix.length) else if (spokenPrefix.isEmpty()) last.text else ""
+                    Voice.speak(rest.ifBlank { " " }, queue = true)
+                } else Voice.speak(last.text)
+            }
             try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
             if (this === cur && (inForeground || overlayOpen)) return
             // A chat you left kept working: say which one finished.

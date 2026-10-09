@@ -29,6 +29,8 @@ publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 - Sliding history window (24 msgs, moves in blocks so the cached prefix stays stable). Setting: `history_window`.
 - Free router: fastest healthy model first, Groq first on short turns, 8 s connect / 20 s first-chunk timeout.
 - Connection pre-warm when a message is sent or the panel opens.
+- Parallel lookups: several read-only tools in one step (search, fetch, mail, calendar…) run at once.
+- Streaming voice: spoken replies start on the first sentence instead of after the whole answer. Toggle: `speak_streaming`.
 - Speed readout: route chip shows "first word X s"; `blaze_self speed_stats` gives the median of the last 20 turns.
 
 ## v1.7 (versionCode 8)
