@@ -364,9 +364,12 @@ When you finish, say what you did in one short sentence.
             append(Memory.promptBlock(userText))
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
             append("\nKNOW BEFORE YOU ASK: never ask the user something you can find out yourself. Their phone make, model, Android version and skin are in the line above; " +
-                "check installed apps with list_apps (e.g. whether Secure Folder, Termux or a bank app is there), settings and screen state with your phone tools, time and battery from 'Phone now', " +
+                "check installed apps with list_apps (e.g. whether Secure Folder, Termux or a bank app is there), where they are with get_location, settings and screen state with your phone tools, time and battery from 'Phone now', " +
                 "and facts about them from memory. Answer for THIS phone specifically (exact menu names for its make and Android version), not a list of options for every brand. " +
                 "Ask only for things that live in their head: preferences, choices, consent.")
+            append("\nTERMINAL: check terminal_status before assuming a tool exists. Write files with file_write/file_edit (never echo or heredocs), read with file_read, find with file_search. " +
+                "Run programs with run_code (it installs Python/Node and packages itself). Anything over ~30 s or a server goes in background (run_shell background=true), then job_log / job_input. " +
+                "Call APIs with http_request. On an error, read it, fix the cause and retry (up to 3 times) before telling the user; a [hint] line tells you what to try. Give the user results with export_file.")
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
@@ -396,6 +399,8 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.phone.Messaging.tool())
         com.blaze.assistant.browser.BrowserTools.definitions().forEach { t.put(it) }
         if (Settings.bool("terminal_tools", true)) com.blaze.assistant.terminal.Terminal.tools(app).forEach { t.put(it) }
+        if (Settings.bool("terminal_tools", true)) com.blaze.assistant.terminal.DevTools.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.phone.Location.tool())
         if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
@@ -986,6 +991,19 @@ When you finish, say what you did in one short sentence.
                         "The user did NOT approve dialling $code."
                     else com.blaze.assistant.phone.Ussd.run(app, code)
                 }
+                in com.blaze.assistant.terminal.DevTools.names -> {
+                    add(Role.STEP, when (name) {
+                        "run_code" -> "Running ${args.optString("language", "code")}"
+                        "file_write", "file_edit" -> "Writing ${args.optString("path").takeLast(50)}"
+                        "file_read", "file_list" -> "Reading ${args.optString("path", "~").takeLast(50)}"
+                        "http_request" -> "${args.optString("method", "GET").uppercase()} ${args.optString("url").removePrefix("https://").take(50)}"
+                        "download_file" -> "Downloading ${args.optString("url").substringAfterLast('/').take(50)}"
+                        else -> name.replace('_', ' ')
+                    })
+                    if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete")) "The user did NOT approve deleting that."
+                    else com.blaze.assistant.terminal.DevTools.run(app, name, args)
+                }
+                com.blaze.assistant.phone.Location.NAME -> { add(Role.STEP, "Checking location"); kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.phone.Location.run(app) } }
                 "linux_install" -> { add(Role.STEP, "Installing Alpine Linux"); com.blaze.assistant.terminal.Linux.install() }
                 "terminal_jobs" -> kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.listJobs() }
                 "terminal_stop" -> com.blaze.assistant.terminal.Terminal.stopJob(args.optInt("id"))

@@ -129,19 +129,59 @@ object Terminal {
     private val danger = Regex("(\\brm\\s+-[a-z]*r[a-z]*f?\\s+(/|~|\\*|\\.\\s*$))|\\bmkfs|\\bdd\\s+if=|\\breboot\\b|\\bsu\\b|>\\s*/dev/", RegexOption.IGNORE_CASE)
     fun risky(cmd: String) = danger.containsMatchIn(cmd)
 
+    // The agent's shell remembers where it is (cd) and what it exported (~/.blaze_env) between calls.
+    @Volatile private var phoneCwd: String = ""
+    @Volatile private var linuxCwd: String = "/root"
+    fun agentCwd(): File = phoneCwd.takeIf { it.isNotBlank() }?.let { File(it) }?.takeIf { it.isDirectory } ?: home()
+    private const val MARK = "__BLZCWD__"
+    private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
+
+    private fun wrap(cmd: String, linux: Boolean): String {
+        val cwd = if (linux) linuxCwd else agentCwd().absolutePath
+        val envFile = if (linux) "/root/phone/.blaze_env" else "\$HOME/.blaze_env"
+        return "[ -f \"$envFile\" ] && . \"$envFile\"; cd ${q(cwd)} 2>/dev/null\n$cmd\n__rc=\$?; echo \"$MARK\$(pwd)\"; exit \$__rc"
+    }
+
     suspend fun run(cmd: String, timeoutSec: Int = 60, linux: Boolean = false): String = withContext(Dispatchers.IO) {
         setup()
-        if (linux && !Linux.installed()) return@withContext "Linux isn't installed yet. Install it in Settings → Terminal (one-time ~3.5 MB download), or call linux_install."
-        val p = try { if (linux) ProcessBuilder(Linux.command(cmd)).directory(home()).redirectErrorStream(true)
-                .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(cmd).start() } catch (e: Exception) { return@withContext "Error: ${e.message}" }
+        if (linux && !Linux.installed()) return@withContext "Linux isn't installed yet. Call linux_install (one-time ~3.5 MB download), or use run_code which sets it up for you."
+        val full = wrap(cmd, linux)
+        val p = try { if (linux) ProcessBuilder(Linux.command(full)).directory(home()).redirectErrorStream(true)
+                .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(full).start() } catch (e: Exception) { return@withContext "Error: ${e.message}" }
+        try { p.outputStream.close() } catch (_: Exception) { }   // no stdin: commands that wait for input fail fast instead of hanging
         val out = StringBuilder()
-        val reader = launch { try { p.inputStream.bufferedReader().forEachLine { if (out.length < 60_000) out.append(it).append('\n') } } catch (_: Exception) { } }
+        val reader = launch { try { p.inputStream.bufferedReader().forEachLine { if (out.length < 200_000) out.append(it).append('\n') } } catch (_: Exception) { } }
         val done = withTimeoutOrNull(timeoutSec.coerceIn(1, 600) * 1000L) { while (p.isAlive) kotlinx.coroutines.delay(50); true }
-        if (done == null) { p.destroy(); reader.cancel(); return@withContext out.toString().takeLast(8000) + "\n[stopped after ${timeoutSec}s; use background=true for servers]" }
+        if (done == null) { p.destroy(); reader.cancel(); return@withContext out.toString().replace(Regex("$MARK.*\n?"), "").takeLast(8000) + "\n[stopped after ${timeoutSec}s; rerun with background=true for servers or long work, then job_log]" }
         reader.join()
         val code = p.exitValue()
-        val text = out.toString().let { if (it.length > 8000) it.take(2000) + "\n…\n" + it.takeLast(6000) else it }
-        "exit $code\n$text".trimEnd()
+        var raw = out.toString()
+        Regex("$MARK(.*)").findAll(raw).lastOrNull()?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }?.let { if (linux) linuxCwd = it else phoneCwd = it }
+        raw = raw.replace(Regex("$MARK.*\n?"), "")
+        val text = if (raw.length > 8000) raw.take(2000) + "\n…[${raw.length - 8000} chars cut; redirect to a file and use file_read/file_search]…\n" + raw.takeLast(6000) else raw
+        val hint = when {
+            code == 127 && !linux -> "\n[hint: command not found in the phone shell. For python/node/git/curl/gcc use linux=true (apk add <pkg>) or run_code.]"
+            code == 127 && linux -> "\n[hint: not installed in Linux; apk add <package> first (apk search <name> to find it).]"
+            code != 0 && Regex("(?i)permission denied").containsMatchIn(raw) -> "\n[hint: Android blocks that path for apps; work inside ~ or /sdcard.]"
+            code != 0 && Regex("(?i)no space left").containsMatchIn(raw) -> "\n[hint: phone storage is full.]"
+            else -> ""
+        }
+        val where = if (linux) linuxCwd else agentCwd().absolutePath.replace(home().absolutePath, "~")
+        "exit $code · cwd $where\n$text".trimEnd() + hint
+    }
+
+    fun jobLog(id: Int, lines: Int): String = synchronized(jobs) {
+        val j = jobs[id] ?: return "No job $id. ${if (jobs.isEmpty()) "No background jobs." else "Jobs: " + jobs.keys.joinToString()}"
+        val state = if (j.proc.isAlive) "running ${(System.currentTimeMillis() - j.started) / 1000}s" else "exited ${j.proc.exitValue()}"
+        "[${j.id}] $state · ${j.cmd.take(80)}\n" + synchronized(j.log) { j.log.toString().trimEnd().lines().takeLast(lines.coerceIn(1, 400)).joinToString("\n") }
+    }
+
+    fun jobInput(id: Int, text: String, enter: Boolean): String {
+        val j = synchronized(jobs) { jobs[id] } ?: return "No job $id."
+        if (!j.proc.isAlive) return "Job $id has already exited."
+        return try { j.proc.outputStream.apply { write((text + if (enter) "\n" else "").toByteArray()); flush() }; Thread.sleep(600)
+            "Sent to job $id. Latest output:\n" + synchronized(j.log) { j.log.toString().trimEnd().lines().takeLast(15).joinToString("\n") }
+        } catch (e: Exception) { "Couldn't write to job $id: ${e.message}" }
     }
 
     data class Job(val id: Int, val cmd: String, val proc: Process, val log: StringBuilder, val started: Long, val maxMs: Long = 0, var reported: Boolean = false, val pid: String = "")
@@ -151,8 +191,9 @@ object Terminal {
     fun startJob(cmd: String, linux: Boolean = false, maxMinutes: Int = 0): String {
         setup()
         if (linux && !Linux.installed()) return "Linux isn't installed yet (linux_install)."
-        val p = try { if (linux) ProcessBuilder(Linux.command(cmd)).directory(home()).redirectErrorStream(true)
-                .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(cmd).start() } catch (e: Exception) { return "Error: ${e.message}" }
+        val wrapped = (if (linux) "[ -f /root/phone/.blaze_env ] && . /root/phone/.blaze_env; cd ${q(linuxCwd)} 2>/dev/null\n" else "[ -f \"\$HOME/.blaze_env\" ] && . \"\$HOME/.blaze_env\"; cd ${q(agentCwd().absolutePath)} 2>/dev/null\n") + cmd
+        val p = try { if (linux) ProcessBuilder(Linux.command(wrapped)).directory(home()).redirectErrorStream(true)
+                .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(wrapped).start() } catch (e: Exception) { return "Error: ${e.message}" }
         val jid = nextJob++
         val pid = com.blaze.assistant.agent.Processes.register("job", cmd.take(50), jid.toString(), props = org.json.JSONObject().put("command", cmd).put("max_minutes", maxMinutes))
         val j = Job(jid, cmd, p, StringBuilder(), System.currentTimeMillis(), maxMinutes * 60_000L, pid = pid)
@@ -217,11 +258,11 @@ object Terminal {
     private fun p(t: String, d: String) = JSONObject().put("type", t).put("description", d)
 
     fun tools(ctx: Context): List<JSONObject> = buildList {
-        add(fn("run_shell", "Run a shell command on the phone (Android sh + BusyBox: ls, cat, grep, sed, awk, wget, curl-less http via wget, tar, unzip, vi, nc, httpd, find, ps, top, df, du...). Working dir is Blaze's home (~). Set background=true for servers, downloads, scraping or anything over ~30 s: it keeps running if Blaze is closed and the user gets a notification when it finishes or fails (optionally limit it with max_minutes). Returns exit code and output.",
+        add(fn("run_shell", "Run a shell command on the phone (Android sh + BusyBox: ls, cat, grep, sed, awk, wget, curl-less http via wget, tar, unzip, vi, nc, httpd, find, ps, top, df, du...). Working dir is Blaze's home (~). Set background=true for servers, downloads, scraping or anything over ~30 s: it keeps running if Blaze is closed and the user gets a notification when it finishes or fails (optionally limit it with max_minutes). Returns exit code, current folder and output. The shell remembers cd between calls; put exports in ~/.blaze_env to keep them. For writing files use file_write, not echo/heredocs.",
             JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job")).put("max_minutes", p("integer", "Time budget for a background job; 0 = none"))
             .put("linux", p("boolean", "Run inside Blaze's Alpine Linux (apk add python3/nodejs/git/openjdk17…) instead of the phone shell")), listOf("command")))
         add(fn("linux_install", "Download and set up Alpine Linux inside Blaze (one time, ~3.5 MB, no root).", JSONObject(), emptyList()))
-        add(fn("terminal_jobs", "List background shell jobs with their latest output.", JSONObject(), emptyList()))
+        add(fn("terminal_jobs", "List background shell jobs with a short tail of output (job_log for more, job_input to type into one).", JSONObject(), emptyList()))
         add(fn("terminal_stop", "Stop a background shell job.", JSONObject().put("id", p("integer", "Job number")), listOf("id")))
         if (termuxInstalled(ctx)) add(fn("termux_run", "Run a command in Termux (full Linux: pkg install python nodejs git openjdk-17 gradle, build Android apps, etc.).",
             JSONObject().put("command", p("string", "bash command")).put("background", p("boolean", "Run without opening a Termux window")), listOf("command")))
