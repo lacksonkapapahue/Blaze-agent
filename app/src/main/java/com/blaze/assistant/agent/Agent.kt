@@ -311,11 +311,6 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
         return buildString {
             append(persona).append(' ')
             if (name != null) append("The user's name is $name. ")
-            append("CURRENT LOCAL TIME: $now (${java.util.TimeZone.getDefault().id}). This is exact: answer any time, date or day question straight from it, never say you can't see the time. ")
-            append(Memory.promptBlock(userText))
-            append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
-            append(SelfSetup.promptLine(app))
-            append(Learning.promptBlock(userText))
             append(com.blaze.assistant.connect.Connectors.promptBlock())
             append("\nHOW YOU TALK: short, warm and sure of yourself, like a sharp friend texting back. Lead with the answer. One or two sentences unless they ask for more. Never say \"let me know if there's anything else\", \"feel free to\", \"I'd be happy to\" or similar filler, and never ask the user to share personal details for your memory. ")
             append("\nYou are Blaze and you can control yourself with blaze_self (close/go quiet, stop, orb, wake word, read-aloud, model, personality, settings, your setup and crash log). When the user wants help setting you up, or asks what you can do or what's installed, call blaze_self setup_check and guide them one step at a time. If the user asks you to shut down, close, go away or stop, do that with blaze_self, never a phone setting. ")
@@ -338,6 +333,15 @@ When you finish, say what you did in one short sentence.
             }
             append("\nYou can also read and send texts, check calls, read and add calendar events, look up contacts, toggle the flashlight and volume, and schedule routines with your tools. Sending a text or placing a call asks the user for approval automatically.")
             if (Settings.followups) append("\nAt the very end of each final answer (never when calling tools), add one line exactly like <<follow-ups: first | second | third>> with three short next requests (max 6 words each) written as the user would say them. Skip it for routines.")
+            append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
+            // Speed plan step 2: everything above stays identical turn after turn, so providers can
+            // reuse their cached prefix. Everything that changes (clock, memory, device) goes last.
+            append("\n\n")
+            append("CURRENT LOCAL TIME: $now (${java.util.TimeZone.getDefault().id}). This is exact: answer any time, date or day question straight from it, never say you can't see the time. ")
+            append(Memory.promptBlock(userText))
+            append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
+            append(SelfSetup.promptLine(app))
+            append(Learning.promptBlock(userText))
         }
     }
 
@@ -538,6 +542,7 @@ When you finish, say what you did in one short sentence.
             val routine = shown.startsWith("[Scheduled routine")
             // Instant acknowledgment: the orb and a tick react before any thinking happens.
             mood = Mood.THINKING
+            LlmClient.prewarm()   // speed plan step 10: open the connection while the fast lane checks
             if (!routine) com.blaze.assistant.device.Haptics.tick(app)
             job = scope.launch {
                 // Fast lane: direct commands run on-device in well under a second.
@@ -587,9 +592,15 @@ When you finish, say what you did in one short sentence.
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt(lastUserText())))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
+            // Speed plan step 3 (sliding window): long chats send only the recent part. The cut moves
+            // in big jumps, not every turn, so the cached prefix stays the same for many turns.
+            val from = windowStart()
+            if (from > 0) msgs.put(JSONObject().put("role", "user").put("content",
+                "[Earlier in this chat (older messages not shown): ${summary.ifBlank { "use search_past_chats if you need them" }}]"))
+                .also { msgs.put(JSONObject().put("role", "assistant").put("content", "Got it.")) }
             var lastScreen = -1
             for (i in 0 until history.length()) if (history.getJSONObject(i).let { it.optString("role") == "tool" && it.optString("content").contains(SCREEN_MARK) }) lastScreen = i
-            for (i in 0 until history.length()) {
+            for (i in from until history.length()) {
                 val m = history.getJSONObject(i)
                 msgs.put(when {
                     isShot(m) && i != lastShot -> JSONObject().put("role", "user").put("content", "$SHOT_NOTE (older, removed)")
@@ -602,6 +613,21 @@ When you finish, say what you did in one short sentence.
             return msgs
         }
 
+        /** First history index to send: 0 for short chats, else a user message 24 to 48 messages back. */
+        fun windowStart(): Int {
+            val n = history.length()
+            val keep = Settings.str("history_window", "24").toIntOrNull()?.coerceIn(8, 400) ?: 24
+            if (n <= keep * 2) return 0
+            // Jump in blocks of [keep] so the start only moves once every [keep] messages.
+            var cut = ((n - keep) / keep) * keep
+            while (cut < n) {
+                val m = history.getJSONObject(cut)
+                if (m.optString("role") == "user" && !isShot(m)) return cut
+                cut++
+            }
+            return 0
+        }
+
         fun isShot(m: JSONObject): Boolean {
             val c = m.opt("content") as? JSONArray ?: return false
             return c.optJSONObject(0)?.optString("text") == SHOT_NOTE
@@ -609,7 +635,16 @@ When you finish, say what you did in one short sentence.
 
         suspend fun runLoop() {
             try {
-                val tools = tools()
+                val allTools = tools().apply { put(ToolRouter.loadTool()) }
+                val routine = lastUserText().startsWith("[Scheduled routine")
+                // Speed plan step 1: core tools + the groups this request (and this chat) needs.
+                val groupsOn = HashSet<String>().apply {
+                    if (routine) addAll(ToolRouter.groups.map { it.id })
+                    addAll(ToolRouter.guess(lastUserText()))
+                    addAll(ToolRouter.usedIn(history))
+                }
+                var tools = ToolRouter.select(allTools, groupsOn)
+                var firstMs = -1L
                 while (trace.length() > 0) trace.remove(0)
                 val turnThink = StringBuilder()
                 val turnStart = System.currentTimeMillis()
@@ -632,7 +667,9 @@ When you finish, say what you did in one short sentence.
                     val onThink: (String) -> Unit = { t -> scope.launch { thinking = listOf(before, t).filter { it.isNotBlank() }.joinToString("\n\n") } }
 
                     val req = requestMessages()
+                    tools = ToolRouter.select(allTools, groupsOn)
                     val reply = LlmClient.complete(req, tools, onText, onThink, if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS)
+                    if (firstMs < 0 && LlmClient.lastFirstTokenAt > 0) firstMs = (LlmClient.lastFirstTokenAt - turnStart).coerceAtLeast(0)
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
                     reply.remove("_reasoning")
                     try { Usage.record(req, reply, LlmClient.lastUsage) } catch (_: Exception) { }
@@ -663,8 +700,12 @@ When you finish, say what you did in one short sentence.
                         val secs = (System.currentTimeMillis() - turnStart) / 1000.0
                     if (step > 0) { com.blaze.assistant.device.Haptics.done(app); com.blaze.assistant.device.Sounds.done() }
                         com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
+                        SpeedLog.add(SpeedLog.Entry(turnStart, firstMs.coerceAtLeast(0), System.currentTimeMillis() - turnStart, step + 1,
+                            tools.length(), req.toString().length + tools.toString().length, LlmClient.lastRoute))
                         addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
-                            if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model }, "%.1f s".format(secs),
+                            if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model },
+                                if (firstMs > 0) "first word %.1f s".format(firstMs / 1000.0) else "",
+                                "%.1f s".format(secs),
                                 if (step > 0) "${step + 1} steps" else "").filter { it.isNotBlank() }.joinToString(" · ") else "")
                         break
                     }
@@ -685,7 +726,15 @@ When you finish, say what you did in one short sentence.
                         val name = fn.getString("name")
                         val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
                             catch (_: Exception) { JSONObject() }
-                        var result = runTool(name, args, shots)
+                        var result = if (name == "load_tools") {
+                            val g = args.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+                            groupsOn += g
+                            add(Role.STEP, "Loading ${g.joinToString(", ")} tools")
+                            "Loaded: ${g.joinToString(", ")}. Those tools are available now."
+                        } else runTool(name, args, shots)
+                        // A tool from a group pulls in the rest of that group (e.g. a stuck run_plan brings tap/scroll).
+                        ToolRouter.groupOf(name)?.let { groupsOn += it }
+                        if (name == "run_plan" || name == "read_screen") groupsOn += "screen"
                         if (name in screenActions && !result.startsWith("Error") && !result.startsWith("Couldn't")) com.blaze.assistant.device.Haptics.tick(app)
                         if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
                         history.put(

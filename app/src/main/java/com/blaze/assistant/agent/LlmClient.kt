@@ -76,6 +76,41 @@ object LlmClient {
         }
     }
 
+    /** Milliseconds from sending the request to the first streamed token (or the whole reply) of the last call. */
+    @Volatile var lastFirstTokenMs: Long = 0
+    @Volatile private var callStart: Long = 0
+    @Volatile private var gotFirst = false
+    /** Wall-clock time of that first token. */
+    @Volatile var lastFirstTokenAt: Long = 0
+    private fun markFirst() { if (!gotFirst) { gotFirst = true; lastFirstTokenAt = System.currentTimeMillis(); lastFirstTokenMs = lastFirstTokenAt - callStart } }
+
+    private val warmed = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Pre-warm (speed plan step 10): resolve DNS and open the TLS connection to the AI service
+     * while the user is still talking, so the real request skips that handshake. Kept-alive
+     * connections are reused by HttpURLConnection's pool. At most once a minute per host.
+     */
+    fun prewarm() {
+        val bases = try {
+            if (Settings.providerId == Providers.AUTO) FreeRouter.warmTargets().map { it.base }
+            else listOf(target(Settings.providerId).base)
+        } catch (_: Exception) { emptyList() }
+        for (b in bases.map { it.trimEnd('/') }.filter { it.startsWith("http") }.distinct().take(2)) {
+            val host = try { URL(b).host } catch (_: Exception) { continue }
+            val now = System.currentTimeMillis()
+            if (now - (warmed[host] ?: 0L) < 60_000) continue
+            warmed[host] = now
+            Thread {
+                try {
+                    val c = URL(b).openConnection() as HttpURLConnection
+                    c.requestMethod = "HEAD"; c.connectTimeout = 5000; c.readTimeout = 5000
+                    c.responseCode; c.inputStream.close()
+                } catch (_: Exception) { }
+            }.start()
+        }
+    }
+
     /** True for short, simple turns: ask reasoning models to think briefly so answers come fast. */
     @Volatile var quickTurn = false
 
@@ -89,11 +124,14 @@ object LlmClient {
         if (t.model.isBlank()) throw LlmException("Pick a model in Settings → Model.", 404)
         val conn = URL("$base/chat/completions").openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
-        conn.connectTimeout = 30_000
-        conn.readTimeout = 120_000
+        // A free-chain call (timeoutMs < 120 s) gives up quickly so the next model gets a turn.
+        val chained = timeoutMs < 120_000
+        conn.connectTimeout = if (chained) 8_000 else 30_000
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
-        conn.readTimeout = timeoutMs
+        // Streaming: the read timeout is the longest wait for the next chunk, including the first.
+        conn.readTimeout = if (chained && onText != null) minOf(timeoutMs, 20_000) else timeoutMs
+        callStart = System.currentTimeMillis(); gotFirst = false; lastFirstTokenMs = 0; lastFirstTokenAt = 0
         authHeaders(key, t.pid).forEach { (k, v) -> conn.setRequestProperty(k, v) }
 
         val body = JSONObject().apply {
@@ -118,6 +156,7 @@ object LlmClient {
         conn.outputStream.use { it.write(body.toString().toByteArray()) }
 
         val code = conn.responseCode
+        if (onText == null || code !in 200..299) markFirst()
         rateHeaders(conn).takeIf { it.isNotEmpty() }?.let { lastRateHeaders = it }
         lastUsage = null
         if (code in 200..299 && onText != null &&
@@ -170,14 +209,16 @@ object LlmClient {
                 val delta = obj.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta") ?: continue
                 val rp = listOf("reasoning_content", "reasoning").firstNotNullOfOrNull { k ->
                     delta.optString(k, "").takeIf { delta.has(k) && !delta.isNull(k) && it.isNotEmpty() } }
-                if (rp != null) { think.append(rp); onThink?.invoke(think.toString()) }
+                if (rp != null) { markFirst(); think.append(rp); onThink?.invoke(think.toString()) }
                 val piece = delta.optString("content", "").takeIf { delta.has("content") && !delta.isNull("content") }
                 if (!piece.isNullOrEmpty()) {
+                    markFirst()
                     content.append(piece)
                     val now = System.currentTimeMillis()
                     if (now - lastEmit > 90) { onText(content.toString()); lastEmit = now }
                 }
                 val tc = delta.optJSONArray("tool_calls") ?: continue
+                markFirst()
                 for (i in 0 until tc.length()) {
                     val d = tc.getJSONObject(i)
                     val idx = d.optInt("index", i)

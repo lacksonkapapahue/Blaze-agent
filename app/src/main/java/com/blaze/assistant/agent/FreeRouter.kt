@@ -91,12 +91,22 @@ object FreeRouter {
             LlmClient.target(pid, m) }.filter { it.key.isNotBlank() && it.model.isNotBlank() }
         // Fill-first: keep the user's order, but skip cooled-down entries and push flaky ones back.
         val (ready, cooling) = ts.partition { (health[keyOf(it)]?.coolUntil ?: 0) <= now }
-        val usable = ready.filterNot { needTools && health[keyOf(it)]?.noTools == true }
+        var usable = ready.filterNot { needTools && health[keyOf(it)]?.noTools == true }
             .sortedBy { (health[keyOf(it)]?.fails ?: 0).coerceAtMost(3) }
+        // Speed plan step 9: among equally healthy models, the one that has been fastest goes first
+        // (an untried model counts as fast so it gets measured). Groq leads short chat turns.
+        if (Settings.bool("fastest_first", true)) {
+            usable = usable.sortedWith(compareBy<LlmClient.Target> { (health[keyOf(it)]?.fails ?: 0).coerceAtMost(3) }
+                .thenBy { health[keyOf(it)]?.avgMs ?: 0L })
+            if (LlmClient.quickTurn) usable = usable.sortedBy { if (it.pid == "groq") 0 else 1 }
+        }
         val out = (usable + cooling.sortedBy { health[keyOf(it)]?.coolUntil ?: 0 }).toMutableList()
         if (!needTools || out.isEmpty()) out += LlmClient.target(Providers.keyless.id)
         return out
     }
+
+    /** The first couple of models a turn would try, for connection pre-warming. */
+    fun warmTargets(): List<LlmClient.Target> = try { chain(true).take(2) } catch (_: Exception) { emptyList() }
 
     private fun mark(t: LlmClient.Target, f: (Health) -> Health) {
         health[keyOf(t)] = f(health[keyOf(t)] ?: Health()); _status.value = HashMap(health)

@@ -97,6 +97,7 @@ object SelfControl {
         "voice_on" -> { Settings.speakReplies = true; "Okay, I'll read answers aloud when you ask by voice." }
         "status", "setup_check" -> SelfSetup.report(ctx)
         "open" -> SelfSetup.open(ctx, args.optString("target"))
+        "speed_stats" -> SpeedLog.summary()
         "crash_log" -> com.blaze.assistant.device.CrashLog.read().takeLast(3000).ifBlank { "No errors logged." }
         "set_model" -> {
             val p = args.optString("provider")
@@ -145,7 +146,7 @@ object SelfControl {
         .put("description", "Control Blaze itself: close/go quiet, stop the task, hide or show the floating orb, wake word on/off, read-aloud on/off, switch AI model or personality, change one of Blaze's settings, check its own setup (setup_check: what's installed, granted or missing — use it to guide the user through full setup), open the exact system/Blaze screen that fixes something, install Linux / the voice model / the fast lane, or read its crash log to diagnose a problem.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("close", "stop", "hide_orb", "show_orb", "wake_on", "wake_off",
-                "voice_on", "voice_off", "status", "setup_check", "open", "install", "crash_log", "set_model", "set_persona", "set_setting"))))
+                "voice_on", "voice_off", "status", "setup_check", "open", "install", "crash_log", "speed_stats", "set_model", "set_persona", "set_setting"))))
             .put("provider", JSONObject().put("type", "string")).put("model", JSONObject().put("type", "string"))
             .put("persona", JSONObject().put("type", "string"))
             .put("target", JSONObject().put("type", "string").put("description", "open: accessibility, overlay, app_permissions, battery, notification_access, assistant, exact_alarms, or a Blaze settings page (settings ai/control/voice/terminal/connections/feel…)"))

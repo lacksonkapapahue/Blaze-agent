@@ -20,9 +20,16 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.6 is the last released build. v1.7 (free model routing, Needle on-device fast lane, faster screen loop,
-connectors, self-learning) is in progress on `main` and may not compile until it's finished.
+v1.9.5 is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
+## v1.9.5 (versionCode 16): speed batch 1
+- Tool diet: core tools + only the tool groups a request needs (`load_tools` pulls in more). Toggle: `tool_diet`.
+- Cache-friendly system prompt: fixed text first, clock/memory/device last.
+- Sliding history window (24 msgs, moves in blocks so the cached prefix stays stable). Setting: `history_window`.
+- Free router: fastest healthy model first, Groq first on short turns, 8 s connect / 20 s first-chunk timeout.
+- Connection pre-warm when a message is sent or the panel opens.
+- Speed readout: route chip shows "first word X s"; `blaze_self speed_stats` gives the median of the last 20 turns.
 
 ## v1.7 (versionCode 8)
 - Auto (free routing): ordered chain of free models with cooldowns/health, keyless Pollinations chat fallback

@@ -274,6 +274,7 @@ object Overlay {
 
     /** Open the chat panel over the current app: the assistant session if Blaze is the assistant, else an overlay. */
     fun openPanel(ctx: Context, listen: Boolean) {
+        com.blaze.assistant.agent.LlmClient.prewarm()
         if (BlazeInteractionService.showPanel(listen)) return
         if (panelView != null) return
         val h = host(ctx)

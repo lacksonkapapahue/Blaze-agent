@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -49,6 +49,19 @@ jobs:
           name: blaze-${{ github.sha }}
           path: app/build/outputs/apk/release/*.apk
           retention-days: 14
+
+      - name: Publish APK to apk branch
+        if: github.event_name != 'pull_request'
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mkdir -p /tmp/out && cp "$APK" "/tmp/out/Blaze-v$VER.apk"
+          cd /tmp/out
+          git init -q -b apk
+          git config user.name "Blaze CI"; git config user.email "ci@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          echo "$VER ${{ github.sha }}" > LATEST
+          git add -A && git commit -qm "Blaze v$VER (${{ github.sha }})" && git push -q origin apk --force
 
       - name: Post failure log
         if: failure()
