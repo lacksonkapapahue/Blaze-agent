@@ -54,6 +54,49 @@ class WakeWordService : Service() {
     @Volatile private var pausedAt = 0L
     private val main by lazy { android.os.Handler(mainLooper) }
 
+    // Power saving: sleep (mic fully released) while the screen is off or the phone is in a pocket.
+    @Volatile private var screenOff = false
+    @Volatile private var pocket = false
+    private var charging = false
+    private val sleeping get() = (screenOff && !Settings.bool("wake_screen_off", false) && !(charging && Settings.bool("wake_charging", true))) ||
+        (pocket && Settings.bool("wake_pocket", true))
+    private var sensors: android.hardware.SensorManager? = null
+    private var proxListening = false
+    private val pocketOn = Runnable { pocket = true; refreshSleep() }
+    private val prox = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val near = e.values.isNotEmpty() && e.values[0] < minOf(e.sensor.maximumRange, 3f)
+            main.removeCallbacks(pocketOn)
+            if (near) main.postDelayed(pocketOn, 2500)   // covered for a few seconds = in a pocket / face down
+            else if (pocket) { pocket = false; refreshSleep() }
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+    }
+    private val screenRx = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            when (i.action) {
+                Intent.ACTION_SCREEN_OFF -> { screenOff = true; setProx(false) }
+                Intent.ACTION_SCREEN_ON -> { screenOff = false; setProx(true) }
+                Intent.ACTION_POWER_CONNECTED -> charging = true
+                Intent.ACTION_POWER_DISCONNECTED -> charging = false
+            }
+            refreshSleep()
+        }
+    }
+
+    private fun setProx(on: Boolean) {
+        val sm = sensors ?: return
+        val s = sm.getDefaultSensor(android.hardware.Sensor.TYPE_PROXIMITY) ?: return
+        try {
+            if (on && !proxListening && Settings.bool("wake_pocket", true)) { sm.registerListener(prox, s, android.hardware.SensorManager.SENSOR_DELAY_NORMAL); proxListening = true }
+            if (!on && proxListening) { sm.unregisterListener(prox); proxListening = false; main.removeCallbacks(pocketOn); pocket = false }
+        } catch (_: Exception) { }
+    }
+
+    private fun refreshSleep() {
+        if (sleeping) stopListening() else if (!paused) main.postDelayed({ startListening() }, 300)
+    }
+
     override fun onBind(i: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -73,6 +116,18 @@ class WakeWordService : Service() {
             } catch (_: Exception) { stopSelf() }
         }.start()
         main.postDelayed(watchdog, 15_000)
+        try {
+            sensors = getSystemService(android.hardware.SensorManager::class.java)
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            screenOff = !(pm?.isInteractive ?: true)
+            charging = (registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                ?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+            registerReceiver(screenRx, android.content.IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED)
+            })
+            if (!screenOff) setProx(true)
+        } catch (_: Exception) { }
     }
 
     private fun goForeground(): Boolean {
@@ -100,7 +155,7 @@ class WakeWordService : Service() {
             if (!running) return
             val idle = Voice.state.value == Voice.State.IDLE
             if (paused && idle && System.currentTimeMillis() - pausedAt > 12_000) { paused = false; startListening() }
-            else if (!paused && !listening) startListening()
+            else if (!paused && !listening && !sleeping) startListening()
             main.postDelayed(this, 10_000)
         }
     }
@@ -112,7 +167,7 @@ class WakeWordService : Service() {
      */
     @Synchronized private fun startListening() {
         val m = model ?: return
-        if (paused || listening) return
+        if (paused || listening || sleeping) return
         listening = true
         thread = Thread {
             var rec: Recognizer? = null
@@ -126,16 +181,41 @@ class WakeWordService : Service() {
                     android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 8192))
                 if (ar.state != android.media.AudioRecord.STATE_INITIALIZED) throw IllegalStateException("mic busy")
                 ar.startRecording()
-                val buf = ShortArray(1600)
+                val buf = ShortArray(1600)   // 100 ms
                 var silentMs = 0L
                 var warned = false
-                while (listening && !paused) {
+                // Sound gate: Vosk only runs while there's voice-level sound, so a quiet room costs
+                // almost nothing. A short pre-roll keeps the start of "hey" when the gate opens.
+                val gate = Settings.bool("wake_gate", true)
+                val pre = ArrayDeque<ShortArray>()
+                var floor = 200.0
+                var openMs = 0
+                while (listening && !paused && !sleeping) {
                     val n = ar.read(buf, 0, buf.size)
                     if (n <= 0) { Thread.sleep(50); continue }
                     var peak = 0
                     for (i in 0 until n) { val v = kotlin.math.abs(buf[i].toInt()); if (v > peak) peak = v }
                     if (peak == 0) { silentMs += n / 16 } else { silentMs = 0; if (warned) { warned = false; com.blaze.assistant.notify.Notifier.clearWakeBlocked() } }
                     if (silentMs > 6000 && !warned) { warned = true; com.blaze.assistant.notify.Notifier.wakeBlocked() }
+                    if (gate) {
+                        var sum = 0.0
+                        for (i in 0 until n) { val v = buf[i].toDouble(); sum += v * v }
+                        val rms = kotlin.math.sqrt(sum / n)
+                        if (openMs <= 0) floor = floor * 0.95 + rms * 0.05   // track background noise only while closed
+                        val loud = rms > maxOf(floor * 2.5, 350.0)
+                        if (loud) {
+                            if (openMs <= 0) { while (pre.isNotEmpty()) { val p = pre.removeFirst(); rec.acceptWaveForm(p, p.size) } }
+                            openMs = 1500
+                        } else if (openMs > 0) {
+                            openMs -= n / 16
+                            if (openMs <= 0) {   // sound ended: settle what was heard, then go idle
+                                rec.acceptWaveForm(buf, n)
+                                if (check(rec.finalResult)) break
+                                rec.reset(); continue
+                            }
+                        }
+                        if (openMs <= 0) { pre.addLast(buf.copyOf(n)); if (pre.size > 5) pre.removeFirst(); continue }
+                    }
                     val done = rec.acceptWaveForm(buf, n)
                     // Only whole, finished phrases count; partial guesses fire on random speech.
                     if (done && check(rec.result)) { rec.reset(); break }
@@ -210,6 +290,8 @@ class WakeWordService : Service() {
         running = false
         main.removeCallbacks(watchdog)
         stopListening()
+        try { unregisterReceiver(screenRx) } catch (_: Exception) { }
+        setProx(false)
         model?.close(); model = null
         super.onDestroy()
     }

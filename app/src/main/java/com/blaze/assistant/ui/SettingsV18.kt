@@ -372,6 +372,7 @@ internal fun V18Field(hint: String, value: String, onChange: (String) -> Unit) {
 
 @Composable
 fun VoiceExtras() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var loop by remember { mutableStateOf(Settings.bool("voice_loop", false)) }
     V18Section("Hands-free")
     var conf by remember { mutableStateOf(Settings.str("wake_conf", "0.88")) }
@@ -384,6 +385,15 @@ fun VoiceExtras() {
         }
     }
     V18Note("Strict wakes only on a clear \u201cHey Blaze\u201d. Use Easy if it misses you.")
+    var gate by remember { mutableStateOf(Settings.bool("wake_gate", true)) }
+    var off by remember { mutableStateOf(Settings.bool("wake_screen_off", false)) }
+    var chg by remember { mutableStateOf(Settings.bool("wake_charging", true)) }
+    var pk by remember { mutableStateOf(Settings.bool("wake_pocket", true)) }
+    V18Section("Battery saver")
+    ToggleRow("Sound gate", "Only process audio when someone's speaking. Saves battery in quiet rooms", gate) { gate = !gate; Settings.setBool("wake_gate", gate); com.blaze.assistant.voice.WakeWordService.start(ctx) }
+    ToggleRow("Listen with screen off", "Off: the mic switches off when the screen does", off) { off = !off; Settings.setBool("wake_screen_off", off); com.blaze.assistant.voice.WakeWordService.start(ctx) }
+    if (!off) ToggleRow("\u2026but listen while charging", "Keep listening with the screen off while plugged in", chg) { chg = !chg; Settings.setBool("wake_charging", chg); com.blaze.assistant.voice.WakeWordService.start(ctx) }
+    ToggleRow("Pause in pocket", "Mic off while the phone is face down or in a pocket", pk) { pk = !pk; Settings.setBool("wake_pocket", pk); com.blaze.assistant.voice.WakeWordService.start(ctx) }
     ToggleRow("Conversation mode", "After Blaze answers out loud, it listens again so you can keep talking", loop) { loop = !loop; Settings.setBool("voice_loop", loop) }
 }
 
