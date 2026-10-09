@@ -76,6 +76,9 @@ object LlmClient {
         }
     }
 
+    /** True for short, simple turns: ask reasoning models to think briefly so answers come fast. */
+    @Volatile var quickTurn = false
+
     internal suspend fun call(t: Target, messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)?,
                               onThink: ((String) -> Unit)?, thoughts: Boolean, timeoutMs: Int = 120_000): JSONObject = withContext(Dispatchers.IO) {
         val key = t.key
@@ -97,8 +100,11 @@ object LlmClient {
             put("model", t.model)
             put("messages", messages)
             if (onText != null) put("stream", true)
+            val quick = quickTurn && Settings.bool("quick_think", true)
+            if (quick && t.pid == "openrouter") put("reasoning", JSONObject().put("effort", "low"))
+            if (quick && t.pid == "gemini" && !thoughts) put("reasoning_effort", "low")
             if (thoughts) put("extra_body", JSONObject().put("google",
-                JSONObject().put("thinking_config", JSONObject().put("include_thoughts", true))))
+                JSONObject().put("thinking_config", JSONObject().put("include_thoughts", true).apply { if (quick) put("thinking_budget", 512) })))
             if (tools != null && tools.length() > 0) {
                 put("tools", tools)
                 put("tool_choice", "auto")

@@ -195,6 +195,10 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
             else SelfControl.run(app, self)
             return
         }
+        // Time, date, battery: answered on the phone instantly.
+        if (attachments.isEmpty() && _question.value == null) {
+            SelfControl.quick(app, text)?.let { r -> com.blaze.assistant.device.Haptics.tick(app); cur.selfTurn(text.trim(), r, byVoice, "⚡ Instant"); return }
+        }
         // Typing or speaking while Blaze waits on a question answers it.
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
         cur.send(text, byVoice, attachments)
@@ -307,7 +311,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
         return buildString {
             append(persona).append(' ')
             if (name != null) append("The user's name is $name. ")
-            append("It is $now. ")
+            append("CURRENT LOCAL TIME: $now (${java.util.TimeZone.getDefault().id}). This is exact: answer any time, date or day question straight from it, never say you can't see the time. ")
             append(Memory.promptBlock(userText))
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
             append(SelfSetup.promptLine(app))
@@ -504,12 +508,12 @@ When you finish, say what you did in one short sentence.
         // ---------- Turns ----------
 
         /** A self-command handled on-device: shown and remembered like a normal exchange. */
-        fun selfTurn(text: String, reply: String, byVoice: Boolean) {
+        fun selfTurn(text: String, reply: String, byVoice: Boolean, chip: String = "⚡ Blaze itself") {
             add(Role.USER, text)
             history.put(JSONObject().put("role", "user").put("content", text))
             if (reply.isNotBlank()) {
                 val id = add(Role.BLAZE, reply)
-                addMeta(id, "⚡ Blaze itself")
+                addMeta(id, chip)
                 history.put(JSONObject().put("role", "assistant").put("content", reply))
                 if (byVoice && Settings.speakReplies && !reply.startsWith("Going quiet")) Voice.speak(reply)
             }
@@ -520,6 +524,7 @@ When you finish, say what you did in one short sentence.
             if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
             Voice.lastTurnByVoice = byVoice
             val shown = text.trim().ifEmpty { "Take a look at this." }
+            LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
             val id = add(Role.USER, shown, attachments.map { it.name })
             historyMark[id] = history.length()
             val content: Any = if (attachments.isEmpty()) shown else JSONArray().apply {

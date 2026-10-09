@@ -63,6 +63,7 @@ object DeviceStatus {
     fun describe(ctx: Context): String {
         val s = snap(ctx)
         return buildString {
+            append("Time: ${java.text.SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}.\n")
             append("Battery ${s.battery}%${if (s.charging) " (charging)" else ""}, ${"%.0f".format(s.tempC)} °C, health ${s.health}")
             if (s.powerSave) append(", battery saver on")
             append(".\nStorage: ${"%.1f".format(s.freeStorageGb)} GB free of ${"%.0f".format(s.totalStorageGb)} GB.")

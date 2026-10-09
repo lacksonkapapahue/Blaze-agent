@@ -35,6 +35,34 @@ object SelfControl {
         Intent(Regex("""^(please )?(unmute|talk to me|speak (your )?(replies|answers)|read (your )?(replies|answers) (aloud|out loud))[.!]*$"""), "voice_on"),
     )
 
+    /**
+     * Instant on-device answers for the basics (time, date, battery), so they never wait on a model.
+     * Returns the reply, or null when this isn't one of them.
+     */
+    fun quick(ctx: Context, text: String): String? {
+        val t = text.trim().lowercase().replace(Regex("[?.!,]+"), " ").replace(Regex("\\s+"), " ").trim()
+            .removePrefix("hey blaze ").removePrefix("blaze ").removePrefix("please ").removeSuffix(" please").removeSuffix(" blaze").trim()
+        if (t.length > 45) return null
+        val now = java.util.Date()
+        val time = android.text.format.DateFormat.getTimeFormat(ctx).format(now)
+        val date = java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.getDefault()).format(now)
+        val timeQ = Regex("""^(what'?s|what is|tell me) (the )?(time|current time)( (now|right now|it is|is it))?$|^what time (is it|it is)( now| right now)?$|^(the )?time( now| please| right now)?$|^(current|exact) time$|^do you (know|have) the time$""")
+        val dateQ = Regex("""^(what'?s|what is|tell me) (the |today'?s )?(date|day)( today)?$|^what (day|date) (is it|is today|is it today)$|^(today'?s )?date$|^what'?s today$""")
+        val battQ = Regex("""^(what'?s |what is |how much |check )?(my |the )?(battery|charge)( level| percentage| left| life)?( left)?( do i have)?$|^how much battery (do i have|is left|left)$""")
+        return when {
+            timeQ.matches(t) -> "It's $time."
+            dateQ.matches(t) -> "It's $date."
+            battQ.matches(t) -> try {
+                val i = ctx.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+                val lvl = i?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                val sc = i?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100) ?: 100
+                val plugged = (i?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+                if (lvl < 0) null else "${lvl * 100 / sc}%${if (plugged) " and charging" else ""}."
+            } catch (_: Exception) { null }
+            else -> null
+        }
+    }
+
     /** An on-device match for a self-command, or null. Works even while a task is running. */
     fun match(text: String): String? {
         val t = text.trim().lowercase().replace(Regex("\\s+"), " ")
