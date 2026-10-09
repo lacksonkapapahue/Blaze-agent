@@ -94,9 +94,23 @@ object FastLane {
             .put("minute", p("integer", "0-59")).put("label", p("string", "Optional label")), listOf("hour", "minute")))
         put(fn("set_timer", "Start a countdown timer", JSONObject().put("minutes", p("integer", "Minutes"))
             .put("seconds", p("integer", "Extra seconds")), listOf("minutes")))
-        put(fn("toggle_setting", "Turn a phone setting on or off", JSONObject()
-            .put("setting", e("flashlight", "wifi", "bluetooth", "mobile_data", "do_not_disturb", "airplane"))
-            .put("on", p("boolean", "true = on")), listOf("setting", "on")))
+        // One narrow tool per setting, named the way people say it, with an on/off enum that
+        // defaults to "on" (Needle's tool-design rules), plus triggers so odd phrasings still land.
+        val single = "(?![\\s\\S]*\\b(and|then)\\b)"
+        for ((tool, words, nouns) in listOf(
+            Triple("flashlight", "Turn the flashlight (torch) on or off", "torch|flash ?light|flash"),
+            Triple("wifi", "Turn Wi-Fi on or off", "wi-?fi|wireless|wlan"),
+            Triple("bluetooth", "Turn Bluetooth on or off", "bluetooth|bt"),
+            Triple("mobile_data", "Turn mobile data on or off", "mobile data|cellular data|data"),
+            Triple("do_not_disturb", "Turn do not disturb (silent focus) on or off", "do not disturb|dnd|disturb"),
+            Triple("airplane_mode", "Turn airplane (flight) mode on or off", "airplane|aeroplane|flight mode"))) {
+            put(JSONObject().put("type", "function").put("function", JSONObject().put("name", tool).put("description", words)
+                .put("triggers", JSONArray(listOf("$single[\\s\\S]*\\b($nouns)\\b")))
+                .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
+                    .put("state", JSONObject().put("type", "string").put("enum", JSONArray(listOf("on", "off"))).put("default", "on")
+                        .put("description", "on (enable, start, activate) or off (disable, stop, kill, deactivate)")))
+                    .put("required", JSONArray()))))
+        }
         put(fn("set_volume", "Change the volume", JSONObject().put("level", e("up", "down", "mute", "max")), listOf("level")))
         put(fn("media_control", "Control music or video playback", JSONObject().put("action", e("play", "pause", "next", "previous")), listOf("action")))
         put(fn("battery_level", "Tell the battery level", JSONObject(), emptyList()))
@@ -146,7 +160,7 @@ object FastLane {
      * [offline] lowers the bar, since the cloud isn't an option.
      */
     suspend fun tryHandle(ctx: Context, text: String, offline: Boolean, confirm: suspend (String, String, String) -> Boolean): Result? {
-        if (text.length > 160 || text.contains('\n') || compound(text)) return null
+        if (text.length > 160 || text.contains('\n')) return null
         val t0 = System.currentTimeMillis()
         // Intent cache: a command that worked before runs again with no model at all.
         IntentCache.get(text)?.let { (n, a) ->
@@ -159,13 +173,13 @@ object FastLane {
             val r = try { execute(ctx, n, a, confirm) } catch (_: Exception) { null }
             if (r != null && listOf("Couldn't tell", "Error", "Unknown", "No app").none { r.startsWith(it) }) return Result(r, System.currentTimeMillis() - t0, n)
         }
-        if (!enabled(ctx)) return null
+        if (!enabled(ctx) || compound(QuickRules.polite(text))) return null
         val out = lock.withLock {
             try {
                 if (!ensureStarted(ctx)) return null
                 withContext(Dispatchers.IO) {
                     post("/reset", "{}")   // each command stands alone
-                    JSONObject(post("/complete", JSONObject().put("input", text).toString()))
+                    JSONObject(post("/complete", JSONObject().put("input", QuickRules.polite(text)).toString()))
                 }
             } catch (_: Exception) { stop(); return null }
         }
@@ -206,6 +220,11 @@ object FastLane {
             val s = a.optInt("minutes") * 60 + a.optInt("seconds")
             if (s <= 0) null else { PhoneTools.run(ctx, "set_timer", JSONObject().put("seconds", s)); "Timer started for ${if (s >= 60) "${s / 60} min" else "$s s"}." }
         }
+        "flashlight", "wifi", "bluetooth", "mobile_data", "do_not_disturb", "airplane_mode" ->
+            Skills.run(ctx, "device_setting", JSONObject().put("setting", if (name == "airplane_mode") "airplane" else name)
+                .put("value", if (a.optString("state", "on") == "off") "off" else "on"))
+        "speed_stats" -> SpeedLog.summary()
+        "list_processes" -> Processes.list(status = "live")
         "toggle_setting" -> Skills.run(ctx, "device_setting", JSONObject().put("setting", a.optString("setting"))
             .put("value", if (a.optBoolean("on", true)) "on" else "off"))
         "set_volume" -> Skills.run(ctx, "device_setting", JSONObject().put("setting", "volume")

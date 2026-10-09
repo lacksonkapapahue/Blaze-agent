@@ -8,7 +8,13 @@ import org.json.JSONObject
  * Returns a fast-lane tool call (name + arguments) or null.
  */
 object QuickRules {
-    private fun clean(s: String) = s.trim().lowercase()
+    /** Drops greetings and politeness that change nothing: "flashlight on, thanks bro" -> "flashlight on". */
+    fun polite(s: String): String = s.trim()
+        .replace(Regex("[,.!]*\\s*(thanks|thank you|thx|pls|plz|please|bro|mate|boss|man|asap|quickly|real quick)[.!]*$", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("[,.!]*\\s*(thanks|thank you|thx|pls|plz|please|bro|mate|boss|man)[.!]*$", RegexOption.IGNORE_CASE), "")
+        .trim()
+
+    private fun clean(s: String) = polite(s).lowercase()
         .replace(Regex("[?!.,]+$"), "").replace(Regex("\\s+"), " ")
         .replace(Regex("^(hey blaze|ok blaze|okay blaze|blaze)[, ]+"), "")
         .replace(Regex("^(please|can you|could you|would you|will you|i want you to|i need you to)[, ]+"), "")
@@ -18,6 +24,9 @@ object QuickRules {
     private val words = mapOf("one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6, "seven" to 7, "eight" to 8,
         "nine" to 9, "ten" to 10, "eleven" to 11, "twelve" to 12, "fifteen" to 15, "twenty" to 20, "thirty" to 30, "forty" to 40,
         "forty five" to 45, "sixty" to 60, "a" to 1, "an" to 1, "half an" to 0)
+
+    /** "data" also appears in "data usage", "data balance", "bundle": those aren't a toggle. */
+    private fun hits0(t: String) = Regex("\\b(usage|balance|bundle|left|remaining|how much|check)\\b").containsMatchIn(t)
 
     private fun num(s: String): Int? = s.toIntOrNull() ?: words[s]
 
@@ -49,6 +58,26 @@ object QuickRules {
                     return "toggle_setting" to JSONObject().put("setting", id).put("on", on)
                 }
         }
+
+        // Looser form for short commands: exactly one setting word plus an on/off word anywhere,
+        // e.g. "can u put the torch on", "kill the wifi", "i need the flashlight", "torch".
+        if (t.split(' ').size <= 9 && !Regex("\\b(and|then|if|when|whenever|every|at|after|don't|dont|not|never|settings?|password|connect to|name)\\b").containsMatchIn(t)
+            && !Regex("^(is|are|was|what|why|how|does|do|did|which|who|should|where)\\b").containsMatchIn(t)) {
+            val hits = settings.filter { (_, pat) -> Regex("\\b(?:$pat)\\b").containsMatchIn(t) }
+                .filterNot { it.first == "flashlight" && Regex("\\b(brightness|screen|night light|dark mode)\\b").containsMatchIn(t) }
+                .filterNot { it.first == "mobile_data" && hits0(t) }
+            if (hits.size == 1) {
+                val off = Regex("\\b(off|disable|deactivate|kill|stop|close|shut|no more|cut)\\b").containsMatchIn(t)
+                val on = Regex("\\b(on|enable|activate|start|open|need|want|give|light up)\\b").containsMatchIn(t) || t.split(' ').size <= 2
+                if (off != on) return "toggle_setting" to JSONObject().put("setting", hits[0].first).put("on", on)
+            }
+        }
+
+        // Speed readout and the process registry work offline too.
+        if (Regex("^(?:show |give me |what are |check )?(?:my |your |the )?(?:speed|latency) ?(?:stats|statistics|report|numbers|test)?$|^how fast (?:are you|is blaze)$").matches(t))
+            return "speed_stats" to JSONObject()
+        if (Regex("^(?:what'?s|what is|show|list|show me)(?: me)? (?:running|active|tracked|my processes|processes|everything you (?:set|made|created))$|^(?:my )?processes$").matches(t))
+            return "list_processes" to JSONObject()
 
         // Volume
         when {

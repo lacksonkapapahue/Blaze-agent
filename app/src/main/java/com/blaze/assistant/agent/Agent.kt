@@ -340,6 +340,7 @@ When you finish, say what you did in one short sentence.
             append("\nYou can also read and send texts, check calls, read and add calendar events, look up contacts, toggle the flashlight and volume, and schedule routines with your tools. Sending a text or placing a call asks the user for approval automatically.")
             if (Settings.followups) append("\nAt the very end of each final answer (never when calling tools), add one line exactly like <<follow-ups: first | second | third>> with three short next requests (max 6 words each) written as the user would say them. Skip it for routines.")
             append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
+            append("\nEverything you create that keeps running (alarms, timers, routines, triggers, calendar events, jobs) gets an ID like R4. To change, stop or delete one, call processes to find the ID, then process(id, action). Only use action=details when the user asks for specifics.")
             // Speed plan step 2: everything above stays identical turn after turn, so providers can
             // reuse their cached prefix. Everything that changes (clock, memory, device) goes last.
             append("\n\n")
@@ -348,6 +349,7 @@ When you finish, say what you did in one short sentence.
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
+            Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
         }
     }
 
@@ -363,6 +365,7 @@ When you finish, say what you did in one short sentence.
                 .put("options", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))))
                 .put("required", JSONArray(listOf("question", "options"))))))
         Web.tools().forEach { t.put(it) }
+        Processes.tools().forEach { t.put(it) }
         com.blaze.assistant.proactive.Triggers.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.Ussd.tool())
         t.put(com.blaze.assistant.phone.Messaging.tool())
@@ -921,6 +924,10 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, "Looking at a screenshot")
                     val shot = PhoneTools.screenshot()
                     if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
+                }
+                in Processes.names -> {
+                    add(Role.STEP, if (name == "processes") "Checking what's running" else "${args.optString("action").replaceFirstChar { it.uppercase() }} ${args.optString("id")}")
+                    try { Processes.run(app, name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 "create_routine", "list_routines", "delete_routine" -> {
                     add(Role.STEP, if (name == "create_routine") "Scheduling \"${args.optString("name")}\"" else "Checking routines")

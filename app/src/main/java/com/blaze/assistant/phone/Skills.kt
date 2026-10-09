@@ -251,8 +251,10 @@ object Skills {
             put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
             a.optString("location").takeIf { it.isNotBlank() }?.let { put(CalendarContract.Events.EVENT_LOCATION, it) }
         }
-        ctx.contentResolver.insert(CalendarContract.Events.CONTENT_URI, v) ?: return "The calendar refused the event."
-        return "Added \"${a.getString("title")}\" on ${SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault()).format(Date(start))}."
+        val uri = ctx.contentResolver.insert(CalendarContract.Events.CONTENT_URI, v) ?: return "The calendar refused the event."
+        val pid = com.blaze.assistant.agent.Processes.register("event", a.getString("title"), android.content.ContentUris.parseId(uri).toString(), start,
+            JSONObject().put("location", a.optString("location")).put("start", a.getString("start")).put("end", a.optString("end")))
+        return "Added \"${a.getString("title")}\" on ${SimpleDateFormat("EEE d MMM HH:mm", Locale.getDefault()).format(Date(start))}. [ID $pid]"
     }
 
     // ---------- Quick settings ----------

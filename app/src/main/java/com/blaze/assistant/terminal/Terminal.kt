@@ -157,7 +157,8 @@ object Terminal {
         synchronized(jobs) { jobs[j.id] = j }
         scope.launch { try { p.inputStream.bufferedReader().forEachLine { synchronized(j.log) { j.log.append(it).append('\n'); if (j.log.length > 50_000) j.log.delete(0, 20_000) } } } catch (_: Exception) { } }
         Thread.sleep(800)
-        return "Started job ${j.id}: $cmd\n" + (if (!p.isAlive) "It already exited (code ${p.exitValue()}).\n" else "") + synchronized(j.log) { j.log.toString().takeLast(1500) }
+        val pid = com.blaze.assistant.agent.Processes.register("job", cmd.take(50), j.id.toString(), props = org.json.JSONObject().put("command", cmd))
+        return "Started job ${j.id} [ID $pid]: $cmd\n" + (if (!p.isAlive) "It already exited (code ${p.exitValue()}).\n" else "") + synchronized(j.log) { j.log.toString().takeLast(1500) }
     }
 
     fun listJobs(): String = synchronized(jobs) {
@@ -166,6 +167,7 @@ object Terminal {
                 synchronized(j.log) { j.log.toString().takeLast(400).prependIndent("    ") } }
     }
 
+    fun jobAlive(id: Int): Boolean = synchronized(jobs) { jobs[id]?.proc?.isAlive == true }
     fun stopJob(id: Int): String = synchronized(jobs) { jobs.remove(id)?.let { it.proc.destroy(); "Stopped job $id." } ?: "No job $id." }
     fun jobCount() = synchronized(jobs) { jobs.values.count { it.proc.isAlive } }
 

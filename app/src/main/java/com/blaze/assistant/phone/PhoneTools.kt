@@ -117,19 +117,34 @@ object PhoneTools {
                     start(ctx, i); "Message drafted; the user needs to press send."
                 }
                 "set_alarm" -> {
+                    // The registry ID goes into the clock label so the alarm can be found and deleted later.
+                    val h = args.getInt("hour"); val m = args.getInt("minute")
+                    val pid = com.blaze.assistant.agent.Processes.nextId("alarm")
+                    val name = args.optString("label").trim()
+                    val label = (if (name.isNotBlank()) "$name " else "") + "(Blaze $pid)"
                     val i = Intent(AlarmClock.ACTION_SET_ALARM)
-                        .putExtra(AlarmClock.EXTRA_HOUR, args.getInt("hour"))
-                        .putExtra(AlarmClock.EXTRA_MINUTES, args.getInt("minute"))
+                        .putExtra(AlarmClock.EXTRA_HOUR, h)
+                        .putExtra(AlarmClock.EXTRA_MINUTES, m)
                         .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-                    if (args.has("label")) i.putExtra(AlarmClock.EXTRA_MESSAGE, args.getString("label"))
-                    start(ctx, i); "Alarm set."
+                        .putExtra(AlarmClock.EXTRA_MESSAGE, label)
+                    start(ctx, i)
+                    com.blaze.assistant.agent.Processes.register("alarm", name.ifBlank { "Alarm %02d:%02d".format(h, m) }, label,
+                        com.blaze.assistant.agent.Processes.nextAt(h, m),
+                        org.json.JSONObject().put("label", label).put("name", name).put("time", "%02d:%02d".format(h, m)), id = pid)
+                    "Alarm set. [ID $pid]"
                 }
                 "set_timer" -> {
+                    val secs = args.getInt("seconds")
                     val i = Intent(AlarmClock.ACTION_SET_TIMER)
-                        .putExtra(AlarmClock.EXTRA_LENGTH, args.getInt("seconds"))
+                        .putExtra(AlarmClock.EXTRA_LENGTH, secs)
                         .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
                     if (args.has("label")) i.putExtra(AlarmClock.EXTRA_MESSAGE, args.getString("label"))
-                    start(ctx, i); "Timer started."
+                    start(ctx, i)
+                    val pid = com.blaze.assistant.agent.Processes.register("timer",
+                        args.optString("label").ifBlank { if (secs >= 60) "${secs / 60} min timer" else "$secs s timer" },
+                        System.currentTimeMillis().toString(), System.currentTimeMillis() + secs * 1000L,
+                        org.json.JSONObject().put("seconds", secs))
+                    "Timer started. [ID $pid]"
                 }
                 "wait" -> {
                     delay((args.optDouble("seconds", 1.0).coerceIn(0.5, 5.0) * 1000).toLong()); "Waited."

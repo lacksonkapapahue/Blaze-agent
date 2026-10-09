@@ -58,9 +58,11 @@ object Triggers {
     fun add(name: String, event: String, match: String, prompt: String): String {
         val ev = event.lowercase().trim()
         if (ev !in setOf("notification", "battery_below", "charging", "app_opened")) return "Error: event must be notification, battery_below, charging or app_opened."
-        save(all.value + Trigger(System.currentTimeMillis(), name.ifBlank { prompt.take(30) }, ev, match.trim(), prompt))
-        return "Trigger \"$name\" saved: when $ev${if (match.isNotBlank()) " ($match)" else ""}, I'll: $prompt"
+        val tid = System.currentTimeMillis()
+        save(all.value + Trigger(tid, name.ifBlank { prompt.take(30) }, ev, match.trim(), prompt))
+        return "Trigger \"$name\" saved: when $ev${if (match.isNotBlank()) " ($match)" else ""}, I'll: $prompt [ID ${com.blaze.assistant.agent.Processes.idFor("trigger", tid.toString())}]"
     }
+    fun rename(id: Long, name: String) = save(all.value.map { if (it.id == id) it.copy(name = name.trim()) else it })
     fun remove(id: Long) = save(all.value.filterNot { it.id == id })
     fun toggle(id: Long) = save(all.value.map { if (it.id == id) it.copy(enabled = !it.enabled) else it })
 

@@ -11,6 +11,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.device.CrashLog.shieldMainThread()
         Settings.init(this)
         com.blaze.assistant.agent.IntentCache.init(this)
+        com.blaze.assistant.agent.Processes.init(this)
         com.blaze.assistant.agent.Memory.init(this)
         com.blaze.assistant.agent.Usage.init(this)
         com.blaze.assistant.agent.Learning.init(this)

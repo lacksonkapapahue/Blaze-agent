@@ -273,6 +273,15 @@ object Connectors {
         } catch (e: Exception) { "Error: ${e.message}" }
     }
 
+    /** Used by the process registry to delete a Google Calendar event Blaze created. */
+    suspend fun gcalDelete(eventId: String): String = withContext(Dispatchers.IO) {
+        val tok = access("google") ?: return@withContext "Couldn't delete: Google isn't connected."
+        try {
+            val (c, b) = Http.req("DELETE", "https://www.googleapis.com/calendar/v3/calendars/primary/events/" + Http.enc(eventId), null, bearer(tok))
+            if (c in 200..299 || c == 404 || c == 410) "Deleted it from Google Calendar." else "Couldn't delete ($c) ${b.take(120)}"
+        } catch (e: Exception) { "Couldn't delete: ${e.message}" }
+    }
+
     private fun bearer(t: String) = mapOf("Authorization" to "Bearer $t", "Accept" to "application/json")
     private fun get(url: String, t: String, extra: Map<String, String> = emptyMap()): JSONObject {
         val (c, b) = Http.req("GET", url, null, bearer(t) + extra)
@@ -335,7 +344,9 @@ object Connectors {
                 val e = send("POST", "https://www.googleapis.com/calendar/v3/calendars/primary/events", JSONObject().put("summary", a.optString("title"))
                     .put("location", a.optString("location")).put("start", JSONObject().put("dateTime", rfc(st)).put("timeZone", tz))
                     .put("end", JSONObject().put("dateTime", rfc(en)).put("timeZone", tz)), t)
-                "Added \"${a.optString("title")}\" to Google Calendar. ${e.optString("htmlLink")}"
+                val pid = com.blaze.assistant.agent.Processes.register("gevent", a.optString("title"), e.optString("id"), st.time,
+                    JSONObject().put("location", a.optString("location")).put("link", e.optString("htmlLink")))
+                "Added \"${a.optString("title")}\" to Google Calendar. [ID $pid] ${e.optString("htmlLink")}"
             }
             "drive_search" -> {
                 val q = a.optString("query").replace("'", "\\'")

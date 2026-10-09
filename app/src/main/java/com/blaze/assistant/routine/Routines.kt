@@ -58,6 +58,8 @@ object Routines {
         save(_all.value + r); return r
     }
 
+    fun rename(id: Int, name: String) = save(_all.value.map { if (it.id == id) it.copy(name = name.trim()) else it })
+    fun retime(id: Int, h: Int, m: Int) = save(_all.value.map { if (it.id == id) it.copy(hour = h, minute = m) else it })
     fun setEnabled(id: Int, on: Boolean) = save(_all.value.map { if (it.id == id) it.copy(enabled = on) else it })
     fun delete(id: Int) { cancel(id); save(_all.value.filterNot { it.id == id }) }
 
@@ -130,7 +132,7 @@ object Routines {
         "create_routine" -> {
             val (h, m) = a.getString("time").split(":").let { it[0].trim().toInt() to (it.getOrNull(1)?.trim()?.take(2)?.toInt() ?: 0) }
             val r = add(a.getString("name"), a.getString("prompt"), h, m, parseDays(a.optString("days", "daily")))
-            "Created routine \"${r.name}\" at ${r.timeLabel()}, ${r.daysLabel()}."
+            "Created routine \"${r.name}\" at ${r.timeLabel()}, ${r.daysLabel()}. [ID ${com.blaze.assistant.agent.Processes.idFor("routine", r.id.toString())}]"
         }
         "list_routines" -> _all.value.takeIf { it.isNotEmpty() }?.joinToString("\n") {
             "${it.name}: ${it.timeLabel()} ${it.daysLabel()}${if (!it.enabled) " (off)" else ""} — ${it.prompt}" } ?: "No routines yet."
