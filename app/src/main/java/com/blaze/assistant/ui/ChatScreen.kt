@@ -156,7 +156,9 @@ fun ChatScreen() {
 
     var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
     // First run only: people who already set Blaze up never see it.
-    var onboard by rememberSaveable { mutableStateOf(!Settings.bool("onboarded", false) && !Settings.ready && !hasMessages) }
+    var onboard by rememberSaveable { mutableStateOf(!Settings.bool("onboarded", false) && !com.blaze.assistant.agent.Brains.hasAny() && !hasMessages) }
+    var setupPage by rememberSaveable { mutableStateOf(0) }
+    val galleryOpen by GalleryUi.open.collectAsState()
     LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
     // Blaze opening one of its own settings pages (setup help).
     val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
@@ -257,7 +259,7 @@ fun ChatScreen() {
             TopBar(mood, controlOn = Settings.phoneControl && a11yOn, onMenu = { drawer = true }, onNew = { Agent.clear(); quote = "" })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (!hasMessages) {
-                    Welcome(needsSetup = !Settings.ready, onSetup = { settingsPage = "ai" }) { Agent.send(it) }
+                    Welcome(needsSetup = !com.blaze.assistant.agent.Brains.hasAny(), onSetup = { setupPage = 0; onboard = true }) { Agent.send(it) }
                 } else {
                     val dens = LocalDensity.current
                     CompositionLocalProvider(LocalTextToolbar provides toolbar,
@@ -269,6 +271,15 @@ fun ChatScreen() {
                 }
             }
             if (voiceState == Voice.State.LISTENING) ListeningStrip()
+            LaunchedEffect(a11yOn) { if (a11yOn) Settings.setBool("a11y_seen", true) }
+            if (!a11yOn && Settings.phoneControl && Settings.bool("a11y_seen", false)) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent)
+                .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Label("Blaze lost phone control", size = 10.sp, modifier = Modifier.weight(1f))
+                Label("Turn it back on", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+                    ComeBack.watch(ctx) { BlazeAccessibilityService.isEnabled(ctx) }
+                    ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }.padding(8.dp))
+            }
             ConfirmCard()
             QuestionCard()
             val sugg = remember(input.text) { CommandRunner.suggest(input.text) }
@@ -326,8 +337,9 @@ fun ChatScreen() {
         if (drawer) BackHandler { drawer = false }
 
         if (showChats) ChatsSheet(onDismiss = { showChats = false })
-        if (onboard) Onboarding { prompt ->
-            onboard = false
+        if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
+        if (onboard) SetupFlow(setupPage) { prompt ->
+            onboard = false; setupPage = 0
             when {
                 prompt == null -> {}
                 prompt.startsWith("/settings") -> settingsPage = "ai"
@@ -406,10 +418,10 @@ private fun Sidebar(onClose: () -> Unit, onNew: () -> Unit, onAllChats: () -> Un
             contentAlignment = Alignment.Center) { Label("+  New chat", color = c.paper, size = 11.sp) }
         Spacer(Modifier.height(10.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            val nav = listOf("chats" to "Chats", "browser" to "Browser", "routines" to "Routines", "memory" to "Memory", "commands" to "Slash commands",
+            val nav = listOf("chats" to "Chats", "gallery" to "Gallery", "browser" to "Browser", "routines" to "Routines", "memory" to "Memory", "commands" to "Slash commands",
                 "usage" to "Usage", "" to "Settings")
             nav.forEach { (id, label) ->
-                Row(Modifier.fillMaxWidth().clickable { when (id) { "chats" -> onAllChats(); "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx); else -> onPage(id) } }.padding(horizontal = 20.dp, vertical = 13.dp),
+                Row(Modifier.fillMaxWidth().clickable { when (id) { "chats" -> onAllChats(); "gallery" -> { GalleryUi.open.value = true; onClose() }; "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx); else -> onPage(id) } }.padding(horizontal = 20.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(5.dp).background(c.weak))
                     Spacer(Modifier.width(14.dp))
@@ -632,6 +644,7 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
                     Text(shownText, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 23.sp, color = c.body))
                 }
             }
+            if (m.media.isNotEmpty()) MediaStrip(m.media)
             Actions(m, canAct, onQuote, allowQuote = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)
         }
@@ -835,19 +848,21 @@ private fun Welcome(needsSetup: Boolean, onSetup: () -> Unit, onPick: (String) -
         Spacer(Modifier.height(32.dp))
 
         if (needsSetup) {
-            Box(
-                Modifier.fillMaxWidth().background(c.ink).clickable(onClick = onSetup).padding(18.dp)
-            ) {
-                Label("Add your AI key to begin  →", color = c.paper, size = 12.sp)
+            Column(Modifier.fillMaxWidth().background(c.ink).clickable(onClick = onSetup).padding(18.dp)) {
+                Label("Make me smarter · one tap  →", color = c.paper, size = 12.sp)
+                Spacer(Modifier.height(4.dp))
+                Text("I already work. Signing in makes me faster and smarter.", style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.paper.copy(alpha = 0.75f)))
             }
-        } else {
+            Spacer(Modifier.height(24.dp))
+        }
+        run {
             Label("Try")
             Spacer(Modifier.height(10.dp))
             val items = listOf(
                 "Set an alarm for 6:30",
-                "Open YouTube and play lo-fi music",
-                "Turn on Wi-Fi",
-                "Draft a short product announcement"
+                "Draw a lion wearing sunglasses",
+                "Make me an afro beat",
+                "Open YouTube and play lo-fi music"
             )
             Column(Modifier.fillMaxWidth().hairlineTop(c.hair)) {
                 items.forEachIndexed { i, s ->

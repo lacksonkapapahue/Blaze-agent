@@ -93,6 +93,11 @@ class MainActivity : FragmentActivity() {
         Notifier.clearReplies(); Notifier.doneWorking()
         com.blaze.assistant.voice.WakeWordService.start(this)
     }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) com.blaze.assistant.agent.Brains.catchKey(this)?.let { android.widget.Toast.makeText(this, it, android.widget.Toast.LENGTH_LONG).show() }
+    }
+
     override fun onPause() {
         Agent.inForeground = false
         if (Agent.mood.value != com.blaze.assistant.agent.Mood.IDLE) Notifier.working(Agent.lastStep())

@@ -18,7 +18,7 @@ object ChatLane {
     private val smalltalk = Regex("""^(hi|hey|hello|yo|sup|hiya|howdy|good (morning|afternoon|evening|night)|gm|gn|morning|night|thanks?( you| u)?|thx|ty|cheers|ok(ay)?|cool|nice|great|awesome|lol|haha+|bye|see (you|ya)|later|sweet dreams|love (you|it)|you'?re (the best|awesome|great|amazing)|how are (you|u)|how'?s it going|what'?s up|wassup|who are you|what are you|what'?s your name)\b""", RegexOption.IGNORE_CASE)
 
     // Anything that smells of live data, the user's own stuff or an action goes to the tool lane.
-    private val needsTools = Regex("""\b(weather|news|latest|current|currently|today|tonight|tomorrow|yesterday|now|this week|price|prices|cost|exchange rate|score|scores|search|google|look ?up|find|near|nearby|open|close|send|call|text|sms|whatsapp|remind|reminder|alarm|timer|set|turn|switch|enable|disable|play|pause|stop|start|check|my|mine|our|download|install|book|order|buy|schedule|calendar|email|mail|inbox|message|messages|screen|phone|app|apps|file|files|photo|battery|wifi|bluetooth|volume|time|date|run|code|shell|terminal|git|repo|website|url|link|http|again|same|do it|go ahead|continue|retry|remember|forget|delete|cancel)\b|https?://|\.(com|org|zm|net)\b|\d{3,}""", RegexOption.IGNORE_CASE)
+    private val needsTools = Regex("""\b(weather|news|latest|current|currently|today|tonight|tomorrow|yesterday|now|this week|price|prices|cost|exchange rate|score|scores|search|google|look ?up|find|near|nearby|open|close|send|call|text|sms|whatsapp|remind|reminder|alarm|timer|set|turn|switch|enable|disable|play|pause|stop|start|check|my|mine|our|download|install|book|order|buy|schedule|calendar|email|mail|inbox|message|messages|screen|phone|app|apps|file|files|photo|battery|wifi|bluetooth|volume|time|date|run|code|shell|terminal|git|repo|website|url|link|http|again|same|do it|go ahead|continue|retry|remember|forget|delete|cancel|image|images|picture|pic|draw|paint|generate|create|make|design|logo|wallpaper|beat|beats|music|song|audio|gallery|python|script)\b|https?://|\.(com|org|zm|net)\b|\d{3,}""", RegexOption.IGNORE_CASE)
 
     private val knowledge = Regex("""^(what|who|why|how|when|where|which|explain|define|tell me|describe|write|compose|give me|translate|summari[sz]e|compare|is|are|can|could|should|would|do|does|did)\b""", RegexOption.IGNORE_CASE)
 
@@ -43,8 +43,9 @@ object ChatLane {
             if (name != null) append("The user's name is $name. ")
             append("Reply like a sharp friend texting back: short, warm, sure of yourself, the answer first, one or two sentences unless they ask for more. No filler like \"let me know if\". ")
             append("It is $now. ")
+            append("You are Blaze: you CAN generate images, make beats and music, run Python in your own Linux terminal, browse, and use the user's phone, just not in this short reply. ")
             append("You have NO tools in this reply. If answering properly needs live or current information (news, weather, prices, scores, anything about today), ")
-            append("anything on the user's phone, apps, messages, files, calendar or settings, or doing any action, reply with exactly $ESCAPE and nothing else. ")
+            append("anything on the user's phone, apps, messages, files, calendar or settings, or doing or making anything (an image, a beat, a file, any action), or if they ask whether you can do something, reply with exactly $ESCAPE and nothing else. ")
             if (Settings.followups) append("At the very end add one line exactly like <<follow-ups: first | second | third>> with three short next requests (max 6 words each) written as the user would say them. ")
             append(Memory.promptBlock(userText).take(1500))
         }

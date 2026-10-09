@@ -58,12 +58,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 data class SettingsPage(val id: String, val title: String, val sub: String)
 
 /** The four that matter, shown first; the rest sit under Advanced. */
-val essentialPages = setOf("ai", "persona", "control", "voice", "feel")
+val essentialPages = setOf("ai", "persona", "voice", "control", "connections", "privacy")
 
 val settingsPages = listOf(
-    SettingsPage("ai", "AI & model", "Provider, key, model, reasoning, follow-ups"),
+    SettingsPage("ai", "Brain", "Free sign-ins; models and keys for power users"),
     SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
-    SettingsPage("connections", "Connections", "Google, GitHub, Spotify, Notion, Slack, MCP"),
+    SettingsPage("connections", "Connected accounts", "Google, GitHub, Spotify, Notion, Slack"),
     SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
     SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
     SettingsPage("terminal", "Terminal", "A real shell, jobs, Termux"),
@@ -126,7 +126,12 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                     val ctx = androidx.compose.ui.platform.LocalContext.current
                     Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
                 }
-                "ai" -> AiPage()
+                "ai" -> {
+                    BrainCard()
+                    var adv by remember { mutableStateOf(Settings.providerId != com.blaze.assistant.agent.Providers.AUTO) }
+                    if (adv) AiPage() else Row(Modifier.fillMaxWidth().clickable { adv = true }.padding(vertical = 14.dp)) {
+                        Label("Show advanced brain settings  ↓", color = c.accent, size = 10.sp) }
+                }
                 "feel" -> FeelPage()
                 "connections" -> ConnectionsPage()
                 "persona" -> PersonaSection()

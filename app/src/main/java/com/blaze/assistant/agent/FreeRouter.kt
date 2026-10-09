@@ -69,7 +69,7 @@ object FreeRouter {
         val saved = try {
             val a = JSONArray(Settings.freeChain)
             (0 until a.length()).map { a.getString(it).split('|', limit = 2).let { p -> p[0] to p.getOrElse(1) { "" } } }
-        } catch (_: Exception) { emptyList() }
+        } catch (_: Exception) { emptyList() }.filter { it.first != "github" }   // GitHub Models retired Jul 2026
         val keyed = Providers.freeOrder.filter { Providers.keyOf(it).isNotBlank() }
             .map { it to Settings.modelFor(it).ifBlank { defaultModel(it) } }
             .filter { it.second.isNotBlank() }
@@ -83,6 +83,12 @@ object FreeRouter {
     fun removed(pid: String) {
         val r = Settings.str("free_chain_removed", "").split(',').filter { it.isNotBlank() }.toMutableSet()
         r += pid; Settings.setStr("free_chain_removed", r.joinToString(","))
+    }
+
+    /** A key was just added for [pid] (sign-in or key catcher): let it join the chain again. */
+    fun added(pid: String) {
+        val r = Settings.str("free_chain_removed", "").split(',').filter { it.isNotBlank() && it != pid }
+        Settings.setStr("free_chain_removed", r.joinToString(","))
     }
 
     fun save(list: List<Pair<String, String>>) {

@@ -41,8 +41,8 @@ object Providers {
             "", "…", "https://console.mistral.ai/api-keys", "https://admin.mistral.ai/plateforme/limits"),
         Provider("cerebras", "Cerebras", "https://api.cerebras.ai/v1/",
             "", "csk-…", "https://cloud.cerebras.ai/platform", "https://cloud.cerebras.ai/platform"),
-        Provider("github", "GitHub Models", "https://models.github.ai/inference/",
-            "", "github_pat_… (or connect GitHub)", "https://github.com/settings/personal-access-tokens/new", "https://github.com/marketplace/models"),
+        Provider("github", "GitHub Models (retired Jul 2026)", "https://models.github.ai/inference/",
+            "", "github_pat_…", "https://github.com/settings/personal-access-tokens/new", "https://github.com/marketplace/models"),
         Provider("xai", "Grok (xAI)", "https://api.x.ai/v1/",
             "", "xai-…", "https://console.x.ai/", "https://console.x.ai/"),
         Provider(CUSTOM, "Custom (OpenAI-compatible)", "", "", "Your key", "", ""),
@@ -51,7 +51,7 @@ object Providers {
     fun byId(id: String) = all.firstOrNull { it.id == id } ?: if (id == keyless.id) keyless else all[1]
 
     /** Providers with a real free tier, in the default fill-first order for Auto. */
-    val freeOrder = listOf("gemini", "groq", "cerebras", "nvidia", "openrouter", "mistral", "github", "deepseek", "moonshot")
+    val freeOrder = listOf("gemini", "groq", "cerebras", "nvidia", "openrouter", "mistral", "deepseek", "moonshot")
 
     /** Free-tier model Auto uses for a provider when the user hasn't picked one. A 404 cools it for 30 min. */
     val freeDefault = mapOf(
@@ -59,16 +59,8 @@ object Providers {
         "cerebras" to "gpt-oss-120b",
         "nvidia" to "meta/llama-3.3-70b-instruct",
         "mistral" to "mistral-small-latest",
-        "github" to "openai/gpt-4.1-mini",
     )
 
-    /**
-     * The key Blaze would use for [pid]. GitHub Models also accepts the token of the GitHub
-     * account connected in Settings → Connections, so no separate key is needed there.
-     */
-    fun keyOf(pid: String): String {
-        val k = Settings.keyFor(pid)
-        if (k.isNotBlank() || pid != "github") return k
-        return try { com.blaze.assistant.connect.Connectors.access("github").orEmpty() } catch (_: Exception) { "" }
-    }
+    /** The key Blaze would use for [pid]. (GitHub Models was retired on 30 Jul 2026, so no GitHub fallback.) */
+    fun keyOf(pid: String): String = Settings.keyFor(pid)
 }

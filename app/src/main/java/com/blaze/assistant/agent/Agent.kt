@@ -26,7 +26,9 @@ enum class Role { USER, BLAZE, STEP, ERROR }
 
 /** [files] are attachment names shown under a user message. */
 data class ChatMessage(val id: Long, val role: Role, val text: String, val files: List<String> = emptyList(),
-                       val thinking: String = "", val followups: List<String> = emptyList(), val meta: String = "")
+                       val thinking: String = "", val followups: List<String> = emptyList(), val meta: String = "",
+                       /** Pictures, beats and other media Blaze made for this reply (absolute paths). */
+                       val media: List<String> = emptyList())
 
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
 object ReplyParts {
@@ -170,6 +172,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     fun init(ctx: Context) {
         app = ctx.applicationContext
         ChatStore.init(app)
+        try { com.blaze.assistant.media.Media.init(app) } catch (_: Exception) { }
         refreshChats()
         // Reopen the chat you were in.
         val last = Settings.lastChatId
@@ -256,7 +259,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
             val mid = m.getLong("id"); maxId = maxOf(maxId, mid)
             val files = m.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
-            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"))
+            val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { java.io.File(it).exists() } ?: emptyList()
+            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media)
             if (m.has("mark")) s.historyMark[mid] = m.getInt("mark")
         }
         ids.set(maxOf(ids.get(), maxId + 1))
@@ -377,6 +381,11 @@ When you finish, say what you did in one short sentence.
             append("\nTERMINAL: check terminal_status before assuming a tool exists. Write files with file_write/file_edit (never echo or heredocs), read with file_read, find with file_search. " +
                 "Run programs with run_code (it installs Python/Node and packages itself). Anything over ~30 s or a server goes in background (run_shell background=true), then terminal_jobs id=N / job_input; preview web servers with preview_server; repeat scripts on a schedule with schedule_command. " +
                 "Use the git tool for repos (already signed in to their GitHub). Call APIs with http_request. On an error, read it, fix the cause and retry (up to 3 times) before telling the user; a [hint] line tells you what to try. Give the user results with export_file.")
+            append("\nMAKE THINGS IN THE BACKGROUND, NOT ON THE SCREEN: you CAN create images (generate_image, free) and you have a real Linux terminal with Python. " +
+                "For anything that produces or processes content (pictures, beats and music, charts, documents, conversions, edits, calculations, data, downloads), do it in the terminal with run_code instead of opening apps and tapping. " +
+                "Beats: run_code python `import sys; sys.path.insert(0,'/root/phone/blaze_lib'); from beats import make; print(make(style='trap', bpm=140, bars=8, key='A', out='/root/phone/beat.wav'))` (styles trap, boombap, afro, house, lofi; vary seed). " +
+                "Save outputs under /root/phone/ (that is ~ for the file tools): new pictures, audio and video files there are added to the user's Gallery and shown in the chat automatically. " +
+                "Only drive the screen when the task truly lives inside another app (sending in WhatsApp, a setting with no tool). Never tell the user you can't make images or music.")
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
@@ -396,6 +405,7 @@ When you finish, say what you did in one short sentence.
                 .put("options", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))))
                 .put("required", JSONArray(listOf("question", "options"))))))
         Web.tools().forEach { t.put(it) }
+        com.blaze.assistant.media.Media.tools().forEach { t.put(it) }
         Processes.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.Watchers.tool())
         SkillPacks.tools().forEach { t.put(it) }
@@ -508,15 +518,19 @@ When you finish, say what you did in one short sentence.
             msgs = msgs.map { if (it.id == id) it.copy(role = role, text = text) else it }
         }
 
+        /** Media made during this turn; shown under the final reply. */
+        val pendingMedia = mutableListOf<String>()
+
         fun addReply(liveId: Long, raw: String, thinking: String, fu: List<String> = emptyList(), meta: String = "") {
+            val media = synchronized(pendingMedia) { pendingMedia.toList().also { pendingMedia.clear() } }
             val p = ReplyParts.split(raw, final = true).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
             val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
             val text = p.text.ifEmpty { "Done." }
             if (liveId >= 0) msgs = msgs.map {
-                if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta) else it }
+                if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta, media = media) else it }
             else {
                 val id = ids.getAndIncrement()
-                msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta)
+                msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta, media = media)
             }
         }
 
@@ -536,6 +550,7 @@ When you finish, say what you did in one short sentence.
                         if (m.thinking.isNotEmpty()) put("thinking", m.thinking.take(20000))
                         if (m.followups.isNotEmpty()) put("followups", JSONArray(m.followups))
                         if (m.meta.isNotEmpty()) put("meta", m.meta)
+                        if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
                     })
             }
             val hist = JSONArray()
@@ -616,6 +631,21 @@ When you finish, say what you did in one short sentence.
                 if (attachments.isEmpty() && !routine) {
                     mood = Mood.THINKING
                     val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                    // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
+                    val pic = if (fast == null && !offline) com.blaze.assistant.media.Media.directPrompt(shown) else null
+                    if (pic != null) {
+                        mood = Mood.ACTING
+                        add(Role.STEP, "Drawing \u201c${pic.take(60)}\u201d")
+                        val t0 = System.currentTimeMillis()
+                        val r = com.blaze.assistant.media.Media.generate(pic)
+                        val reply = r.fold({ f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }; "Here you go. It's saved in your Gallery." },
+                            { "I couldn't reach the image service just now (${it.message}). Try again in a moment." })
+                        history.put(JSONObject().put("role", "assistant").put("content", if (r.isSuccess) "[Generated an image of: $pic, shown to the user and saved in their Gallery]" else reply))
+                        addReply(-1, reply, "", meta = "\uD83C\uDFA8 free image · %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
+                        mood = Mood.IDLE
+                        persist(); announce()
+                        return@launch
+                    }
                     if (fast != null) {
                         history.put(JSONObject().put("role", "assistant").put("content", fast.reply))
                         addReply(-1, fast.reply, "", meta = if (fast.ms < 60) "⚡ instant · ${fast.ms} ms" else "⚡ on-device · ${fast.ms} ms")
@@ -1024,6 +1054,26 @@ When you finish, say what you did in one short sentence.
             return if (r.isBlank()) ToolGuide.empty(name) else r
         }
 
+        /** Runs terminal work, then puts any new pictures / audio / video it wrote into the Gallery and this reply. */
+        private suspend fun withMediaScan(block: suspend () -> String): String {
+            val started = System.currentTimeMillis() - 2000
+            try { com.blaze.assistant.media.Media.installHelpers(com.blaze.assistant.terminal.Terminal.home()) } catch (_: Exception) { }
+            val out = block()
+            val found = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                try {
+                    val roots = listOf(com.blaze.assistant.terminal.Terminal.home(), java.io.File(com.blaze.assistant.terminal.Linux.rootfs(), "root"))
+                    roots.filter { it.isDirectory }.flatMap { r ->
+                        r.walkTopDown().maxDepth(4).onEnter { d -> d.name !in setOf("node_modules", "blaze_lib", "site-packages", ".cache", ".git", "phone") || d == r }
+                            .filter { it.isFile && it.lastModified() >= started && it.length() > 1000 && com.blaze.assistant.media.Media.isMedia(it) }.toList()
+                    }.distinctBy { it.canonicalPath }.sortedBy { it.lastModified() }.takeLast(6)
+                } catch (_: Exception) { emptyList() }
+            }
+            if (found.isEmpty()) return out
+            val names = found.mapNotNull { f -> try { com.blaze.assistant.media.Media.add(f).also { g -> synchronized(pendingMedia) { if (g.absolutePath !in pendingMedia) pendingMedia += g.absolutePath } }.name } catch (_: Exception) { null } }
+            if (names.isNotEmpty()) add(Role.STEP, "Added to your Gallery: " + names.joinToString())
+            return out + "\n[Shown to the user in the chat and saved in their Gallery: ${names.joinToString()}. No need to export or link them.]"
+        }
+
         suspend fun runToolRaw(name: String, args: JSONObject, shots: MutableList<String>): String {
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
             // Record phone actions (with the element's label, since numbers change) for task replay.
@@ -1036,6 +1086,29 @@ When you finish, say what you did in one short sentence.
             return when (name) {
                 "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact")) }
                 "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
+                "generate_image" -> {
+                    add(Role.STEP, "Drawing \u201c${args.optString("prompt").take(60)}\u201d")
+                    com.blaze.assistant.media.Media.generate(args.optString("prompt"), args.optInt("width", 1024), args.optInt("height", 1024),
+                        if (args.has("seed")) args.optInt("seed") else null, args.optString("model")).fold(
+                        { f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }
+                            "Image made and shown to the user in the chat (saved in their Gallery as ${f.name}). Reply with one short line about it; don't describe it at length or paste a link." },
+                        { e -> "Image service failed (${e.message}). Try once more with a simpler prompt, or draw it with run_code (Python + Pillow) and save it under /root/phone/." })
+                }
+                "gallery" -> {
+                    val M = com.blaze.assistant.media.Media
+                    when (args.optString("action")) {
+                        "add" -> {
+                            val f = com.blaze.assistant.terminal.DevTools.resolve(args.optString("path"))
+                            if (!f.isFile) "No such file: ${args.optString("path")}"
+                            else { val g = M.add(f, args.optString("title")); synchronized(pendingMedia) { if (g.absolutePath !in pendingMedia) pendingMedia += g.absolutePath }
+                                add(Role.STEP, "Added ${g.name} to your Gallery"); "Added to the Gallery and shown in the chat as ${g.name}." }
+                        }
+                        "save" -> M.find(args.optString("path"))?.let { add(Role.STEP, "Saving ${it.name} to your phone"); M.saveToPhone(it) } ?: "Not in the gallery: ${args.optString("path")}. Call gallery list."
+                        "share" -> M.find(args.optString("path"))?.let { app.startActivity(M.shareIntent(it)); "Opened the share sheet for ${it.name}." } ?: "Not in the gallery."
+                        "delete" -> M.find(args.optString("path"))?.let { f -> if (confirm("Delete from Gallery?", f.name, "Delete")) { M.delete(f); "Deleted ${f.name}." } else "The user did NOT approve deleting it." } ?: "Not in the gallery."
+                        else -> M.list()
+                    }
+                }
                 "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
                 "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
                 "ask_user" -> {
@@ -1055,7 +1128,7 @@ When you finish, say what you did in one short sentence.
                     if (com.blaze.assistant.terminal.Terminal.risky(cmd) && !confirm("Run this command?", cmd.take(200), "Run"))
                         "The user did NOT approve running that command."
                     else if (args.optBoolean("background")) kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.startJob(cmd, args.optBoolean("linux"), args.optInt("max_minutes", 0)) }
-                    else com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60), args.optBoolean("linux"))
+                    else withMediaScan { com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60), args.optBoolean("linux")) }
                 }
                 "run_ussd" -> {
                     val code = args.optString("code")
@@ -1074,6 +1147,7 @@ When you finish, say what you did in one short sentence.
                         else -> name.replace('_', ' ')
                     })
                     if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete")) "The user did NOT approve deleting that."
+                    else if (name == "run_code") withMediaScan { com.blaze.assistant.terminal.DevTools.run(app, name, args) }
                     else com.blaze.assistant.terminal.DevTools.run(app, name, args)
                 }
                 in com.blaze.assistant.phone.PimEdit.names -> {
