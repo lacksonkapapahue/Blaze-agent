@@ -36,7 +36,7 @@ object Processes {
     )
 
     private val prefix = mapOf("alarm" to "A", "timer" to "T", "routine" to "R", "trigger" to "G",
-        "event" to "E", "gevent" to "C", "job" to "J")
+        "event" to "E", "gevent" to "C", "job" to "J", "watcher" to "W")
     val kinds get() = prefix.keys
 
     private lateinit var app: Context
@@ -122,6 +122,11 @@ object Processes {
                 else list[i] = list[i].copy(title = t.name, status = st, props = props)
             }
         } catch (_: Exception) { }
+        try {
+            val ws = com.blaze.assistant.phone.Watchers.states()
+            list.removeAll { it.kind == "watcher" && it.ref !in ws }
+            list = list.map { if (it.kind == "watcher") it.copy(status = if (ws[it.ref] == true) "active" else "paused") else it }.toMutableList()
+        } catch (_: Exception) { }
         list = list.map {
             when {
                 it.status == "active" && it.kind == "timer" && it.due in 1..now -> it.copy(status = "finished")
@@ -141,6 +146,7 @@ object Processes {
     private fun whenOf(p: P): String = when (p.kind) {
         "routine" -> "${p.props.optString("time")} ${p.props.optString("days")}"
         "trigger" -> "on ${p.props.optString("event")}"
+        "watcher" -> "sees ${p.props.optString("when_visible")}"
         "job" -> ""
         else -> if (p.due > 0) fmt.format(Date(p.due)) else ""
     }
@@ -182,6 +188,7 @@ object Processes {
             "routine" -> { Routines.delete(p.ref.toInt()); "Deleted routine ${p.id} \u201c${p.title}\u201d." }
             "trigger" -> { Triggers.remove(p.ref.toLong()); "Deleted trigger ${p.id} \u201c${p.title}\u201d." }
             "job" -> com.blaze.assistant.terminal.Terminal.stopJob(p.ref.toInt())
+            "watcher" -> { com.blaze.assistant.phone.Watchers.remove(p.ref); "Deleted watcher ${p.id}." }
             "event" -> try {
                 val n = ctx.contentResolver.delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, p.ref.toLong()), null, null)
                 if (n > 0) "Deleted calendar event ${p.id} \u201c${p.title}\u201d." else "That event was already gone from the calendar."
@@ -221,6 +228,7 @@ object Processes {
             if (t != null && t.enabled == off) Triggers.toggle(t.id)
             sync(); "Trigger ${p.id} ${if (off) "paused" else "resumed"}."
         }
+        "watcher" -> { com.blaze.assistant.phone.Watchers.setEnabled(p.ref, !off); sync(); "Watcher ${p.id} ${if (off) "paused" else "resumed"}." }
         else -> "A ${p.kind} can't be paused, only deleted or rescheduled."
     }
 

@@ -26,8 +26,8 @@ object ToolRouter {
 
     val groups = listOf(
         Group("screen", "fine-grained screen control: tap, type, scroll, buttons, screenshots, do_actions",
-            r("""\b(tap|click|press|scroll|swipe|type|screen|button|screenshot|look at)\b"""),
-            { it in setOf("tap", "type_text", "scroll", "press_button", "do_actions", "look_at_screen", "wait", "viewport", "open_url", "navigate_to", "share_to_app") }),
+            r("""\b(tap|click|press|scroll|swipe|type|screen|button|screenshot|look at|watch|watcher|whenever|pops? up|sign ?in|log ?in)\b"""),
+            { it in setOf("tap", "type_text", "scroll", "press_button", "do_actions", "look_at_screen", "wait", "viewport", "open_url", "navigate_to", "share_to_app", "watch") }),
         Group("messages", "texts, calls, contacts, WhatsApp/Telegram, notifications, USSD",
             r("""\b(text|sms|message|whatsapp|telegram|reply|call|ring|dial|phone|contact|number|notification|missed|unread|airtime|bundle|balance|ussd|mtn|airtel|zamtel|mobile money|momo)\b|\*\d"""),
             { it in setOf("send_sms", "compose_sms", "read_messages", "call_contact", "call_number", "dial", "find_contact", "recent_calls",

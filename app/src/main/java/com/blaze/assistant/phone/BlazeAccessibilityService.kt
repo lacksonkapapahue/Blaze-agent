@@ -33,7 +33,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     }
 
     /** Elements from the last read_screen, addressed by their number. */
-    private val elements = mutableListOf<AccessibilityNodeInfo>()
+    private val elements = mutableListOf<AccessibilityNodeInfo?>()
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -49,6 +49,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         lastEventAt = android.os.SystemClock.uptimeMillis()
+        try { Watchers.onEvent(this, event.packageName?.toString().orEmpty()) } catch (_: Exception) { }
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString().orEmpty()
             if (pkg.isNotEmpty() && pkg != lastWindowPkg && pkg != packageName) {
@@ -66,13 +67,27 @@ class BlazeAccessibilityService : AccessibilityService() {
      */
     suspend fun settle(maxMs: Long = 1500, quietMs: Long = 250) {
         val start = android.os.SystemClock.uptimeMillis()
-        kotlinx.coroutines.delay(80)
+        val pkg = lastWindowPkg
+        // Learned per app: how long this app usually takes to go quiet. Fast apps stop waiting early.
+        val learned = settleAvg[pkg]
+        val cap = if (learned != null && (settleN[pkg] ?: 0) >= 3) minOf(maxMs, maxOf(350L, (learned * 2.2).toLong())) else maxMs
+        val quiet = if (learned != null && learned < 300) minOf(quietMs, 150L) else quietMs
+        kotlinx.coroutines.delay(60)
         while (true) {
             val now = android.os.SystemClock.uptimeMillis()
-            if (now - lastEventAt >= quietMs || now - start >= maxMs) return
-            kotlinx.coroutines.delay(50)
+            if (now - lastEventAt >= quiet || now - start >= cap) {
+                val took = (lastEventAt - start).coerceIn(0, maxMs)
+                if (pkg.isNotEmpty()) {
+                    settleAvg[pkg] = settleAvg[pkg]?.let { it * 0.7 + took * 0.3 } ?: took.toDouble()
+                    settleN[pkg] = (settleN[pkg] ?: 0) + 1
+                }
+                return
+            }
+            kotlinx.coroutines.delay(40)
         }
     }
+    private val settleAvg = java.util.concurrent.ConcurrentHashMap<String, Double>()
+    private val settleN = java.util.concurrent.ConcurrentHashMap<String, Int>()
     override fun onInterrupt() {}
 
     override fun onDestroy() {
@@ -114,46 +129,107 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     // ---------- Reading ----------
 
-    fun readScreen(): String {
-        elements.clear()
-        val root = rootInActiveWindow ?: return "I can't see the screen right now (no active window)."
+    // Stable element numbers: an element keeps its number across reads of the same screen, so the
+    // model can act on numbers it already has and after-action reads only need to send the changes.
+    private var keyToId = HashMap<String, Int>()
+    private var lastLines = HashMap<Int, String>()
+    private var lastReadPkg = ""
+    private var lastReadAt = 0L
+
+    private fun role(n: AccessibilityNodeInfo): String {
+        val c = n.className?.toString()?.substringAfterLast('.') ?: "View"
+        return when {
+            n.isEditable || c.contains("EditText") -> "field"
+            c.contains("Switch") || c.contains("Toggle") -> "switch"
+            c.contains("CheckBox") -> "check"
+            c.contains("Radio") -> "radio"
+            c.contains("Button") || (c.contains("Image") && n.isClickable) -> "btn"
+            c.contains("Image") -> "img"
+            c.contains("Recycler") || c.contains("ListView") || c.contains("ScrollView") || c.contains("Pager") -> "list"
+            c.contains("Web") -> "web"
+            c == "TextView" -> if (n.isClickable) "link" else "text"
+            n.isClickable -> "item"
+            else -> "text"
+        }
+    }
+
+    /** Full read. With [diff], a read of the same screen returns only what changed. */
+    fun readScreen(diff: Boolean = false): String {
+        val root = rootInActiveWindow ?: run { elements.clear(); return "I can't see the screen right now (no active window)." }
         val pkg = root.packageName?.toString() ?: "unknown"
+        val found = ArrayList<Pair<AccessibilityNodeInfo, String>>()
+        walk(root, found, 0)
+        // Keys: what the element is and says (not where), with a counter for repeats.
+        val seen = HashMap<String, Int>()
+        val keys = found.map { (n, line) ->
+            val base = role(n) + "|" + (n.text ?: "") + "|" + (n.contentDescription ?: "") + "|" + (n.viewIdResourceName ?: "")
+            val k = seen.getOrDefault(base, 0); seen[base] = k + 1
+            "$base#$k"
+        }
+        val now = android.os.SystemClock.uptimeMillis()
+        val samePkg = pkg == lastReadPkg && now - lastReadAt < 120_000
+        val overlap = if (samePkg) keys.count { it in keyToId } else 0
+        val keep = samePkg && found.isNotEmpty() && overlap * 10 >= found.size * 3
+        val newMap = HashMap<String, Int>()
+        val used = HashSet<Int>()
+        if (keep) keys.forEach { k -> keyToId[k]?.let { if (used.add(it)) newMap[k] = it } }
+        var next = if (keep) (keyToId.values.maxOrNull() ?: -1) + 1 else 0
+        keys.forEach { k -> if (k !in newMap) { while (next in used) next++; newMap[k] = next; used.add(next); next++ } }
+        elements.clear()
+        val lines = HashMap<Int, String>()
+        found.forEachIndexed { i, (n, line) ->
+            val id = newMap[keys[i]]!!
+            while (elements.size <= id) elements.add(null)
+            elements[id] = n
+            lines[id] = "[$id] $line"
+        }
+        val prevLines = lastLines
+        keyToId = newMap; lastLines = lines; lastReadPkg = pkg; lastReadAt = now
         val sb = StringBuilder()
-        sb.append("Foreground app: ").append(appLabel(pkg)).append(" (").append(pkg).append(")\n")
-        sb.append("Elements (use the number in [ ] with tap/type/scroll):\n")
-        walk(root, sb, 0)
-        if (elements.isEmpty()) sb.append("(nothing readable on screen)\n")
+        val ordered = found.indices.map { newMap[keys[it]]!! }
+        if (diff && keep && prevLines.isNotEmpty()) {
+            val changed = ordered.filter { prevLines[it] != lines[it] }
+            val gone = prevLines.keys.filter { it !in lines }
+            if (changed.isEmpty() && gone.isEmpty()) return "Same screen in ${appLabel(pkg)}, nothing changed."
+            if (changed.size + gone.size < found.size / 2 + 1) {
+                sb.append("Same screen in ").append(appLabel(pkg)).append(". Changed or new:\n")
+                changed.forEach { sb.append(lines[it]).append("\n") }
+                if (gone.isNotEmpty()) sb.append("Gone: ").append(gone.take(20).joinToString(" ") { "[$it]" }).append("\n")
+                sb.append("Other ").append(found.size - changed.size).append(" elements unchanged, same numbers.")
+                return sb.toString()
+            }
+        }
+        sb.append(appLabel(pkg)).append(" (").append(pkg).append("). Elements, use the [number]:\n")
+        ordered.forEach { sb.append(lines[it]).append("\n") }
+        if (found.isEmpty()) sb.append("(nothing readable on screen)\n")
         val out = sb.toString()
         return if (out.length <= 6_000) out else out.take(6_000) + "\n…(more below; scroll to see it)"
     }
 
-    private fun walk(node: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int) {
-        if (node == null || depth > 40 || elements.size >= 200) return
+    private fun walk(node: AccessibilityNodeInfo?, out: MutableList<Pair<AccessibilityNodeInfo, String>>, depth: Int) {
+        if (node == null || depth > 40 || out.size >= 200) return
         if (!node.isVisibleToUser) return
         val text = node.text?.toString()?.trim().orEmpty()
         val desc = node.contentDescription?.toString()?.trim().orEmpty()
         val hint = if (android.os.Build.VERSION.SDK_INT >= 26) node.hintText?.toString()?.trim().orEmpty() else ""
         val interesting = text.isNotEmpty() || desc.isNotEmpty() || node.isClickable ||
             node.isEditable || node.isScrollable || node.isCheckable
-        if (interesting) {
-            val id = elements.size
-            elements.add(node)
-            val kind = node.className?.toString()?.substringAfterLast('.') ?: "View"
-            sb.append("[").append(id).append("] ").append(kind)
+        // Skip a bare clickable wrapper whose only job is to hold one labelled child: the child is listed.
+        val wrapper = text.isEmpty() && desc.isEmpty() && !node.isEditable && !node.isScrollable && !node.isCheckable &&
+            node.childCount == 1 && node.getChild(0)?.let { c -> !c.isClickable && (!c.text.isNullOrBlank() || !c.contentDescription.isNullOrBlank()) } == true
+        if (interesting && !wrapper) {
+            val sb = StringBuilder(role(node))
             if (text.isNotEmpty()) sb.append(" \"").append(text.take(120)).append("\"")
-            if (desc.isNotEmpty() && desc != text) sb.append(" desc=\"").append(desc.take(80)).append("\"")
-            if (hint.isNotEmpty() && hint != text) sb.append(" hint=\"").append(hint.take(60)).append("\"")
-            val flags = mutableListOf<String>()
-            if (node.isClickable) flags += "clickable"
-            if (node.isEditable) flags += "editable"
-            if (node.isScrollable) flags += "scrollable"
-            if (node.isCheckable) flags += if (node.isChecked) "checked" else "unchecked"
-            if (node.isSelected) flags += "selected"
-            if (!node.isEnabled) flags += "disabled"
-            if (flags.isNotEmpty()) sb.append(" (").append(flags.joinToString(", ")).append(")")
-            sb.append("\n")
+            if (desc.isNotEmpty() && desc != text) sb.append(" (").append(desc.take(80)).append(")")
+            if (hint.isNotEmpty() && hint != text) sb.append(" hint \"").append(hint.take(60)).append("\"")
+            if (node.isCheckable) sb.append(if (node.isChecked) " on" else " off")
+            if (node.isScrollable) sb.append(" scrolls")
+            if (node.isSelected) sb.append(" selected")
+            if (!node.isEnabled) sb.append(" disabled")
+            if (node.isClickable && role(node) in setOf("text", "img")) sb.append(" tappable")
+            out.add(node to sb.toString())
         }
-        for (i in 0 until node.childCount) walk(node.getChild(i), sb, depth + 1)
+        for (i in 0 until node.childCount) walk(node.getChild(i), out, depth + 1)
     }
 
     private fun appLabel(pkg: String): String = try {
@@ -169,7 +245,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     /** After read_screen: the element whose text or description matches [label] best (for task replay). */
     fun findByLabel(label: String): Int? {
         val l = label.trim().lowercase(); if (l.isEmpty()) return null
-        val labels = elements.indices.map { labelOf(it).trim().lowercase() }
+        val labels = elements.indices.map { if (elements[it] == null) "" else labelOf(it).trim().lowercase() }
         labels.indexOfFirst { it == l }.takeIf { it >= 0 }?.let { return it }
         return labels.indexOfFirst { it.isNotEmpty() && (it.contains(l) || l.contains(it)) }.takeIf { it >= 0 }
     }
@@ -205,6 +281,7 @@ class BlazeAccessibilityService : AccessibilityService() {
         val l = label.trim().lowercase(); if (l.isEmpty()) return null
         var best = -1; var bestScore = 0
         elements.forEachIndexed { i, n ->
+            if (n == null) return@forEachIndexed
             val ls = labelsOf(n).map { it.lowercase() } + labelOf(i).lowercase()
             var sc = 0
             for (x in ls) sc = maxOf(sc, when {
@@ -237,11 +314,11 @@ class BlazeAccessibilityService : AccessibilityService() {
         readScreen()
         val f = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
         if (f != null && f.isEditable) { val i = elements.indexOfFirst { it == f }; if (i >= 0) return i }
-        return elements.indexOfFirst { it.isEditable }.takeIf { it >= 0 }
+        return elements.indexOfFirst { it?.isEditable == true }.takeIf { it >= 0 }
     }
 
     /** Presses the keyboard's Enter/Search on the current field. */
-    suspend fun pressEnter(): Boolean { val id = anyField() ?: return false; return submitIme(elements[id]) }
+    suspend fun pressEnter(): Boolean { val id = anyField() ?: return false; return submitIme(elements[id] ?: return false) }
 
     /** Package in front right now. */
     fun currentPkg(): String = rootInActiveWindow?.packageName?.toString().orEmpty()
@@ -249,7 +326,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     /** Words visible on screen (for checking a step worked, and short "what changed" notes). */
     fun visibleWords(): Set<String> {
         readScreen()
-        return elements.flatMap { labelsOf(it) }.map { it.take(80) }.toSet()
+        return elements.filterNotNull().flatMap { labelsOf(it) }.map { it.take(80) }.toSet()
     }
 
     /** A soft ring where Blaze is about to tap, so you can watch it work. */
@@ -324,6 +401,14 @@ class BlazeAccessibilityService : AccessibilityService() {
         else "Couldn't tap [$id]."
     }
 
+    /** Tap a node found outside read_screen (watchers): accessibility click up the parent chain, else a touch. */
+    suspend fun tapNode(node: AccessibilityNodeInfo): Boolean {
+        var n: AccessibilityNodeInfo? = node
+        while (n != null) { if (n.isClickable && n.isEnabled) { if (n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true; break }; n = n.parent }
+        val pt = centerOf(node) ?: return false
+        return gestureTap(pt.first, pt.second, 60)
+    }
+
     /** Fresh read, then tap the element whose words match [label]. Immune to stale numbers. */
     suspend fun tapText(label: String, long: Boolean = false): String {
         readScreen()
@@ -341,7 +426,7 @@ class BlazeAccessibilityService : AccessibilityService() {
             if (focused != null && focused.isEditable) node = focused
             else {
                 readScreen()
-                elements.firstOrNull { it.isEditable }?.let { node = it }
+                elements.firstOrNull { it?.isEditable == true }?.let { node = it }
             }
         }
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
@@ -365,7 +450,7 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     suspend fun scroll(direction: String, id: Int?): String {
         val forward = direction.lowercase() in listOf("down", "right", "forward")
-        val target = id?.let { element(it) } ?: elements.firstOrNull { it.isScrollable }
+        val target = id?.let { element(it) } ?: elements.firstOrNull { it?.isScrollable == true }
         if (target != null) {
             var n: AccessibilityNodeInfo? = target
             while (n != null) {
