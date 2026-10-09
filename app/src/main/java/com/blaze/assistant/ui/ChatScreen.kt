@@ -623,7 +623,8 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             Spacer(Modifier.height(6.dp))
             Box(Modifier.widthIn(max = 330.dp).background(c.paper).hairline(c.hair).padding(horizontal = 16.dp, vertical = 12.dp)) {
                 SelectionContainer {
-                    Text(m.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 23.sp, color = c.body))
+                    val shownText = remember(m.text, c.accent) { Md.render(m.text, c.accent, c.hair.copy(alpha = 0.35f)) }
+                    Text(shownText, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 23.sp, color = c.body))
                 }
             }
             Actions(m, canAct, onQuote, allowQuote = true)
@@ -677,7 +678,7 @@ private fun Actions(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, 
     val ctx = LocalContext.current
     Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Label("Copy", color = c.sub, size = 10.sp, modifier = Modifier.clickable {
-            clip.setText(AnnotatedString(m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+            clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(m.text) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
         }.padding(horizontal = 6.dp, vertical = 8.dp))
         if (allowQuote) {
             Label("·", color = c.weak, size = 10.sp)

@@ -55,6 +55,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -535,7 +536,8 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                             }
                             Role.STEP -> Label("— " + m.text, size = 10.sp)
                             else -> SelectionContainer {
-                                Text(m.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp,
+                                Text(if (m.role == Role.BLAZE) Md.render(m.text, c.accent, c.hair.copy(alpha = 0.35f)) else AnnotatedString(m.text),
+                                    style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp,
                                     color = if (m.role == Role.ERROR) c.accent else c.body))
                             }
                         }

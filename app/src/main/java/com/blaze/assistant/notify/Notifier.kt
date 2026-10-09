@@ -78,7 +78,8 @@ object Notifier {
     fun doneWorking() = NotificationManagerCompat.from(app).cancel(ID_WORK)
 
     /** Blaze's reply, with an inline Reply box. */
-    fun reply(text: String, isError: Boolean) {
+    fun reply(raw: String, isError: Boolean) {
+        val text = com.blaze.assistant.ui.Md.plain(raw)
         if (!allowed()) return
         val input = RemoteInput.Builder(KEY_REPLY).setLabel("Reply to Blaze").build()
         val replyAction = NotificationCompat.Action.Builder(0, "Reply", broadcast(ActionReceiver.REPLY, mutable = true))

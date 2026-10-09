@@ -115,7 +115,7 @@ object Voice {
     fun speak(text: String) {
         if (!ttsReady) return
         WakeWordService.pause(app)
-        val clean = text.replace(Regex("[*_`#>]"), "").take(3900)
+        val clean = com.blaze.assistant.ui.Md.plain(text).replace(Regex("[*_`#>•]"), "").take(3900)
         tts?.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "blaze-${System.currentTimeMillis()}")
     }
 
