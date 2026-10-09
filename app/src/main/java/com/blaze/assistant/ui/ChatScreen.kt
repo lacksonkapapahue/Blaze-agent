@@ -158,6 +158,9 @@ fun ChatScreen() {
     // First run only: people who already set Blaze up never see it.
     var onboard by rememberSaveable { mutableStateOf(!Settings.bool("onboarded", false) && !Settings.ready && !hasMessages) }
     LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
+    // Blaze opening one of its own settings pages (setup help).
+    val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
+    LaunchedEffect(askedPage) { askedPage?.let { settingsPage = it; com.blaze.assistant.agent.SelfSetup.openPage.value = null } }
     var showChats by rememberSaveable { mutableStateOf(false) }
     var drawer by rememberSaveable { mutableStateOf(false) }
     var input by remember { mutableStateOf(TextFieldValue("")) }

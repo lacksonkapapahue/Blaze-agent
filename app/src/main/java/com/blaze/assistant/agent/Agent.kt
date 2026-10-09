@@ -310,15 +310,17 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
             append("It is $now. ")
             append(Memory.promptBlock(userText))
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
+            append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
             append(com.blaze.assistant.connect.Connectors.promptBlock())
             append("\nHOW YOU TALK: short, warm and sure of yourself, like a sharp friend texting back. Lead with the answer. One or two sentences unless they ask for more. Never say \"let me know if there's anything else\", \"feel free to\", \"I'd be happy to\" or similar filler, and never ask the user to share personal details for your memory. ")
-            append("\nYou are Blaze and you can control yourself with blaze_self (close/go quiet, stop, orb, wake word, read-aloud, model, personality, settings, your status and crash log). If the user asks you to shut down, close, go away or stop, do that with blaze_self, never a phone setting. ")
+            append("\nYou are Blaze and you can control yourself with blaze_self (close/go quiet, stop, orb, wake word, read-aloud, model, personality, settings, your setup and crash log). When the user wants help setting you up, or asks what you can do or what's installed, call blaze_self setup_check and guide them one step at a time. If the user asks you to shut down, close, go away or stop, do that with blaze_self, never a phone setting. ")
             append("\nWhen the user tells you something lasting about themselves, save it quietly with the remember tool. ")
             append("\nIf the user says \"again\", \"do it again\" or \"same for X\", repeat your last actions from this chat (adapted to X) without asking. ")
             append("\nIf you're unsure what the user wants, or there are several options (accounts, contacts, items, times), don't guess and don't end your turn: call ask_user with short options, then carry on with the answer. ")
             if (control) {
                 append("""
+BACKGROUND FIRST: never take over the user's screen when a background tool can do it. Web questions → web_search/fetch_page. Email → gmail_search/gmail_read. Calendar → gcal_events or calendar tools. Texts, calls, contacts → the SMS/call/contact tools. Notifications → recent_notifications. Music → spotify tools. Files/code → run_shell. Only if no background tool exists or it isn't connected, use the screen; when a background tool isn't connected, offer to connect it (blaze_self open "settings connections") instead of silently driving the app.
 You can control the phone. SPEED MATTERS: the user is watching.
 - For anything in an app, call run_plan ONCE with the whole script, using the visible words on buttons and fields as targets (e.g. open_app YouTube → tap "Search" → type "lofi hip hop" submit → tap the first result's title). You know how common apps look; you don't need to read the screen first. Add optional:true for popups you might need to dismiss, and expect:"..." when a step must lead somewhere.
 - run_plan only comes back when it's done or stuck. If stuck, it returns the screen with element numbers: fix it with a short new run_plan, or tap/type_text by number.
@@ -818,7 +820,11 @@ When you finish, say what you did in one short sentence.
                 "termux_run" -> { add(Role.STEP, "Termux: " + args.optString("command").take(60)); com.blaze.assistant.terminal.Terminal.runInTermux(app, args.optString("command"), args.optBoolean("background", true)) }
                 "delegate" -> delegate(args.optJSONArray("tasks") ?: JSONArray())
                 "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
-                "blaze_self" -> { add(Role.STEP, "Adjusting myself: ${args.optString("action")}"); SelfControl.run(app, args.optString("action"), args) }
+                "blaze_self" -> {
+                    val act = args.optString("action")
+                    add(Role.STEP, when (act) { "setup_check", "status" -> "Checking my setup"; "install" -> "Installing ${args.optString("what")}"; "open" -> "Opening ${args.optString("target")}"; else -> "Adjusting myself: $act" })
+                    if (act == "install") SelfSetup.install(app, args.optString("what")) else SelfControl.run(app, act, args)
+                }
                 "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
                 "look_at_screen" -> {
                     add(Role.STEP, "Looking at a screenshot")
