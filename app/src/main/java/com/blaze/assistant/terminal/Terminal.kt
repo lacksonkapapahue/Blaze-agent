@@ -144,20 +144,22 @@ object Terminal {
         "exit $code\n$text".trimEnd()
     }
 
-    data class Job(val id: Int, val cmd: String, val proc: Process, val log: StringBuilder, val started: Long)
+    data class Job(val id: Int, val cmd: String, val proc: Process, val log: StringBuilder, val started: Long, val maxMs: Long = 0, var reported: Boolean = false, val pid: String = "")
     private val jobs = LinkedHashMap<Int, Job>()
     private var nextJob = 1
 
-    fun startJob(cmd: String, linux: Boolean = false): String {
+    fun startJob(cmd: String, linux: Boolean = false, maxMinutes: Int = 0): String {
         setup()
         if (linux && !Linux.installed()) return "Linux isn't installed yet (linux_install)."
         val p = try { if (linux) ProcessBuilder(Linux.command(cmd)).directory(home()).redirectErrorStream(true)
                 .also { it.environment().putAll(env()); it.environment().putAll(Linux.env()) }.start() else builder(cmd).start() } catch (e: Exception) { return "Error: ${e.message}" }
-        val j = Job(nextJob++, cmd, p, StringBuilder(), System.currentTimeMillis())
+        val jid = nextJob++
+        val pid = com.blaze.assistant.agent.Processes.register("job", cmd.take(50), jid.toString(), props = org.json.JSONObject().put("command", cmd).put("max_minutes", maxMinutes))
+        val j = Job(jid, cmd, p, StringBuilder(), System.currentTimeMillis(), maxMinutes * 60_000L, pid = pid)
         synchronized(jobs) { jobs[j.id] = j }
+        JobKeeper.start(app)
         scope.launch { try { p.inputStream.bufferedReader().forEachLine { synchronized(j.log) { j.log.append(it).append('\n'); if (j.log.length > 50_000) j.log.delete(0, 20_000) } } } catch (_: Exception) { } }
         Thread.sleep(800)
-        val pid = com.blaze.assistant.agent.Processes.register("job", cmd.take(50), j.id.toString(), props = org.json.JSONObject().put("command", cmd))
         return "Started job ${j.id} [ID $pid]: $cmd\n" + (if (!p.isAlive) "It already exited (code ${p.exitValue()}).\n" else "") + synchronized(j.log) { j.log.toString().takeLast(1500) }
     }
 
@@ -165,6 +167,21 @@ object Terminal {
         if (jobs.isEmpty()) "No background jobs." else jobs.values.joinToString("\n") { j ->
             "[${j.id}] ${if (j.proc.isAlive) "running" else "exited ${j.proc.exitValue()}"} · ${(System.currentTimeMillis() - j.started) / 1000}s · ${j.cmd.take(80)}\n" +
                 synchronized(j.log) { j.log.toString().takeLast(400).prependIndent("    ") } }
+    }
+
+    /** Called by JobKeeper: enforce budgets and report finished jobs once. */
+    fun sweep(report: (String) -> Unit) {
+        val now = System.currentTimeMillis()
+        val list = synchronized(jobs) { jobs.values.toList() }
+        for (j in list) {
+            if (j.proc.isAlive && j.maxMs > 0 && now - j.started > j.maxMs) { j.proc.destroy(); synchronized(j.log) { j.log.append("[stopped: time budget used up]\n") } }
+            if (!j.proc.isAlive && !j.reported) {
+                j.reported = true
+                val code = try { j.proc.exitValue() } catch (_: Exception) { -1 }
+                val tail = synchronized(j.log) { j.log.toString().trim().lines().takeLast(3).joinToString(" | ") }.take(200)
+                report("Job ${j.pid.ifBlank { j.id.toString() }} ${if (code == 0) "finished" else "failed (exit $code)"}: ${j.cmd.take(50)}${if (tail.isNotBlank()) "\n$tail" else ""}")
+            }
+        }
     }
 
     fun jobAlive(id: Int): Boolean = synchronized(jobs) { jobs[id]?.proc?.isAlive == true }
@@ -200,8 +217,8 @@ object Terminal {
     private fun p(t: String, d: String) = JSONObject().put("type", t).put("description", d)
 
     fun tools(ctx: Context): List<JSONObject> = buildList {
-        add(fn("run_shell", "Run a shell command on the phone (Android sh + BusyBox: ls, cat, grep, sed, awk, wget, curl-less http via wget, tar, unzip, vi, nc, httpd, find, ps, top, df, du...). Working dir is Blaze's home (~). Set background=true for servers or long jobs (e.g. 'httpd -f -p 8080 -h ~/site'). Returns exit code and output.",
-            JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job"))
+        add(fn("run_shell", "Run a shell command on the phone (Android sh + BusyBox: ls, cat, grep, sed, awk, wget, curl-less http via wget, tar, unzip, vi, nc, httpd, find, ps, top, df, du...). Working dir is Blaze's home (~). Set background=true for servers, downloads, scraping or anything over ~30 s: it keeps running if Blaze is closed and the user gets a notification when it finishes or fails (optionally limit it with max_minutes). Returns exit code and output.",
+            JSONObject().put("command", p("string", "Shell command")).put("timeout_seconds", p("integer", "Max seconds (default 60)")).put("background", p("boolean", "Run as a background job")).put("max_minutes", p("integer", "Time budget for a background job; 0 = none"))
             .put("linux", p("boolean", "Run inside Blaze's Alpine Linux (apk add python3/nodejs/git/openjdk17…) instead of the phone shell")), listOf("command")))
         add(fn("linux_install", "Download and set up Alpine Linux inside Blaze (one time, ~3.5 MB, no root).", JSONObject(), emptyList()))
         add(fn("terminal_jobs", "List background shell jobs with their latest output.", JSONObject(), emptyList()))

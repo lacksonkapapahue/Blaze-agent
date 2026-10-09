@@ -372,6 +372,7 @@ When you finish, say what you did in one short sentence.
         Processes.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.Watchers.tool())
         SkillPacks.tools().forEach { t.put(it) }
+        com.blaze.assistant.phone.AndroidControl.tools().forEach { t.put(it) }
         t.put(Autonomy.findToolDef()); t.put(Autonomy.goalTool()); t.put(Autonomy.permissionTool())
         com.blaze.assistant.proactive.Triggers.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.Ussd.tool())
@@ -956,7 +957,7 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, "$ " + cmd.take(70))
                     if (com.blaze.assistant.terminal.Terminal.risky(cmd) && !confirm("Run this command?", cmd.take(200), "Run"))
                         "The user did NOT approve running that command."
-                    else if (args.optBoolean("background")) kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.startJob(cmd, args.optBoolean("linux")) }
+                    else if (args.optBoolean("background")) kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.terminal.Terminal.startJob(cmd, args.optBoolean("linux"), args.optInt("max_minutes", 0)) }
                     else com.blaze.assistant.terminal.Terminal.run(cmd, args.optInt("timeout_seconds", 60), args.optBoolean("linux"))
                 }
                 "run_ussd" -> {
@@ -982,6 +983,10 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, "Looking at a screenshot")
                     val shot = PhoneTools.screenshot()
                     if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
+                }
+                in com.blaze.assistant.phone.AndroidControl.names -> {
+                    add(Role.STEP, name.replace('_', ' ').replaceFirstChar { it.uppercase() })
+                    try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, args) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 in SkillPacks.names -> {
                     add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; else -> "Reading a skill file" })

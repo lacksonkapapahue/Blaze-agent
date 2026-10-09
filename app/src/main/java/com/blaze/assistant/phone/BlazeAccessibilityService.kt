@@ -331,7 +331,7 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     /** A soft ring where Blaze is about to tap, so you can watch it work. */
     fun flash(id: Int) {
-        if (!com.blaze.assistant.agent.Settings.bool("show_taps", true)) return
+        if (!com.blaze.assistant.agent.Settings.bool("show_taps", true) || com.blaze.assistant.agent.Settings.bool("speed_mode", false)) return
         val n = element(id) ?: return
         val r = Rect(); n.getBoundsInScreen(r)
         if (r.width() <= 2 || r.height() <= 2) return
@@ -497,7 +497,7 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     private suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
-        return dispatch(GestureDescription.StrokeDescription(path, 0, 350))
+        return dispatch(GestureDescription.StrokeDescription(path, 0, if (com.blaze.assistant.agent.Settings.bool("speed_mode", false)) 180 else 350))
     }
 
     private suspend fun dispatch(stroke: GestureDescription.StrokeDescription): Boolean =

@@ -113,21 +113,60 @@ object Proactive {
             append("New notifications since ${f.format(Date(since))}:\n")
             append(if (notes.isEmpty()) "(none)\n" else notes.joinToString("\n") { "- ${f.format(Date(it.time))} ${it.app} · ${it.title}: ${it.text.take(200)}" }).append("\n\n")
             append("Calendar today:\n$cal\n\n")
+            sweepSignals(since).takeIf { it.isNotBlank() }?.let { append("Phone signals:\n").append(it).append("\n\n") }
+            synchronized(digest) { if (digest.isNotEmpty()) append("Saved for the next brief:\n").append(digest.joinToString("\n") { "- $it" }).append("\n\n") }
             append("Already told the user recently:\n").append(recent.value.takeLast(6).joinToString("\n") { "- ${it.text}" }.ifEmpty { "(nothing)" })
         }
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         val today = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
         val morning = Settings.bool("morning_brief", true) && hour in quietTo..(quietTo + 4) && Settings.str("brief_day", "") != today && urgentHint == null
         if (morning) Settings.setStr("brief_day", today)
-        val brief = if (morning) "\nThis is the first check of the user's morning: ALWAYS give a short good-morning brief (2-3 sentences): the day, what's on the calendar, anything important waiting, and one useful heads-up (e.g. low battery). Set urgent false." else ""
+        val evening = !morning && Settings.bool("evening_brief", true) && hour in 19..21 && Settings.str("evening_day", "") != today && urgentHint == null
+        if (evening) Settings.setStr("evening_day", today)
+        if (morning || evening) synchronized(digest) { digest.clear() }
+        val brief = if (evening) "\nThis is the evening check: ALWAYS give a short wrap-up (2-3 sentences): anything still waiting on them, unfinished goals, and what's first on tomorrow's calendar. Set urgent false." else if (morning) "\nThis is the first check of the user's morning: ALWAYS give a short good-morning brief (2-3 sentences): the day, what's on the calendar, anything important waiting, and one useful heads-up (e.g. low battery). Set urgent false." else ""
         val sys = """You are Blaze, the user's phone assistant, deciding whether to speak up on your own right now.$brief ${Memory.promptBlock(ctx.take(600))}
-Speak only when it truly helps now: an urgent or important message they may have missed, a meeting or event starting soon, something that needs a reply or decision, a phone problem (very low battery, overheating, storage full), or a genuinely useful nudge tied to their routines. Never repeat what was already said. Never mention codes or passwords. Most of the time, say nothing.
+Speak only when it truly helps now: a bill or payment due, low airtime/data or a mobile-money message that needs action, a delivery arriving, a missed call or message that's been waiting hours, an urgent or important message they may have missed, a meeting or event starting soon, something that needs a reply or decision, a phone problem (very low battery, overheating, storage full), or a genuinely useful nudge tied to their routines. Never repeat what was already said. Never mention codes or passwords. Most of the time, say nothing.
 Reply ONLY with JSON: {"say": "" or "one or two short friendly sentences", "urgent": true|false, "suggest": "" or "a short request the user could tap to have you do it, e.g. 'Reply to Mary that I'm on my way'"}"""
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys)).put(JSONObject().put("role", "user").put("content", ctx))
         val raw = try { LlmClient.complete(msgs, null, null, null, LlmClient.Lane.BACKGROUND).optString("content") } catch (e: Exception) { return@withLock }
         val o = try { JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) } catch (_: Exception) { return@withLock }
         val text = o.optString("say").trim()
-        if (text.isNotEmpty()) say(text, text.lowercase().take(40), o.optBoolean("urgent"), o.optString("suggest").trim())
+        if (text.isNotEmpty()) say(text, (if (morning || evening) "brief:" else "") + text.lowercase().take(40), o.optBoolean("urgent"), o.optString("suggest").trim())
+    }
+
+    private val digest = mutableListOf<String>()
+
+    private val moneyWords = Regex("(airtime|bundle|data balance|low balance|insufficient|mobile money|momo|airtel money|mtn money|zamtel|kwacha|\\bZMW\\b|\\bK\\s?\\d|due|bill|invoice|overdue|payment|deliver|parcel|package|shipped|out for delivery)", RegexOption.IGNORE_CASE)
+
+    /** Cheap on-device sweep: SMS, missed calls, storage, goals due. Only lines worth a look. */
+    private fun sweepSignals(since: Long): String {
+        val out = StringBuilder()
+        try {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_SMS) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                app.contentResolver.query(android.provider.Telephony.Sms.Inbox.CONTENT_URI, arrayOf("address", "body", "date"), "date > ?", arrayOf(since.toString()), "date DESC")?.use { c ->
+                    var n = 0
+                    while (c.moveToNext() && n < 8) {
+                        val body = c.getString(1).orEmpty()
+                        if (moneyWords.containsMatchIn(body)) { out.append("- SMS from ${c.getString(0)}: ${body.replace(Regex("\\b\\d{4,8}\\b(?=.*(code|otp|pin))", RegexOption.IGNORE_CASE), "••••").take(160)}\n"); n++ }
+                    }
+                }
+        } catch (_: Exception) { }
+        try {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(app, android.Manifest.permission.READ_CALL_LOG) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                app.contentResolver.query(android.provider.CallLog.Calls.CONTENT_URI, arrayOf(android.provider.CallLog.Calls.CACHED_NAME, android.provider.CallLog.Calls.NUMBER),
+                    "${android.provider.CallLog.Calls.TYPE} = ${android.provider.CallLog.Calls.MISSED_TYPE} AND ${android.provider.CallLog.Calls.DATE} > ?", arrayOf(since.toString()), null)?.use { c ->
+                    val who = mutableListOf<String>(); while (c.moveToNext() && who.size < 5) who += (c.getString(0) ?: c.getString(1) ?: "unknown")
+                    if (who.isNotEmpty()) out.append("- Missed calls: ${who.joinToString()}\n")
+                }
+        } catch (_: Exception) { }
+        try {
+            val st = android.os.StatFs(android.os.Environment.getDataDirectory().path)
+            val freeGb = st.availableBytes / 1e9
+            if (freeGb < 1.5) out.append("- Storage low: %.1f GB free\n".format(freeGb))
+        } catch (_: Exception) { }
+        try { com.blaze.assistant.agent.Autonomy.dueSoon().takeIf { it.isNotBlank() }?.let { out.append("- Goals due soon: $it\n") } } catch (_: Exception) { }
+        return out.toString().trim()
     }
 
     /** Tell the user something unprompted: notification, optional voice, and the orb if it's out. */
@@ -140,6 +179,8 @@ Reply ONLY with JSON: {"say": "" or "one or two short friendly sentences", "urge
             said[key] = now
         }
         if (quietNow() && !urgent) return
+        // Digest mode: non-urgent things wait for the morning/evening brief instead of buzzing now.
+        if (!urgent && Settings.bool("digest_mode", false) && !key.startsWith("brief")) { synchronized(digest) { digest += text; while (digest.size > 12) digest.removeAt(0) }; return }
         recent.value = (recent.value + HeadsUp(now, text, urgent)).takeLast(30)
         com.blaze.assistant.notify.Notifier.proactive(text, suggest, urgent)
         val audio = app.getSystemService(AudioManager::class.java)

@@ -102,6 +102,12 @@ object Autonomy {
         if (open.isEmpty()) "" else "\nUnfinished goals: " + open.take(5).joinToString("; ") { line(it) } + ". Pick them up when relevant (goal action=show for steps)."
     }
 
+    /** Open goals due within the next 24 hours, for background checks. */
+    fun dueSoon(): String = synchronized(this) {
+        val now = System.currentTimeMillis()
+        goals.filter { it.status == "open" && it.due in now..(now + 86_400_000L) }.joinToString("; ") { line(it) }
+    }
+
     private fun parseDue(s: String): Long {
         if (s.isBlank()) return 0
         for (p in listOf("yyyy-MM-dd HH:mm", "yyyy-MM-dd")) try { return SimpleDateFormat(p, Locale.US).parse(s.trim())!!.time } catch (_: Exception) { }
@@ -180,5 +186,5 @@ object Autonomy {
     }
 
     fun promptBlock(): String = """
-AUTONOMY: you finish things. Plan briefly, act, then check the result proves it worked before you say it's done. If a step fails, try a different way (another target, a deep link, the background browser, run_shell) before giving up. Never say you can't until find_tool and at least two other approaches have failed. For work with several steps or a deadline, keep a goal (task notebook) and tick steps off. Ask the user only when you're truly blocked or something risky needs their OK."""
+AUTONOMY: you finish things. Plan briefly, act, then check the result proves it worked before you say it's done. If a step fails, try a different way (another target, a deep link, the background browser, run_shell) before giving up. Never say you can't until find_tool and at least two other approaches have failed. For work with several steps or a deadline, keep a goal (task notebook) and tick steps off. Ask the user only when you're truly blocked or something risky needs their OK. When the user mentions something they must do later (a bill, a call, a deadline), offer in one short line to set a reminder."""
 }
