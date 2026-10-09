@@ -20,7 +20,7 @@ object LlmClient {
     fun target(pid: String, model: String? = null): Target {
         val p = Providers.byId(pid)
         val base = if (pid == Providers.CUSTOM) Settings.customBase else p.baseUrl
-        return Target(pid, base, if (pid == Providers.keyless.id) "" else Settings.keyFor(pid),
+        return Target(pid, base, if (pid == Providers.keyless.id) "" else Providers.keyOf(pid),
             model?.takeIf { it.isNotBlank() } ?: Settings.modelFor(pid))
     }
 
@@ -42,6 +42,12 @@ object LlmClient {
     fun rateHeaders(conn: HttpURLConnection): Map<String, String> =
         conn.headerFields.orEmpty().filterKeys { it != null && (it.lowercase().contains("ratelimit")) }
             .map { (k, v) -> k.lowercase() to (v.firstOrNull() ?: "") }.toMap()
+
+    /** Rate-limit headers of the very last call (empty when it sent none), for the token meter. */
+    @Volatile var lastCallHeaders: Map<String, String> = emptyMap()
+
+    /** True for a chat-lane turn (no tools, short prompt): Auto prefers small fast models for it. */
+    @Volatile var liteTurn = false
 
     /** Token usage the provider reported for the last call, if any. */
     @Volatile var lastUsage: JSONObject? = null
@@ -144,6 +150,7 @@ object LlmClient {
             k.startsWith("AIza") -> "gemini"
             k.startsWith("sk-ant-") -> "anthropic"
             k.startsWith("xai-") -> "xai"
+            k.startsWith("csk-") -> "cerebras"
             else -> null
         }
     }
@@ -238,7 +245,9 @@ object LlmClient {
             conn.disconnect(); throw LlmException("$who: couldn't reach the service (${e.message?.take(80)}).", 0)
         }
         if (onText == null || code !in 200..299) markFirst()
-        rateHeaders(conn).takeIf { it.isNotEmpty() }?.let { lastRateHeaders = it }
+        val rh = rateHeaders(conn)
+        lastCallHeaders = rh
+        rh.takeIf { it.isNotEmpty() }?.let { lastRateHeaders = it }
         lastUsage = null
         if (code in 200..299 && onText != null &&
             (conn.contentType ?: "").contains("event-stream", ignoreCase = true)) {

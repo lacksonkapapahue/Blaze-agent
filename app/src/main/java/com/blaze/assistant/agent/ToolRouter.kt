@@ -51,6 +51,8 @@ object ToolRouter {
         Group("apps", "GitHub, Notion, Slack, Spotify connectors",
             r("""\b(github|repo|issue|pull request|pr|notion|slack|spotify|playlist|song|music)\b"""),
             { it.startsWith("github_") || it.startsWith("notion_") || it.startsWith("slack_") || it.startsWith("spotify_") }),
+        Group("more", "everything else: watchers, triggers, goals, standing permissions, skill packs and other rarely used tools",
+            Regex("(?!)"), { false }),
         Group("extras", "learned skills, helpers working in parallel, screen memory",
             r("""\b(skill|learn|delegate|parallel|at once|earlier on screen|saw)\b"""),
             { it in setOf("skill_manage", "delegate", "search_screen_memory", "install_skill", "write_skill", "skill_file") }),
@@ -58,7 +60,9 @@ object ToolRouter {
 
     private fun nameOf(t: Any?): String = (t as? JSONObject)?.optJSONObject("function")?.optString("name").orEmpty()
 
+    /** A tool's group; tools no group claims (and that aren't core) fall into "more", sent only on request. */
     fun groupOf(name: String): String? = groups.firstOrNull { it.names(name) }?.id
+        ?: if (name in core || name == "load_tools" || name.isBlank() || !Settings.bool("tool_lean", true)) null else "more"
 
     /** Tool groups the text looks like it needs. */
     fun guess(text: String): Set<String> = groups.filter { it.match.containsMatchIn(text) }.map { it.id }.toSet()

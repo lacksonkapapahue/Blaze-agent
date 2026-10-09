@@ -323,6 +323,11 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
 
     // ---------- Prompt ----------
 
+    private fun personaText(): String =
+        if (Settings.personaId == Personas.CUSTOM && Settings.customPersona.isNotBlank())
+            "You are Blaze, an AI assistant on the user's Android phone. " + Settings.customPersona
+        else Personas.byId(Settings.personaId).prompt
+
     private fun systemPrompt(userText: String): String {
         val now = SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())
         val name = Settings.userName.ifBlank { null }
@@ -731,6 +736,10 @@ When you finish, say what you did in one short sentence.
                     addAll(ToolRouter.usedIn(history))
                 }
                 var tools = ToolRouter.select(allTools, groupsOn)
+                // Chat lane: small talk and plain questions = one light call with no tools.
+                val lastBlaze = msgs.lastOrNull { it.role == Role.BLAZE }?.text.orEmpty()
+                var lite = !routine && history.optJSONObject(history.length() - 1)?.opt("content") is String &&
+                    ChatLane.fits(lastUserText(), lastBlaze)
                 var firstMs = -1L
                 streamedVoice = false
                 while (trace.length() > 0) trace.remove(0)
@@ -747,8 +756,9 @@ When you finish, say what you did in one short sentence.
                     spokenPrefix = ""
                     val before = turnThink.toString()
                     var pendingFollowups = emptyList<String>()
+                    val liteNow = lite
                     val onText: ((String) -> Unit)? = if (Settings.streamReplies) { partial ->
-                        scope.launch {
+                        if (!(liteNow && partial.trimStart().let { it.startsWith("[") || it.startsWith("TOOLS", true) })) scope.launch {
                             val p = ReplyParts.split(partial)
                             if (p.thinking.isNotEmpty()) thinking = listOf(before, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
                             if (p.text.isNotEmpty()) {
@@ -759,8 +769,9 @@ When you finish, say what you did in one short sentence.
                     } else null
                     val onThink: (String) -> Unit = { t -> scope.launch { thinking = listOf(before, t).filter { it.isNotBlank() }.joinToString("\n\n") } }
 
-                    val req = requestMessages()
-                    tools = ToolRouter.select(allTools, groupsOn)
+                    LlmClient.liteTurn = lite
+                    val req = if (lite) ChatLane.messages(requestMessages(), lastUserText(), personaText(), Settings.userName.ifBlank { null }) else requestMessages()
+                    tools = if (lite) JSONArray() else ToolRouter.select(allTools, groupsOn)
                     // Watchdog: only a model that goes SILENT (no text, thinking or tool-call chunks) for the
                     // limit is cut off and retried once on the same model. Long thinking is fine while it streams.
                     val lane = if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS
@@ -776,6 +787,16 @@ When you finish, say what you did in one short sentence.
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
                     reply.remove("_reasoning")
                     try { Usage.record(req, reply, LlmClient.lastUsage) } catch (_: Exception) { }
+                    if (lite) {
+                        lite = false
+                        LlmClient.liteTurn = false
+                        val said = (reply.opt("content") as? String).orEmpty()
+                        if (ChatLane.escaped(said) || (reply.optJSONArray("tool_calls")?.length() ?: 0) > 0) {
+                            // It needs tools after all: rerun this turn on the full lane.
+                            if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                            continue
+                        }
+                    }
                     // Gatekeeper: a call written as text becomes a real call; glued/typo'd names,
                     // broken JSON and wrong types are repaired before anything runs or is sent back.
                     var unknownCalls: Set<String> = emptySet()
@@ -919,6 +940,7 @@ When you finish, say what you did in one short sentence.
                 com.blaze.assistant.device.CrashLog.error("agent loop", e)
                 add(Role.ERROR, "Something went wrong: ${e.message}")
             } finally {
+                LlmClient.liteTurn = false
                 thinking = ""
                 mood = Mood.IDLE
                 currentStep = 0

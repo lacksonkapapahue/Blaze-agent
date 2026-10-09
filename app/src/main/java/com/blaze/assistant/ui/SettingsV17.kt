@@ -82,7 +82,7 @@ fun AutoRouterSection() {
                         style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
                 }
                 Box(Modifier.clickable(enabled = i > 0) { chain = chain.toMutableList().also { l -> l.add(i - 1, l.removeAt(i)) }; FreeRouter.save(chain) }.padding(10.dp)) { Label("↑", size = 13.sp) }
-                Box(Modifier.clickable { chain = chain.filterIndexed { j, _ -> j != i }; FreeRouter.save(chain) }.padding(10.dp)) { Label("×", size = 13.sp) }
+                Box(Modifier.clickable { FreeRouter.removed(pid); chain = chain.filterIndexed { j, _ -> j != i }; FreeRouter.save(chain) }.padding(10.dp)) { Label("×", size = 13.sp) }
             }
         }
     }
