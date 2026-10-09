@@ -266,8 +266,21 @@ object Skills {
         }
     }
 
-    private fun setting(ctx: Context, s: String, value: String): String {
+    private suspend fun setting(ctx: Context, s: String, value: String): String {
         val v = value.trim().lowercase()
+        // Radios Android won't let apps flip directly: flip the Quick Settings tile like a person, then fall back to the panel.
+        val tileNames = mapOf(
+            "wifi" to listOf("Wi-Fi", "Wifi", "WLAN"),
+            "bluetooth" to listOf("Bluetooth"),
+            "airplane" to listOf("Airplane mode", "Aeroplane mode", "Flight mode", "Airplane", "Aeroplane"),
+            "mobile_data" to listOf("Mobile data", "Cellular data"),
+            "do_not_disturb" to listOf("Do not disturb", "Do Not Disturb", "DND"),
+        )
+        val want = when (v) { "on", "enable", "true", "1" -> true; "off", "disable", "false", "0" -> false; else -> null }
+        tileNames[s]?.let { names ->
+            val svc = BlazeAccessibilityService.instance
+            if (svc != null) try { svc.toggleQuickTile(names, want)?.let { return it } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {}
+        }
         return when (s) {
             "flashlight" -> {
                 val cm = ctx.getSystemService(CameraManager::class.java)
@@ -292,9 +305,9 @@ object Skills {
                 val bm = ctx.getSystemService(BatteryManager::class.java)
                 "Battery ${bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)}%${if (bm.isCharging) ", charging" else ""}."
             }
-            "wifi" -> if (Build.VERSION.SDK_INT >= 29) panel(ctx, android.provider.Settings.Panel.ACTION_WIFI, "Opened the Wi-Fi panel; Android only lets the user flip it.")
+            "wifi" -> if (Build.VERSION.SDK_INT >= 29) panel(ctx, android.provider.Settings.Panel.ACTION_WIFI, "Opened the Wi-Fi panel. Turn on Phone control so I can flip it for you.")
                 else panel(ctx, android.provider.Settings.ACTION_WIFI_SETTINGS, "Opened Wi-Fi settings.")
-            "bluetooth" -> panel(ctx, android.provider.Settings.ACTION_BLUETOOTH_SETTINGS, "Opened Bluetooth settings; the user flips it.")
+            "bluetooth" -> panel(ctx, android.provider.Settings.ACTION_BLUETOOTH_SETTINGS, "Opened Bluetooth settings.")
             "mobile_data" -> if (Build.VERSION.SDK_INT >= 29) panel(ctx, android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY, "Opened the internet panel.")
                 else panel(ctx, android.provider.Settings.ACTION_DATA_ROAMING_SETTINGS, "Opened mobile data settings.")
             "do_not_disturb" -> panel(ctx, "android.settings.ZEN_MODE_SETTINGS", "Opened Do Not Disturb settings.")

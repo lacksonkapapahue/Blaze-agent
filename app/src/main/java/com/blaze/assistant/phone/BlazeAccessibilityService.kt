@@ -409,6 +409,56 @@ class BlazeAccessibilityService : AccessibilityService() {
         return gestureTap(pt.first, pt.second, 60)
     }
 
+    /**
+     * Flip a Quick Settings tile (Wi-Fi, Bluetooth, Airplane...) like a person would: pull down the
+     * shade, find the tile by any of its names, tap only if it isn't already in the wanted state, close.
+     * Works on any skin because it matches labels, not positions. Null when the tile can't be found.
+     */
+    suspend fun toggleQuickTile(names: List<String>, want: Boolean?): String? {
+        fun norm(s: CharSequence?) = s?.toString()?.lowercase()?.replace('\u2011', '-')?.replace('\u2010', '-')?.trim().orEmpty()
+        val keys = names.map { norm(it) }
+        fun find(): AccessibilityNodeInfo? {
+            val roots = (try { windows.mapNotNull { it.root } } catch (_: Exception) { emptyList() }) + listOfNotNull(rootInActiveWindow)
+            for (r in roots) {
+                val stack = ArrayDeque<AccessibilityNodeInfo>().apply { add(r) }
+                var seen = 0
+                while (stack.isNotEmpty() && seen++ < 3000) {
+                    val n = stack.removeLast()
+                    val label = norm(n.contentDescription).ifEmpty { norm(n.text) }
+                    if (label.isNotEmpty() && keys.any { label == it || label.startsWith("$it,") || label.startsWith("$it ") }) {
+                        var c: AccessibilityNodeInfo? = n
+                        while (c != null && !c.isClickable) c = c.parent
+                        return c ?: n
+                    }
+                    for (i in 0 until n.childCount) n.getChild(i)?.let { stack.add(it) }
+                }
+            }
+            return null
+        }
+        fun state(n: AccessibilityNodeInfo): Boolean? {
+            if (n.isCheckable) return n.isChecked
+            val sd = if (android.os.Build.VERSION.SDK_INT >= 30) norm(n.stateDescription) else ""
+            val all = "$sd ${norm(n.contentDescription)}"
+            return when { Regex("\\b(on|enabled|connected)\\b").containsMatchIn(all) -> true; Regex("\\b(off|disabled)\\b").containsMatchIn(all) -> false; else -> null }
+        }
+        if (!performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS)) return null
+        var tile: AccessibilityNodeInfo? = null
+        repeat(8) { if (tile == null) { delay(250); tile = find() } }
+        val t = tile ?: run { performGlobalAction(GLOBAL_ACTION_BACK); return null }
+        val before = state(t)
+        val name = names.first()
+        if (want != null && before == want) { performGlobalAction(GLOBAL_ACTION_BACK); return "$name is already ${if (want) "on" else "off"}." }
+        if (!tapNode(t)) { performGlobalAction(GLOBAL_ACTION_BACK); return null }
+        delay(600)
+        val after = find()?.let { it.refresh(); state(it) }
+        performGlobalAction(GLOBAL_ACTION_BACK)
+        return when {
+            after != null -> "$name ${if (after) "on" else "off"}."
+            want != null -> "$name ${if (want) "on" else "off"}."
+            else -> "Flipped $name."
+        }
+    }
+
     /** Fresh read, then tap the element whose words match [label]. Immune to stale numbers. */
     suspend fun tapText(label: String, long: Boolean = false): String {
         readScreen()

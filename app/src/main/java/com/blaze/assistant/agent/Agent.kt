@@ -606,7 +606,8 @@ When you finish, say what you did in one short sentence.
                         addReply(-1, fast.reply, "", meta = if (fast.ms < 60) "⚡ instant · ${fast.ms} ms" else "⚡ on-device · ${fast.ms} ms")
                         mood = Mood.IDLE
                         persist(); announce()
-                        launch { kotlinx.coroutines.delay(5 * 60_000 + 5_000); FastLane.trimIfIdle() }
+                        // Not a child of this job: a child would keep the turn "busy" for 5 minutes and block every new prompt.
+                        scope.launch { kotlinx.coroutines.delay(5 * 60_000 + 5_000); FastLane.trimIfIdle() }
                         return@launch
                     }
                 }
