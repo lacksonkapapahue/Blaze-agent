@@ -49,4 +49,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           { echo "Build failed on ${{ github.sha }} (run ${{ github.run_id }})"; echo; echo '```'; grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log 2>/dev/null | head -120; echo '----- tail -----'; tail -80 build.log 2>/dev/null || echo "no build.log (failed before Gradle ran)"; echo '```'; } > comment.md
-          gh issue comment 1 --repo ${{ github.repository }} --body-file comment.md
+          gh issue edit 1 --repo ${{ github.repository }} --body-file comment.md
