@@ -1,0 +1,121 @@
+package com.blaze.assistant.ui
+
+import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.blaze.assistant.agent.Providers
+import com.blaze.assistant.agent.Settings
+import com.blaze.assistant.agent.Traces
+import com.blaze.assistant.phone.BlazeAccessibilityService
+import kotlinx.coroutines.delay
+
+/** Settings → Look & feel: the small things that make Blaze feel alive. */
+@Composable
+internal fun FeelPage() {
+    var taps by remember { mutableStateOf(Settings.bool("show_taps", true)) }
+    var sounds by remember { mutableStateOf(Settings.bool("sounds", true)) }
+    var compact by remember { mutableStateOf(Settings.bool("compact_panel", true)) }
+    var autoHide by remember { mutableStateOf(Settings.bool("auto_hide_panel", true)) }
+    var traces by remember { mutableStateOf(Traces.count()) }
+    ToggleRow("Show where I tap", "A soft blue ring flashes on whatever Blaze is about to tap", taps) { taps = !taps; Settings.setBool("show_taps", taps) }
+    ToggleRow("Sounds", "A blip when Blaze wakes, a tick when a task is done", sounds) { sounds = !sounds; Settings.setBool("sounds", sounds) }
+    ToggleRow("Compact panel", "Over other apps, show a slim bar with just the latest line. Tap More to expand", compact) { compact = !compact; Settings.setBool("compact_panel", compact) }
+    ToggleRow("Fade away when done", "The compact panel closes itself a few seconds after a task finishes", autoHide) { autoHide = !autoHide; Settings.setBool("auto_hide_panel", autoHide) }
+    V18Section("Learning from what I do")
+    V18Note("Blaze keeps a private log of the steps it runs on screen ($traces so far). It never leaves your phone and will train a faster on-device model later.")
+    Spacer(Modifier.height(8.dp))
+    V18Button("Clear step log", primary = false) { Traces.clear(); traces = 0 }
+}
+
+/** First run: three short screens, then straight into something real. */
+@Composable
+fun Onboarding(onDone: (firstPrompt: String?) -> Unit) {
+    val c = LocalBlaze.current
+    val ctx = LocalContext.current
+    var page by remember { mutableStateOf(0) }
+    var a11y by remember { mutableStateOf(BlazeAccessibilityService.isEnabled(ctx)) }
+    var brain by remember { mutableStateOf(if (Settings.ready) "ready" else "") }
+    LaunchedEffect(page) { while (page == 1) { a11y = BlazeAccessibilityService.isEnabled(ctx); delay(1200) } }
+    BackHandler(enabled = page > 0) { page-- }
+    fun finish(prompt: String?) { Settings.setBool("onboarded", true); onDone(prompt) }
+
+    Box(Modifier.fillMaxSize().background(c.paper)) {
+        ParticleField(com.blaze.assistant.agent.Mood.IDLE)
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(28.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
+                Spacer(Modifier.weight(1f))
+                Box(Modifier.clickable { finish(null) }.padding(8.dp)) { Label("Skip", color = c.sub, size = 10.sp) }
+            }
+            Column {
+                OrbFace(72.dp)
+                Spacer(Modifier.height(28.dp))
+                val (title, body) = when (page) {
+                    0 -> "Hi, I'm Blaze." to "I live in your phone and get things done for you: open apps, play music, send texts, find answers. First, pick my brain."
+                    1 -> "Let me use your phone." to "Turn on Blaze in Accessibility so I can tap and type for you. I'll always ask before sending, paying or deleting anything."
+                    else -> "Just say it." to "Type or tap the mic and tell me what you want, like \u201cplay lofi on YouTube\u201d. Turn on \u201cHey Blaze\u201d in Settings to call me hands-free."
+                }
+                Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 34.sp, lineHeight = 40.sp, color = c.ink))
+                Spacer(Modifier.height(14.dp))
+                Text(body, style = TextStyle(fontFamily = Type.Sans, fontSize = 16.sp, lineHeight = 24.sp, color = c.sub))
+                Spacer(Modifier.height(24.dp))
+                when (page) {
+                    0 -> {
+                        Choice("Free \u2014 start now", "No key needed. Blaze picks a free model for you.", brain == "free") {
+                            Settings.providerId = Providers.AUTO; brain = "free" }
+                        Spacer(Modifier.height(10.dp))
+                        Choice("I have an API key", "Gemini, OpenAI, OpenRouter, Groq\u2026 set it after this.", brain == "key") { brain = "key" }
+                    }
+                    1 -> Choice(if (a11y) "Phone control is on \u2713" else "Open Accessibility settings", if (a11y) "Nice. I can see and tap the screen now." else "Find Blaze in the list and switch it on.", a11y) {
+                        if (!a11y) ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(54.dp).background(c.ink).clickable {
+                when (page) {
+                    0 -> { if (brain.isEmpty()) { Settings.providerId = Providers.AUTO; brain = "free" }; page = 1 }
+                    1 -> page = 2
+                    else -> finish(if (brain == "key") "/settings ai" else "Introduce yourself in one sentence, then tell me three things you can do on my phone.")
+                }
+            }, contentAlignment = Alignment.Center) {
+                Label(when (page) { 0 -> "Continue"; 1 -> if (a11y) "Continue" else "Later"; else -> "Let's go" }, color = c.paper, size = 11.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Choice(title: String, sub: String, on: Boolean, onClick: () -> Unit) {
+    val c = LocalBlaze.current
+    Column(Modifier.fillMaxWidth().background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair).clickable(onClick = onClick).padding(16.dp)) {
+        Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.paper else c.ink))
+        Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = if (on) c.paper.copy(alpha = 0.75f) else c.sub))
+    }
+}

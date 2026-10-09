@@ -57,8 +57,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 /** Settings, grouped into pages. [page] null = the category list. */
 data class SettingsPage(val id: String, val title: String, val sub: String)
 
+/** The four that matter, shown first; the rest sit under Advanced. */
+val essentialPages = setOf("ai", "persona", "control", "voice", "feel")
+
 val settingsPages = listOf(
     SettingsPage("ai", "AI & model", "Provider, key, model, reasoning, follow-ups"),
+    SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
     SettingsPage("connections", "Connections", "Google, GitHub, Spotify, Notion, Slack, MCP"),
     SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
     SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
@@ -100,7 +104,9 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
             when (page) {
                 null -> {
                     Spacer(Modifier.height(8.dp))
-                    settingsPages.forEachIndexed { i, sp ->
+                    var advanced by remember { mutableStateOf(false) }
+                    val shown = settingsPages.filter { it.id in essentialPages } + if (advanced) settingsPages.filter { it.id !in essentialPages } else emptyList()
+                    shown.forEachIndexed { i, sp ->
                         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { page = sp.id }.padding(vertical = 16.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
@@ -112,11 +118,16 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                             Text("→", color = c.sub, fontSize = 16.sp)
                         }
                     }
+                    if (!advanced) Row(Modifier.fillMaxWidth().clickable { advanced = true }.padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Label("Advanced · ${settingsPages.size - essentialPages.size} more", color = c.accent, size = 10.sp)
+                        Spacer(Modifier.weight(1f)); Text("↓", color = c.accent, fontSize = 16.sp)
+                    }
                     Spacer(Modifier.height(18.dp))
                     val ctx = androidx.compose.ui.platform.LocalContext.current
                     Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
                 }
                 "ai" -> AiPage()
+                "feel" -> FeelPage()
                 "connections" -> ConnectionsPage()
                 "persona" -> PersonaSection()
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)

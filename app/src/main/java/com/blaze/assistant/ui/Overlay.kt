@@ -457,8 +457,21 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
     val partial by Voice.partial.collectAsState()
     var text by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    val recent = messages.filter { it.role != Role.STEP || it == messages.lastOrNull() }.takeLast(8)
+    var compact by remember { mutableStateOf(Settings.bool("compact_panel", true)) }
+    val recentAll = messages.filter { it.role != Role.STEP || it == messages.lastOrNull() }.takeLast(8)
+    // Compact: just the newest thing Blaze said or is doing.
+    val recent = if (compact) recentAll.filter { it.role != Role.USER }.takeLast(1) else recentAll
     val list = rememberLazyListState()
+    // Fade away a few seconds after a task finishes, unless you're typing or talking.
+    var touched by remember { mutableStateOf(false) }
+    var wasBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(mood) {
+        if (mood != Mood.IDLE) { wasBusy = true; return@LaunchedEffect }
+        if (wasBusy && compact && !touched && Settings.bool("auto_hide_panel", true) && Agent.pendingQuestion.value == null) {
+            kotlinx.coroutines.delay(7000)
+            if (mood == Mood.IDLE && !touched && text.isEmpty() && Voice.state.value == Voice.State.IDLE && Agent.pendingQuestion.value == null) onClose()
+        }
+    }
     LaunchedEffect(recent.size, recent.lastOrNull()?.text?.length) { if (recent.isNotEmpty()) list.animateScrollToItem(recent.size - 1) }
 
     fun listen() {
@@ -490,10 +503,10 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
         ) {
             Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                OrbFace(40.dp)
+                OrbFace(if (compact) 30.dp else 40.dp)
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Blaze", style = TextStyle(fontFamily = Type.Display, fontSize = 17.sp, color = c.ink))
+                    if (!compact) Text("Blaze", style = TextStyle(fontFamily = Type.Display, fontSize = 17.sp, color = c.ink))
                     Label(when {
                         voice == Voice.State.LISTENING -> "Listening"
                         voice == Voice.State.SPEAKING -> "Speaking"
@@ -502,13 +515,16 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                         else -> "Ready"
                     }, color = if (mood != Mood.IDLE || voice != Voice.State.IDLE) c.accent else c.sub, size = 9.sp)
                 }
-                PanelButton("New") { Voice.cancelListening(); Agent.clear(); text = "" }
-                PanelButton("Pin", onPin)
-                PanelButton("Open", onExpand)
+                if (!compact) {
+                    PanelButton("New") { Voice.cancelListening(); Agent.clear(); text = "" }
+                    PanelButton("Pin", onPin)
+                    PanelButton("Open", onExpand)
+                }
+                PanelButton(if (compact) "More" else "Less") { compact = !compact; touched = true; Settings.setBool("compact_panel", compact) }
                 PanelButton("×", onClose)
             }
             if (recent.isNotEmpty()) {
-                LazyColumn(state = list, modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 300.dp).padding(horizontal = 14.dp),
+                LazyColumn(state = list, modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = if (compact) 150.dp else 300.dp).padding(horizontal = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     item { Spacer(Modifier.height(4.dp)) }
                     items(recent, key = { it.id }) { m ->
@@ -537,7 +553,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
             Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 12.dp, vertical = 12.dp)) {
                     if (text.isEmpty()) Text("Ask Blaze", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
-                    BasicTextField(text, { text = it },
+                    BasicTextField(text, { text = it; touched = true },
                         textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink),
                         cursorBrush = SolidColor(c.accent), maxLines = 3,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -548,7 +564,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                 val micOn = voice != Voice.State.IDLE
                 Box(Modifier.size(46.dp).background(if (micOn) c.accent else c.paper).hairline(if (micOn) c.accent else c.hair)
                     .clickable {
-                        note = ""
+                        note = ""; touched = true
                         when (voice) {
                             Voice.State.LISTENING -> Voice.cancelListening()
                             Voice.State.SPEAKING -> Voice.stopSpeaking()
@@ -583,7 +599,13 @@ fun TaskCard(onOpen: () -> Unit, onStop: () -> Unit) {
         val c = LocalBlaze.current
         val msgs by Agent.messages.collectAsState()
         val busy by Agent.busyChats.collectAsState()
-        val step = msgs.lastOrNull { it.role == com.blaze.assistant.agent.Role.STEP }?.text ?: "Working"
+        val stepRaw = msgs.lastOrNull { it.role == com.blaze.assistant.agent.Role.STEP }?.text ?: "Working"
+        // A plan checklist shows its current line; "2/5" tells you how far along it is.
+        val lines = stepRaw.lines()
+        val step = if (lines.size > 1) {
+            val done = lines.count { it.startsWith("\u2713") }
+            (lines.firstOrNull { it.startsWith("\u2192") }?.removePrefix("\u2192 ") ?: lines.last().drop(2)) + "  ·  $done/${lines.size}"
+        } else stepRaw
         Row(Modifier.padding(horizontal = 12.dp).fillMaxWidth().background(c.paper).border(1.dp, c.ink).clickable(onClick = onOpen)
             .padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             OrbFace(26.dp)

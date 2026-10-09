@@ -155,6 +155,9 @@ fun ChatScreen() {
     val clip = LocalClipboardManager.current
 
     var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
+    // First run only: people who already set Blaze up never see it.
+    var onboard by rememberSaveable { mutableStateOf(!Settings.bool("onboarded", false) && !Settings.ready && !hasMessages) }
+    LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
     var showChats by rememberSaveable { mutableStateOf(false) }
     var drawer by rememberSaveable { mutableStateOf(false) }
     var input by remember { mutableStateOf(TextFieldValue("")) }
@@ -320,6 +323,14 @@ fun ChatScreen() {
         if (drawer) BackHandler { drawer = false }
 
         if (showChats) ChatsSheet(onDismiss = { showChats = false })
+        if (onboard) Onboarding { prompt ->
+            onboard = false
+            when {
+                prompt == null -> {}
+                prompt.startsWith("/settings") -> settingsPage = "ai"
+                else -> Agent.send(prompt)
+            }
+        }
         settingsPage?.let { start ->
             androidx.compose.runtime.key(start) {
                 SettingsScreen(start, a11yOn,

@@ -526,6 +526,9 @@ When you finish, say what you did in one short sentence.
             history.put(JSONObject().put("role", "user").put("content", content))
             persist()   // so it shows in the chat list right away, even if you leave
             val routine = shown.startsWith("[Scheduled routine")
+            // Instant acknowledgment: the orb and a tick react before any thinking happens.
+            mood = Mood.THINKING
+            if (!routine) com.blaze.assistant.device.Haptics.tick(app)
             job = scope.launch {
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
@@ -649,7 +652,7 @@ When you finish, say what you did in one short sentence.
                     if (calls == null || calls.length() == 0) {
                         kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
                         val secs = (System.currentTimeMillis() - turnStart) / 1000.0
-                    if (step > 0) com.blaze.assistant.device.Haptics.done(app)
+                    if (step > 0) { com.blaze.assistant.device.Haptics.done(app); com.blaze.assistant.device.Sounds.done() }
                         com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
                         addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
                             if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model }, "%.1f s".format(secs),

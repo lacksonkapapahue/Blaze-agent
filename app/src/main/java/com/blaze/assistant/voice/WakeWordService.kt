@@ -193,6 +193,7 @@ class WakeWordService : Service() {
     }
 
     private fun wake() {
+        com.blaze.assistant.device.Sounds.wake()
         // Best path: as the default assistant, open Blaze's assistant session over any app.
         if (BlazeInteractionService.showFromWake()) return
         // Otherwise the overlay panel, if Blaze may draw over apps.
