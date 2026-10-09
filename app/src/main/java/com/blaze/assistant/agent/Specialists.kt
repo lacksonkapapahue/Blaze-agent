@@ -46,7 +46,7 @@ object Specialists {
             || tool.startsWith("github") || tool.startsWith("spotify") || tool.startsWith("notion") || tool.startsWith("slack") || tool == "share_to_app" -> "connectors"
         tool in setOf("remember", "forget", "recall_memory", "search_past_chats", "search_screen_memory") -> "memory"
         tool.endsWith("_routine") || tool == "list_routines" || tool.endsWith("_trigger") || tool == "list_triggers" -> "routines"
-        tool.startsWith("terminal") || tool == "run_shell" || tool in com.blaze.assistant.terminal.DevTools.names -> "terminal"
+        tool.startsWith("terminal") || tool == "run_shell" || tool == "git" || tool in com.blaze.assistant.terminal.DevTools.names -> "terminal"
         tool == "device_status" -> "device"
         tool.contains("notification") -> "notifications"
         else -> "other"

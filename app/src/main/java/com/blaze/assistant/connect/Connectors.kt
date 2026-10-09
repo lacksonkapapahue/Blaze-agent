@@ -171,7 +171,7 @@ object Connectors {
     }
 
     /** A valid access token, refreshing it when it's about to expire. */
-    private fun access(id: String): String? {
+    fun access(id: String): String? {
         val t = tokens(id) ?: return null
         val exp = t.optLong("expires_at", 0)
         if (exp > 0 && exp < System.currentTimeMillis() + 60_000 && t.optString("refresh_token").isNotBlank()) {
