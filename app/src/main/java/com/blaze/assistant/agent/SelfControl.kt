@@ -22,7 +22,7 @@ object SelfControl {
 
     private data class Intent(val re: Regex, val action: String)
     private val intents = listOf(
-        Intent(Regex("""^(please |hey blaze,? |blaze,? )?(shut ?down|turn (yourself )?off|power off|quit|exit|close( (yourself|blaze|the app|the panel|this))?|go away|go to sleep|sleep|dismiss|good ?bye|bye( blaze)?|that'?s all|nothing else|we'?re done)( (now|please|for now|blaze))*[.!]*$"""), "close"),
+        Intent(Regex("""^(please |hey blaze,? |blaze,? )?(shut ?down|turn (yourself )?off|power off|quit|exit|close( (yourself|blaze|the panel|this))?|go away|go to sleep|sleep|dismiss|good ?bye|bye( blaze)?|that'?s all|nothing else|we'?re done)( (now|please|for now|blaze))*[.!]*$"""), "close"),
         Intent(Regex("""(^|\b)(nothing for now|that'?s it for now)\b.*\b(shut ?down|close|go away|sleep)\b"""), "close"),
         Intent(Regex("""^(please )?(stop|cancel|abort|never ?mind|forget it|hold on|wait|pause)( (it|that|this|now|please|everything))*[.!]*$"""), "stop"),
         Intent(Regex("""^(please )?(be quiet|shut up|stop talking|stop speaking|quiet|silence|hush)( (now|please|blaze))*[.!]*$"""), "quiet"),
@@ -30,7 +30,7 @@ object SelfControl {
         Intent(Regex("""^(please )?(show|bring back|pin) (the |your )?(orb|bubble|floating button)[.!]*$"""), "show_orb"),
         Intent(Regex("""^(please )?(turn off|disable|stop) (the )?(wake word|hey blaze|listening for hey blaze)[.!]*$|^stop listening[.!]*$"""), "wake_off"),
         Intent(Regex("""^(please )?(turn on|enable|start) (the )?(wake word|hey blaze)[.!]*$"""), "wake_on"),
-        Intent(Regex("""^(please )?(mute|stop reading|don'?t (talk|speak)( out loud)?)( (your )?(voice|replies|answers))?[.!]*$"""), "voice_off"),
+        Intent(Regex("""^(please )?(mute (yourself|your voice|your replies)|stop reading (your )?(replies|answers)( out loud| aloud)?|don'?t (talk|speak) out loud)[.!]*$"""), "voice_off"),
         Intent(Regex("""^(please )?(unmute|talk to me|speak (your )?(replies|answers)|read (your )?(replies|answers) (aloud|out loud))[.!]*$"""), "voice_on"),
     )
 

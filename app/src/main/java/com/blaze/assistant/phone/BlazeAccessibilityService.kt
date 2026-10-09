@@ -55,6 +55,7 @@ class BlazeAccessibilityService : AccessibilityService() {
                 lastWindowPkg = pkg
                 com.blaze.assistant.agent.ScreenMemory.onWindow(this, pkg)
                 try { com.blaze.assistant.proactive.Triggers.onApp(pkg, appLabel(pkg)) } catch (_: Exception) { }
+                try { com.blaze.assistant.proactive.Habits.onApp(pkg, appLabel(pkg)) } catch (_: Exception) { }
             }
         }
     }

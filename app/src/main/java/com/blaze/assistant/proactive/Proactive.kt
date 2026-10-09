@@ -115,7 +115,12 @@ object Proactive {
             append("Calendar today:\n$cal\n\n")
             append("Already told the user recently:\n").append(recent.value.takeLast(6).joinToString("\n") { "- ${it.text}" }.ifEmpty { "(nothing)" })
         }
-        val sys = """You are Blaze, the user's phone assistant, deciding whether to speak up on your own right now. ${Memory.promptBlock(ctx.take(600))}
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val today = SimpleDateFormat("yyyyMMdd", Locale.US).format(Date())
+        val morning = Settings.bool("morning_brief", true) && hour in quietTo..(quietTo + 4) && Settings.str("brief_day", "") != today && urgentHint == null
+        if (morning) Settings.setStr("brief_day", today)
+        val brief = if (morning) "\nThis is the first check of the user's morning: ALWAYS give a short good-morning brief (2-3 sentences): the day, what's on the calendar, anything important waiting, and one useful heads-up (e.g. low battery). Set urgent false." else ""
+        val sys = """You are Blaze, the user's phone assistant, deciding whether to speak up on your own right now.$brief ${Memory.promptBlock(ctx.take(600))}
 Speak only when it truly helps now: an urgent or important message they may have missed, a meeting or event starting soon, something that needs a reply or decision, a phone problem (very low battery, overheating, storage full), or a genuinely useful nudge tied to their routines. Never repeat what was already said. Never mention codes or passwords. Most of the time, say nothing.
 Reply ONLY with JSON: {"say": "" or "one or two short friendly sentences", "urgent": true|false, "suggest": "" or "a short request the user could tap to have you do it, e.g. 'Reply to Mary that I'm on my way'"}"""
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys)).put(JSONObject().put("role", "user").put("content", ctx))

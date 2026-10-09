@@ -49,6 +49,10 @@ internal fun FeelPage() {
     ToggleRow("Sounds", "A blip when Blaze wakes, a tick when a task is done", sounds) { sounds = !sounds; Settings.setBool("sounds", sounds) }
     ToggleRow("Compact panel", "Over other apps, show a slim bar with just the latest line. Tap More to expand", compact) { compact = !compact; Settings.setBool("compact_panel", compact) }
     ToggleRow("Fade away when done", "The compact panel closes itself a few seconds after a task finishes", autoHide) { autoHide = !autoHide; Settings.setBool("auto_hide_panel", autoHide) }
+    var habits by remember { mutableStateOf(Settings.bool("habit_offers", true)) }
+    var morning by remember { mutableStateOf(Settings.bool("morning_brief", true)) }
+    ToggleRow("Morning brief", "A short good-morning card with your day when your quiet hours end", morning) { morning = !morning; Settings.setBool("morning_brief", morning) }
+    ToggleRow("Offer to automate habits", "If you open an app at the same time most days, Blaze offers once to do it for you", habits) { habits = !habits; Settings.setBool("habit_offers", habits) }
     V18Section("Learning from what I do")
     V18Note("Blaze keeps a private log of the steps it runs on screen ($traces so far). It never leaves your phone and will train a faster on-device model later.")
     Spacer(Modifier.height(8.dp))
