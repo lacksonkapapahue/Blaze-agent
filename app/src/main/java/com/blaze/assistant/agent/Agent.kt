@@ -186,6 +186,15 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     fun retryLast() { cur.msgs.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.let { retry(it.id) } }
 
     fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
+        // "Shut down", "stop", "be quiet"… are handled on-device, even mid-task.
+        val self = if (attachments.isEmpty()) SelfControl.match(text) else null
+        if (self != null) {
+            val s = cur
+            com.blaze.assistant.device.Haptics.tick(app)
+            if (self != "quiet") s.selfTurn(text.trim(), SelfControl.run(app, self), byVoice)
+            else SelfControl.run(app, self)
+            return
+        }
         // Typing or speaking while Blaze waits on a question answers it.
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
         cur.send(text, byVoice, attachments)
@@ -303,19 +312,19 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
             append(Learning.promptBlock(userText))
             append(com.blaze.assistant.connect.Connectors.promptBlock())
-            append("\nWhen the user tells you something lasting about themselves, save it with the remember tool. ")
+            append("\nHOW YOU TALK: short, warm and sure of yourself, like a sharp friend texting back. Lead with the answer. One or two sentences unless they ask for more. Never say \"let me know if there's anything else\", \"feel free to\", \"I'd be happy to\" or similar filler, and never ask the user to share personal details for your memory. ")
+            append("\nYou are Blaze and you can control yourself with blaze_self (close/go quiet, stop, orb, wake word, read-aloud, model, personality, settings, your status and crash log). If the user asks you to shut down, close, go away or stop, do that with blaze_self, never a phone setting. ")
+            append("\nWhen the user tells you something lasting about themselves, save it quietly with the remember tool. ")
             append("\nIf you're unsure what the user wants, or there are several options (accounts, contacts, items, times), don't guess and don't end your turn: call ask_user with short options, then carry on with the answer. ")
             if (control) {
                 append("""
-You can control the phone with tools. To do something in an app:
-1. open_app (or press_button home), 2. tap / type_text / scroll using element numbers, and repeat until done.
-After every open_app, tap, type_text, scroll or press_button the fresh screen is returned automatically, so you rarely need read_screen. Element numbers change after every action: always use the newest screen.
-When you already know the next few steps on the current screen (tap a field, type, tap Search), do them in one do_actions call.
-If read_screen shows little or nothing useful (games, maps, photos, video, custom apps), call look_at_screen to see a screenshot.
-Prefer the direct tools when they fit: search_in_app for "play/search X on YouTube/Spotify/Play Store/Maps" (never open_url for that), set_alarm, set_timer, dial, compose_sms. Use open_url only for real web addresses; for looking something up yourself use web_search.
-To search inside any other app: type_text into its search field with submit=true. If a tap by number didn't work, tap by its text.
-Before anything irreversible or that spends money or contacts someone (sending a message, posting, paying, deleting, calling), stop and ask the user to confirm in your reply, unless they clearly already told you to do exactly that.
-When you finish, say in one or two sentences what you did.
+You can control the phone. SPEED MATTERS: the user is watching.
+- For anything in an app, call run_plan ONCE with the whole script, using the visible words on buttons and fields as targets (e.g. open_app YouTube → tap "Search" → type "lofi hip hop" submit → tap the first result's title). You know how common apps look; you don't need to read the screen first. Add optional:true for popups you might need to dismiss, and expect:"..." when a step must lead somewhere.
+- run_plan only comes back when it's done or stuck. If stuck, it returns the screen with element numbers: fix it with a short new run_plan, or tap/type_text by number.
+- Use single tap/type_text/scroll only for one-off fixes. If read_screen shows little (games, maps, video, custom apps), call look_at_screen.
+- Prefer direct tools when they fit: search_in_app for "play/search X on YouTube/Spotify/Play Store/Maps", set_alarm, set_timer, dial, compose_sms. open_url only for real web addresses; web_search to look something up yourself.
+- Before anything irreversible or that spends money or contacts someone (sending, posting, paying, deleting, calling), confirm first unless the user clearly told you to do exactly that.
+When you finish, say what you did in one short sentence.
 """.trimIndent())
             } else {
                 append("Phone control is turned off in settings, so you can only chat.")
@@ -329,6 +338,7 @@ When you finish, say in one or two sentences what you did.
         val t = JSONArray()
         Memory.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.device.DeviceStatus.tool())
+        t.put(SelfControl.tool())
         t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "ask_user")
             .put("description", "Pause and ask the user a question with 2-4 short tap-able options (an 'own answer' choice is added automatically). Use whenever you're unsure, the request is ambiguous, or there are several choices on screen (which account, which contact, which item). The task waits right where it is and continues with the answer.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
@@ -345,6 +355,20 @@ When you finish, say in one or two sentences what you did.
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
         com.blaze.assistant.connect.Connectors.tools().forEach { t.put(it) }
         try { com.blaze.assistant.connect.Mcp.tools().forEach { t.put(it) } } catch (_: Exception) { }
+        if (Settings.phoneControl) t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "run_plan")
+            .put("description", "FASTEST way to do anything in an app. Give the whole script at once; Blaze runs it on-device in a few seconds, finding things by their visible text (no element numbers, no need to read the screen first), checking each step, and only comes back when done or stuck.")
+            .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("steps", JSONObject().put("type", "array")
+                .put("items", JSONObject().put("type", "object").put("properties", JSONObject()
+                    .put("do", JSONObject().put("type", "string").put("enum", JSONArray(listOf("open_app", "tap", "long_press", "type", "enter", "scroll", "back", "home", "wait", "search_in_app"))))
+                    .put("app", JSONObject().put("type", "string").put("description", "open_app / search_in_app: app name"))
+                    .put("target", JSONObject().put("type", "string").put("description", "tap/type: the visible text, label or hint of the element, e.g. Search, Send, Message"))
+                    .put("text", JSONObject().put("type", "string").put("description", "type: what to type"))
+                    .put("submit", JSONObject().put("type", "boolean").put("description", "type: press Enter/Search after"))
+                    .put("query", JSONObject().put("type", "string")).put("play", JSONObject().put("type", "boolean"))
+                    .put("direction", JSONObject().put("type", "string")).put("seconds", JSONObject().put("type", "number"))
+                    .put("expect", JSONObject().put("type", "string").put("description", "optional text that should be visible after this step"))
+                    .put("optional", JSONObject().put("type", "boolean").put("description", "skip instead of stopping if it fails (e.g. dismissing a popup)")))
+                    .put("required", JSONArray(listOf("do")))))).put("required", JSONArray(listOf("steps"))))))
         if (Settings.phoneControl) t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "do_actions")
             .put("description", "Run several phone actions in a row in one go (e.g. tap the search box, type, tap a result), using element numbers from the latest screen. Stops at the first one that fails. The new screen is returned at the end.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("steps", JSONObject().put("type", "array")
@@ -475,6 +499,19 @@ When you finish, say in one or two sentences what you did.
         }
 
         // ---------- Turns ----------
+
+        /** A self-command handled on-device: shown and remembered like a normal exchange. */
+        fun selfTurn(text: String, reply: String, byVoice: Boolean) {
+            add(Role.USER, text)
+            history.put(JSONObject().put("role", "user").put("content", text))
+            if (reply.isNotBlank()) {
+                val id = add(Role.BLAZE, reply)
+                addMeta(id, "⚡ Blaze itself")
+                history.put(JSONObject().put("role", "assistant").put("content", reply))
+                if (byVoice && Settings.speakReplies && !reply.startsWith("Going quiet")) Voice.speak(reply)
+            }
+            persist()
+        }
 
         fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
             if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
@@ -777,6 +814,7 @@ When you finish, say in one or two sentences what you did.
                 "termux_run" -> { add(Role.STEP, "Termux: " + args.optString("command").take(60)); com.blaze.assistant.terminal.Terminal.runInTermux(app, args.optString("command"), args.optBoolean("background", true)) }
                 "delegate" -> delegate(args.optJSONArray("tasks") ?: JSONArray())
                 "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
+                "blaze_self" -> { add(Role.STEP, "Adjusting myself: ${args.optString("action")}"); SelfControl.run(app, args.optString("action"), args) }
                 "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
                 "look_at_screen" -> {
                     add(Role.STEP, "Looking at a screenshot")
@@ -798,6 +836,7 @@ When you finish, say in one or two sentences what you did.
                 "search_screen_memory" -> { add(Role.STEP, "Searching screen memory"); ScreenMemory.search(app, args.optString("query"), args.optString("app").ifBlank { null }) }
                 "recent_notifications" -> { add(Role.STEP, "Checking notifications"); com.blaze.assistant.notify.NotificationBrain.list(args.optString("app").ifBlank { null }, args.optDouble("hours", 6.0)) }
                 "reply_to_notification" -> { add(Role.STEP, "Replying"); com.blaze.assistant.notify.NotificationBrain.reply(app, args.optInt("number"), args.optString("text")) }
+                "run_plan" -> runPlan(args)
                 "do_actions" -> {
                     val steps = args.optJSONArray("steps") ?: JSONArray()
                     val log = StringBuilder()
@@ -826,6 +865,104 @@ When you finish, say in one or two sentences what you did.
                     else -> { add(Role.STEP, PhoneTools.describe(name, args)); PhoneTools.run(app, name, args) }
                 }
             }
+        }
+
+
+        /**
+         * v1.9 fast path: run a whole script of steps the model planned, addressed by visible text
+         * instead of element numbers. Each step is checked locally (target found, screen changed,
+         * expected text appeared) — no model call until the script finishes or gets stuck.
+         */
+        suspend fun runPlan(args: JSONObject): String {
+            val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
+                ?: return "Phone control isn't connected. Ask the user to turn on Blaze in Accessibility settings."
+            val steps = args.optJSONArray("steps") ?: return "Error: no steps."
+            val n = minOf(steps.length(), 15)
+            fun desc(st: JSONObject): String = when (st.optString("do")) {
+                "open_app" -> "Open ${st.optString("app").ifBlank { st.optString("target") }}"
+                "tap" -> "Tap \u201c${st.optString("target").take(30)}\u201d"
+                "long_press" -> "Hold \u201c${st.optString("target").take(30)}\u201d"
+                "type" -> "Type \u201c${st.optString("text").take(30)}\u201d" + if (st.optBoolean("submit")) " and search" else ""
+                "scroll" -> "Scroll ${st.optString("direction", "down")}"
+                "back" -> "Go back"; "home" -> "Go home"; "enter" -> "Press Enter"
+                "wait" -> "Wait"
+                "search_in_app" -> "Search ${st.optString("app")} for \u201c${st.optString("query").take(30)}\u201d"
+                else -> st.optString("do")
+            }
+            val labels = (0 until n).map { desc(steps.getJSONObject(it)) }
+            val state = MutableList(n) { 0 }   // 0 todo, 1 running, 2 done, 3 failed, 4 skipped
+            fun board() = labels.mapIndexed { i, l -> (when (state[i]) { 2 -> "\u2713 "; 1 -> "\u2192 "; 3 -> "\u2715 "; 4 -> "\u2013 "; else -> "\u00b7 " }) + l }.joinToString("\n")
+            val boardId = add(Role.STEP, board())
+            val started = System.currentTimeMillis()
+            for (i in 0 until n) {
+                val st = steps.getJSONObject(i)
+                state[i] = 1; replace(boardId, Role.STEP, board())
+                val t0 = System.currentTimeMillis()
+                val pkgBefore = svc.currentPkg()
+                val target = st.optString("target")
+                var fail: String? = null
+                try {
+                    when (st.optString("do")) {
+                        "open_app" -> {
+                            val r = PhoneTools.run(app, "open_app", JSONObject().put("app_name", st.optString("app").ifBlank { target }))
+                            if (r.startsWith("No app") || r.startsWith("Error") || r.startsWith("Couldn't")) fail = r
+                            else {
+                                val end = System.currentTimeMillis() + 3000
+                                while (svc.currentPkg() == pkgBefore && System.currentTimeMillis() < end) kotlinx.coroutines.delay(100)
+                                svc.settle(1500, 250)
+                            }
+                        }
+                        "tap", "long_press" -> {
+                            var id = svc.waitFor(target, 3000)
+                            if (id == null) { svc.scroll("down", null); svc.settle(600, 150); id = svc.waitFor(target, 1200) }
+                            if (id == null) fail = "couldn't find \u201c$target\u201d on screen"
+                            else {
+                                val label = svc.labelOf(id)
+                                if (Settings.confirmRisky && risky.containsMatchIn(label) &&
+                                    !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc.currentApp() ?: "the app"}.", "Tap"))
+                                    return "The user did NOT approve tapping \"$label\" (step ${i + 1}). Don't retry; tell them it's ready for them to finish."
+                                svc.flash(id)
+                                val r = svc.tap(id, st.optString("do") == "long_press")
+                                if (r.startsWith("Couldn't") || r.startsWith("No element")) fail = r
+                                trace.put(JSONObject().put("tool", "tap").put("args", JSONObject().put("text", label)).put("label", label))
+                            }
+                        }
+                        "type" -> {
+                            val id = if (target.isNotBlank()) svc.waitFor(target, 3000, wantField = true) ?: svc.anyField() else svc.anyField()
+                            if (id == null) fail = "no text field to type into"
+                            else {
+                                svc.flash(id)
+                                val r = svc.type(id, st.optString("text"), st.optBoolean("submit"))
+                                if (r.startsWith("Couldn't") || r.startsWith("No element")) fail = r
+                                trace.put(JSONObject().put("tool", "type_text").put("args", JSONObject().put("text", st.optString("text")).put("submit", st.optBoolean("submit"))).put("label", svc.labelOf(id)))
+                            }
+                        }
+                        "enter" -> if (!svc.pressEnter()) fail = "couldn't press Enter"
+                        "scroll" -> { val r = svc.scroll(st.optString("direction", "down"), null); if (r.startsWith("Couldn't")) fail = r }
+                        "back" -> svc.press("back")
+                        "home" -> svc.press("home")
+                        "wait" -> kotlinx.coroutines.delay((st.optDouble("seconds", 1.0).coerceIn(0.2, 10.0) * 1000).toLong())
+                        "search_in_app" -> {
+                            val r = com.blaze.assistant.phone.AppSearch.run(app, st.optString("app"), st.optString("query"), st.optBoolean("play"))
+                            if (r.startsWith("Error") || r.startsWith("No app")) fail = r
+                        }
+                        else -> fail = "unknown step \u201c${st.optString("do")}\u201d"
+                    }
+                    if (fail == null && st.optString("do") !in setOf("wait", "open_app")) svc.settle(1200, 180)
+                    val expect = st.optString("expect")
+                    if (fail == null && expect.isNotBlank() && svc.waitFor(expect, 3500) == null) fail = "expected \u201c$expect\u201d to appear but it didn't"
+                } catch (e: CancellationException) { throw e } catch (e: Exception) { fail = "error: ${e.message}" }
+                Traces.log(svc.currentPkg(), st, fail == null, System.currentTimeMillis() - t0, fail ?: "")
+                if (fail != null && st.optBoolean("optional")) { state[i] = 4; replace(boardId, Role.STEP, board()); continue }
+                if (fail != null) {
+                    state[i] = 3; replace(boardId, Role.STEP, board())
+                    return "Stopped at step ${i + 1} (${labels[i]}): $fail. Steps 1-$i worked.\nUse the element numbers below to continue, or send a new run_plan from here.\n\n" + svc.readScreen()
+                }
+                state[i] = 2; replace(boardId, Role.STEP, board())
+                com.blaze.assistant.device.Haptics.tick(app)
+            }
+            val words = svc.visibleWords().filter { it.length in 2..60 }.take(25)
+            return "All $n steps done in ${"%.1f".format((System.currentTimeMillis() - started) / 1000.0)} s. Now in ${svc.currentApp() ?: "?"}. On screen: ${words.joinToString(" · ")}\n(Call read_screen only if you need to act further on this screen.)"
         }
 
         /** After a turn: summary, memories and skills in the background (see Learning). */

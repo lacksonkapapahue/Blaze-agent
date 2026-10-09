@@ -89,6 +89,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume(); Agent.inForeground = true
+        com.blaze.assistant.agent.SelfControl.activity = java.lang.ref.WeakReference(this)
         Notifier.clearReplies(); Notifier.doneWorking()
         com.blaze.assistant.voice.WakeWordService.start(this)
     }

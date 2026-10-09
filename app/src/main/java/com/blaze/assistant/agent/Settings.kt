@@ -21,6 +21,12 @@ object Settings {
             if (pid == Providers.CUSTOM) e.putString("custom_base", oldBase)
             e.apply()
         }
+        // v1.9: the fast lane misread things like "shut down" at 0.3; raise an untouched low threshold.
+        if (!prefs.getBoolean("v19_fl_min", false)) {
+            val e = prefs.edit().putBoolean("v19_fl_min", true)
+            if (prefs.getFloat("fast_lane_min", 0.55f) < 0.5f) e.putFloat("fast_lane_min", 0.55f)
+            e.apply()
+        }
         // v1.7: API keys and tokens move into Keystore-encrypted form (plain values still read).
         try {
             val e = prefs.edit(); var n = 0
@@ -60,7 +66,7 @@ object Settings {
         set(v) = prefs.edit().putBoolean("fast_lane", v).apply()
     /** Minimum Needle confidence (0-1) to act without the cloud. */
     var fastLaneMin: Float
-        get() = prefs.getFloat("fast_lane_min", 0.3f)
+        get() = prefs.getFloat("fast_lane_min", 0.55f)
         set(v) = prefs.edit().putFloat("fast_lane_min", v).apply()
 
     /** Optional quicker model for in-between phone steps; blank = use the main model. */

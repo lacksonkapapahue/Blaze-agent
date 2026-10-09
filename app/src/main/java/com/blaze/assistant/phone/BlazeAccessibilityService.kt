@@ -184,6 +184,101 @@ class BlazeAccessibilityService : AccessibilityService() {
         return n.viewIdResourceName?.substringAfter('/')?.replace('_', ' ') ?: ""
     }
 
+    // ---------- v1.9: by-label targeting for planned scripts ----------
+
+    private fun labelsOf(n: AccessibilityNodeInfo): List<String> {
+        val out = mutableListOf<String>()
+        n.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
+        n.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
+        if (android.os.Build.VERSION.SDK_INT >= 26) n.hintText?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
+        n.viewIdResourceName?.substringAfter('/')?.replace('_', ' ')?.takeIf { it.isNotEmpty() }?.let { out += it }
+        return out
+    }
+
+    /**
+     * Fresh read, then the element best matching [label]: exact text, then word-start, then
+     * contains; editable fields win when [wantField], clickable things otherwise.
+     */
+    fun findTarget(label: String, wantField: Boolean = false): Int? {
+        readScreen()
+        val l = label.trim().lowercase(); if (l.isEmpty()) return null
+        var best = -1; var bestScore = 0
+        elements.forEachIndexed { i, n ->
+            val ls = labelsOf(n).map { it.lowercase() } + labelOf(i).lowercase()
+            var sc = 0
+            for (x in ls) sc = maxOf(sc, when {
+                x == l -> 100
+                x.startsWith(l) || Regex("\\b" + Regex.escape(l)).containsMatchIn(x) -> 70
+                x.contains(l) -> 50
+                l.contains(x) && x.length >= 3 -> 30
+                else -> 0 })
+            if (sc == 0) return@forEachIndexed
+            if (wantField && n.isEditable) sc += 25
+            if (!wantField && n.isClickable) sc += 10
+            if (!n.isEnabled) sc -= 40
+            if (sc > bestScore) { bestScore = sc; best = i }
+        }
+        return best.takeIf { it >= 0 && bestScore >= 30 }
+    }
+
+    /** Waits up to [ms] for [label] to show up (apps load lazily). */
+    suspend fun waitFor(label: String, ms: Long, wantField: Boolean = false): Int? {
+        val end = android.os.SystemClock.uptimeMillis() + ms
+        while (true) {
+            findTarget(label, wantField)?.let { return it }
+            if (android.os.SystemClock.uptimeMillis() > end) return null
+            kotlinx.coroutines.delay(150)
+        }
+    }
+
+    /** The focused text field, or the first one on screen. */
+    fun anyField(): Int? {
+        readScreen()
+        val f = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (f != null && f.isEditable) { val i = elements.indexOfFirst { it == f }; if (i >= 0) return i }
+        return elements.indexOfFirst { it.isEditable }.takeIf { it >= 0 }
+    }
+
+    /** Presses the keyboard's Enter/Search on the current field. */
+    suspend fun pressEnter(): Boolean { val id = anyField() ?: return false; return submitIme(elements[id]) }
+
+    /** Package in front right now. */
+    fun currentPkg(): String = rootInActiveWindow?.packageName?.toString().orEmpty()
+
+    /** Words visible on screen (for checking a step worked, and short "what changed" notes). */
+    fun visibleWords(): Set<String> {
+        readScreen()
+        return elements.flatMap { labelsOf(it) }.map { it.take(80) }.toSet()
+    }
+
+    /** A soft ring where Blaze is about to tap, so you can watch it work. */
+    fun flash(id: Int) {
+        if (!com.blaze.assistant.agent.Settings.bool("show_taps", true)) return
+        val n = element(id) ?: return
+        val r = Rect(); n.getBoundsInScreen(r)
+        if (r.width() <= 2 || r.height() <= 2) return
+        try {
+            val wm = getSystemService(android.view.WindowManager::class.java)
+            val pad = (8 * resources.displayMetrics.density).toInt()
+            val v = object : android.view.View(this) {
+                val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    style = android.graphics.Paint.Style.STROKE; strokeWidth = 3 * resources.displayMetrics.density; color = 0xFF6B8CFF.toInt() }
+                val f = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0x226B8CFF }
+                override fun onDraw(c: android.graphics.Canvas) {
+                    val h = p.strokeWidth
+                    c.drawRect(h, h, width - h, height - h, f); c.drawRect(h, h, width - h, height - h, p)
+                }
+            }
+            val lp = android.view.WindowManager.LayoutParams(r.width() + pad * 2, r.height() + pad * 2,
+                android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                android.graphics.PixelFormat.TRANSLUCENT).apply {
+                gravity = android.view.Gravity.TOP or android.view.Gravity.START; x = r.left - pad; y = r.top - pad }
+            android.os.Handler(mainLooper).post { try { wm.addView(v, lp); v.animate().alpha(0f).setStartDelay(260).setDuration(320).withEndAction { try { wm.removeView(v) } catch (_: Exception) { } }.start() } catch (_: Exception) { } }
+        } catch (_: Exception) { }
+    }
+
     fun currentApp(): String? = rootInActiveWindow?.packageName?.toString()?.let { appLabel(it) }
 
     /** True if the screen changed (any accessibility event) since [since], waiting up to [ms]. */
