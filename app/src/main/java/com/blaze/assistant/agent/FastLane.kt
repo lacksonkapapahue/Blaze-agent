@@ -154,6 +154,11 @@ object FastLane {
             if (r != null && listOf("Couldn't tell", "Error", "Unknown", "No app").none { r.startsWith(it) }) return Result(r, System.currentTimeMillis() - t0, n)
             IntentCache.drop(text)
         }
+        // Everyday commands by plain rules: instant and offline, no model needed.
+        QuickRules.parse(text)?.let { (n, a) ->
+            val r = try { execute(ctx, n, a, confirm) } catch (_: Exception) { null }
+            if (r != null && listOf("Couldn't tell", "Error", "Unknown", "No app").none { r.startsWith(it) }) return Result(r, System.currentTimeMillis() - t0, n)
+        }
         if (!enabled(ctx)) return null
         val out = lock.withLock {
             try {

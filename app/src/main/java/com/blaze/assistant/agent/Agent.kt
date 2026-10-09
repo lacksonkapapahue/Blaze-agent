@@ -540,7 +540,7 @@ When you finish, say what you did in one short sentence.
             job = scope.launch {
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
-                if (attachments.isEmpty() && !routine && (FastLane.enabled(app) || IntentCache.size() > 0)) {
+                if (attachments.isEmpty() && !routine) {
                     mood = Mood.THINKING
                     val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     if (fast != null) {
@@ -553,8 +553,7 @@ When you finish, say what you did in one short sentence.
                     }
                 }
                 if (offline && !Settings.customBase.contains("127.0.0.1") && !Settings.customBase.contains("localhost")) {
-                    add(Role.ERROR, if (FastLane.enabled(app)) "You're offline. I can still do direct commands like \u201copen WhatsApp\u201d, \u201cflashlight on\u201d or \u201cset a timer for 5 minutes\u201d." 
-                        else "You're offline. Turn on the fast lane in Settings → AI & model to use direct commands without internet.")
+                    add(Role.ERROR, "You're offline. I can still do direct commands like \u201copen WhatsApp\u201d, \u201cflashlight on\u201d or \u201cset a timer for 5 minutes\u201d.")
                     mood = Mood.IDLE; persist(); return@launch
                 }
                 runLoop()

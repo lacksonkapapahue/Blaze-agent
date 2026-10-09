@@ -24,9 +24,42 @@ object FreeRouter {
 
     private fun keyOf(t: LlmClient.Target) = t.pid + "|" + t.model
 
+    // ---- Smart OpenRouter free pick ----
+    // "openrouter/free" hands each turn to a random free model, sometimes a tiny coding model that
+    // can't even read the clock. Instead pick the strongest free models that support tools, once a day.
+    private val weak = Regex("""(code|coder|codestral|devstral|mini|nano|tiny|small|lite|micro|guard|embed|vision|-vl|ocr|reward|math|\b[0-9]b\b|\b(1\.5|0\.5|1|2|3|4|7|8|9|12|14)b\b|e2b|e4b|uncensored|roleplay|rp\b)""", RegexOption.IGNORE_CASE)
+    private val strong = listOf("deepseek", "qwen3", "kimi", "glm", "gpt-oss", "llama-4", "gemini", "mistral-large", "nemotron-ultra", "hermes", "maverick", "grok")
+    @Volatile private var refreshing = false
+
+    /** Best free OpenRouter models (tools-capable), cached; refreshed in the background daily. */
+    fun openRouterPicks(): List<String> {
+        val saved = Settings.str("or_free_best", "")
+        val at = Settings.str("or_free_best_at", "0").toLongOrNull() ?: 0
+        if (System.currentTimeMillis() - at > 24 * 3600_000L && !refreshing) {
+            refreshing = true
+            Thread {
+                try {
+                    val (code, body) = com.blaze.assistant.connect.Http.req("GET", "https://openrouter.ai/api/v1/models", timeoutMs = 20_000)
+                    if (code in 200..299) {
+                        val data = JSONObject(body).optJSONArray("data") ?: JSONArray()
+                        val c = (0 until data.length()).map { data.getJSONObject(it) }.filter { m ->
+                            val id = m.optString("id")
+                            val params = m.optJSONArray("supported_parameters")?.toString() ?: ""
+                            id.endsWith(":free") && params.contains("\"tools\"") && !weak.containsMatchIn(id)
+                        }.sortedWith(compareByDescending<JSONObject> { m -> strong.indexOfFirst { m.optString("id").contains(it, true) }.let { if (it < 0) 0 else strong.size - it } }
+                            .thenByDescending { it.optInt("context_length") })
+                        val top = c.take(3).map { it.optString("id") }
+                        if (top.isNotEmpty()) { Settings.setStr("or_free_best", top.joinToString(",")); Settings.setStr("or_free_best_at", System.currentTimeMillis().toString()) }
+                    }
+                } catch (_: Exception) { } finally { refreshing = false }
+            }.start()
+        }
+        return saved.split(',').filter { it.isNotBlank() }
+    }
+
     /** Default free model per provider when the user hasn't picked one. */
     private fun defaultModel(pid: String) = when (pid) {
-        "openrouter" -> "openrouter/free"
+        "openrouter" -> openRouterPicks().firstOrNull() ?: "openrouter/free"
         "gemini" -> Settings.DEFAULT_MODEL
         else -> ""
     }
@@ -52,7 +85,10 @@ object FreeRouter {
 
     private fun chain(needTools: Boolean): List<LlmClient.Target> {
         val now = System.currentTimeMillis()
-        val ts = entries().map { LlmClient.target(it.first, it.second) }.filter { it.key.isNotBlank() && it.model.isNotBlank() }
+        val ts = entries().map { (pid, model) ->
+            // A tiny or coding-only OpenRouter model gets swapped for today's best free pick.
+            val m = if (pid == "openrouter" && (model == "openrouter/free" || weak.containsMatchIn(model))) openRouterPicks().firstOrNull() ?: model else model
+            LlmClient.target(pid, m) }.filter { it.key.isNotBlank() && it.model.isNotBlank() }
         // Fill-first: keep the user's order, but skip cooled-down entries and push flaky ones back.
         val (ready, cooling) = ts.partition { (health[keyOf(it)]?.coolUntil ?: 0) <= now }
         val usable = ready.filterNot { needTools && health[keyOf(it)]?.noTools == true }

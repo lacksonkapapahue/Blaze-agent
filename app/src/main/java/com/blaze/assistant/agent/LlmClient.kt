@@ -105,6 +105,11 @@ object LlmClient {
             if (quick && t.pid == "gemini" && !thoughts) put("reasoning_effort", "low")
             if (thoughts) put("extra_body", JSONObject().put("google",
                 JSONObject().put("thinking_config", JSONObject().put("include_thoughts", true).apply { if (quick) put("thinking_budget", 512) })))
+            // OpenRouter: if this free model is busy, fall through to the next-best free ones server-side.
+            if (t.pid == "openrouter" && t.model.endsWith(":free")) {
+                val alts = FreeRouter.openRouterPicks().filter { it != t.model }.take(2)
+                if (alts.isNotEmpty()) put("models", JSONArray(listOf(t.model) + alts))
+            }
             if (tools != null && tools.length() > 0) {
                 put("tools", tools)
                 put("tool_choice", "auto")
