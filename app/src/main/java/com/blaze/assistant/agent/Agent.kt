@@ -363,6 +363,10 @@ When you finish, say what you did in one short sentence.
             append("CURRENT LOCAL TIME: $now (${java.util.TimeZone.getDefault().id}). This is exact: answer any time, date or day question straight from it, never say you can't see the time. ")
             append(Memory.promptBlock(userText))
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
+            append("\nKNOW BEFORE YOU ASK: never ask the user something you can find out yourself. Their phone make, model, Android version and skin are in the line above; " +
+                "check installed apps with list_apps (e.g. whether Secure Folder, Termux or a bank app is there), settings and screen state with your phone tools, time and battery from 'Phone now', " +
+                "and facts about them from memory. Answer for THIS phone specifically (exact menu names for its make and Android version), not a list of options for every brand. " +
+                "Ask only for things that live in their head: preferences, choices, consent.")
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
@@ -376,7 +380,7 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.device.DeviceStatus.tool())
         t.put(SelfControl.tool())
         t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "ask_user")
-            .put("description", "Pause and ask the user a question with 2-4 short tap-able options (an 'own answer' choice is added automatically). Use whenever you're unsure, the request is ambiguous, or there are several choices on screen (which account, which contact, which item). The task waits right where it is and continues with the answer.")
+            .put("description", "Pause and ask the user a question with 2-4 short tap-able options (an 'own answer' choice is added automatically). Use when a real choice is theirs (which account, which contact, which item) or the request is ambiguous. Never use it for facts you can check yourself (phone model, Android version, installed apps, settings, battery). The task waits right where it is and continues with the answer.")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("question", JSONObject().put("type", "string"))
                 .put("options", JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))))

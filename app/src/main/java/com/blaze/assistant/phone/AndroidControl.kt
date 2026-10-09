@@ -24,7 +24,7 @@ import org.json.JSONObject
  * directly opens the right settings page for the user instead.
  */
 object AndroidControl {
-    val names = setOf("clipboard", "post_notification", "share_text", "phone_mode", "open_settings_page", "system_action", "app_usage", "uninstall_app", "open_camera")
+    val names = setOf("clipboard", "post_notification", "share_text", "phone_mode", "open_settings_page", "system_action", "app_usage", "uninstall_app", "open_camera", "list_apps")
 
     private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
         JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
@@ -56,6 +56,8 @@ object AndroidControl {
             JSONObject().put("action", en("power_dialog", "split_screen", "screenshot", "lock", "recents", "notifications", "quick_settings")), listOf("action")),
         fn("app_usage", "Which apps were used most today/this week (needs Usage access).", JSONObject().put("days", JSONObject().put("type", "integer")), emptyList()),
         fn("uninstall_app", "Ask Android to uninstall an app (the user confirms).", JSONObject().put("package", str("Package name")), listOf("package")),
+        fn("list_apps", "List the apps installed on this phone (name and package), optionally filtered by a word. Use it instead of asking the user what they have.",
+            JSONObject().put("filter", str("Optional word, e.g. 'bank', 'secure', 'whatsapp'")), emptyList()),
         fn("open_camera", "Open the camera to take a photo, record video, or scan a QR code.", JSONObject().put("mode", en("photo", "video", "qr")), emptyList()),
     )
 
@@ -77,6 +79,14 @@ object AndroidControl {
         }
         "system_action" -> system(a.optString("action"))
         "app_usage" -> usage(ctx, a.optInt("days", 1).coerceIn(1, 30))
+        "list_apps" -> {
+            val pm = ctx.packageManager
+            val f = a.optString("filter").trim()
+            val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+                .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }.distinctBy { it.second }
+                .filter { f.isBlank() || it.first.contains(f, true) || it.second.contains(f, true) }.sortedBy { it.first.lowercase() }
+            if (apps.isEmpty()) "No installed app matches \u201c$f\u201d." else "${apps.size} apps:\n" + apps.take(150).joinToString("\n") { "${it.first} (${it.second})" }
+        }
         "uninstall_app" -> if (start(ctx, Intent(Intent.ACTION_DELETE, Uri.parse("package:" + a.optString("package"))))) "Android is asking the user to confirm the uninstall." else "Couldn't start the uninstall."
         "open_camera" -> when (a.optString("mode", "photo")) {
             "video" -> if (start(ctx, Intent(android.provider.MediaStore.INTENT_ACTION_VIDEO_CAMERA))) "Opened the video camera." else "No camera app found."

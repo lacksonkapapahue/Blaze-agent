@@ -20,7 +20,7 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.9.10 is the current build (watchers, screen diffs, autonomy, SKILL.md packs, hands-free mode, detached jobs, background sweeps, wider Android control) on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.9.11 is the current build (watchers, screen diffs, autonomy, SKILL.md packs, hands-free mode, detached jobs, background sweeps, wider Android control) on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 ## v1.9.6 (versionCode 17): process registry + steadier offline commands

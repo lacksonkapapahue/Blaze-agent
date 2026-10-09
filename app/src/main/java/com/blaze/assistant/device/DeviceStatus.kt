@@ -73,11 +73,37 @@ object DeviceStatus {
         }
     }
 
+    private fun prop(name: String): String = try {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java).invoke(null, name) as? String ?: ""
+    } catch (_: Exception) { "" }
+
+    /** Who this phone is, worked out once: make, model, Android and skin version, screen, RAM, region. */
+    @Volatile private var idCache = ""
+    fun identity(ctx: Context): String {
+        if (idCache.isNotEmpty()) return idCache
+        val make = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+        val skin = when {
+            make.equals("samsung", true) -> prop("ro.build.version.oneui").toIntOrNull()?.let { v -> " (One UI ${v / 10000}.${(v / 100) % 100})" } ?: " (One UI)"
+            make.equals("xiaomi", true) || make.equals("redmi", true) || make.equals("poco", true) -> prop("ro.miui.ui.version.name").takeIf { it.isNotBlank() }?.let { " (MIUI/HyperOS $it)" } ?: ""
+            make.equals("oneplus", true) || make.equals("oppo", true) || make.equals("realme", true) -> prop("ro.build.version.oplusrom").takeIf { it.isNotBlank() }?.let { " (ColorOS/OxygenOS $it)" } ?: ""
+            make.equals("huawei", true) || make.equals("honor", true) -> prop("ro.build.version.emui").takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""
+            make.equals("tecno", true) || make.equals("infinix", true) || make.equals("itel", true) -> prop("ro.os_product.version").takeIf { it.isNotBlank() }?.let { " (HiOS/XOS $it)" } ?: ""
+            else -> ""
+        }
+        val dm = ctx.resources.displayMetrics
+        val ram = try { val mi = android.app.ActivityManager.MemoryInfo(); ctx.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(mi); "%.0f GB RAM".format(mi.totalMem / 1e9) } catch (_: Exception) { "" }
+        val country = try { ctx.getSystemService(android.telephony.TelephonyManager::class.java)?.simCountryIso?.uppercase().orEmpty() } catch (_: Exception) { "" }
+        idCache = "This phone: $make ${Build.MODEL} (device ${Build.DEVICE}), Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}$skin, " +
+            "${dm.widthPixels}x${dm.heightPixels} screen, $ram, ${Build.SUPPORTED_ABIS.firstOrNull().orEmpty()}" +
+            (if (country.isNotBlank()) ", SIM country $country" else "") + ", language ${java.util.Locale.getDefault().toLanguageTag()}."
+        return idCache
+    }
+
     /** One line for the system prompt so Blaze is aware without spending a tool call. */
     fun promptLine(ctx: Context): String = try {
         val s = snap(ctx)
         val w = warnings(s)
-        "\nPhone now: battery ${s.battery}%${if (s.charging) " charging" else ""}, ${s.network}, ringer ${s.ringer}." +
+        "\n" + identity(ctx) + "\nPhone now: battery ${s.battery}%${if (s.charging) " charging" else ""}, ${s.network}, ringer ${s.ringer}." +
             (if (w.isNotEmpty()) " Note: ${w.joinToString("; ")}." else "")
     } catch (_: Exception) { "" }
 

@@ -14,7 +14,7 @@ object ToolRouter {
 
     /** Always sent. */
     private val core = setOf(
-        "remember", "forget", "processes", "process", "recall_memory", "device_status", "blaze_self", "ask_user",
+        "remember", "forget", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user",
         "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
         // Basic phone control stays in core: it's the most common thing people ask for.
         "run_plan", "open_app", "search_in_app", "read_screen"
@@ -33,7 +33,7 @@ object ToolRouter {
             { it in setOf("send_sms", "compose_sms", "read_messages", "call_contact", "call_number", "dial", "find_contact", "recent_calls",
                 "message_contact", "send_text", "reply_to_notification", "recent_notifications", "run_ussd") }),
         Group("device", "alarms, timers, volume, settings toggles, battery, media",
-            r("""\b(alarm|timer|volume|mute|loud|wifi|wi-fi|bluetooth|torch|flash|brightness|dnd|disturb|airplane|battery|setting|pause|play|next|skip|music|song|clipboard|copy|paste|notif\w*|share|ringer|silent|vibrate|rotat\w*|hotspot|nfc|location|split|power|screenshot|lock|usage|uninstall|camera|qr|photo)\b"""),
+            r("""\b(alarm|timer|volume|mute|loud|wifi|wi-fi|bluetooth|torch|flash|brightness|dnd|disturb|airplane|battery|setting|pause|play|next|skip|music|song|clipboard|copy|paste|notif\w*|share|ringer|silent|vibrate|rotat\w*|hotspot|nfc|location|split|power|screenshot|lock|usage|uninstall|camera|qr|photo|installed|apps?|secure folder|private space|phone model|android version)\b"""),
             { it in setOf("set_alarm", "set_timer", "set_volume", "toggle_setting", "device_setting", "battery_level", "media_control") || it in com.blaze.assistant.phone.AndroidControl.names }),
         Group("schedule", "calendar, routines, triggers (when X do Y)",
             r("""\b(calendar|event|meeting|schedule|remind|reminder|every|daily|tomorrow|tonight|morning|routine|when|whenever|appointment)\b"""),
