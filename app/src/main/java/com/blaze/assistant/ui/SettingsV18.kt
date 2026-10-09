@@ -79,6 +79,7 @@ fun DevicePage() {
     V18Button(if (checking) "Checking…" else "Run self-check") {
         if (!checking) { checking = true; scope.launch { results = SelfCheck.run(ctx); checking = false } }
     }
+    if (results.isNotEmpty()) Label("${results.count { it.ok }} of ${results.size} passed", color = if (results.all { it.ok }) c.accent else c.ink, modifier = Modifier.padding(top = 10.dp))
     if (results.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(top = 10.dp).hairline(c.hair)) {
         results.forEach { r ->
             Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(12.dp), verticalAlignment = Alignment.Top) {
@@ -88,7 +89,9 @@ fun DevicePage() {
                     Text(r.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
                     Text(r.detail, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                 }
-                Label(if (r.ok) "Pass" else "Fix", color = if (r.ok) c.accent else c.ink, size = 10.sp)
+                if (!r.ok && r.fix.isNotBlank()) Label("Fix ›", color = c.accent, size = 10.sp,
+                    modifier = Modifier.clickable { com.blaze.assistant.agent.SelfSetup.open(ctx, r.fix) }.padding(4.dp))
+                else Label(if (r.ok) "Pass" else "Fix", color = if (r.ok) c.accent else c.ink, size = 10.sp)
             }
         }
     }

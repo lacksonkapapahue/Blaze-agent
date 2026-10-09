@@ -70,6 +70,19 @@ class NotificationBrain : NotificationListenerService() {
             return l.mapIndexed { i, it -> "[$i] ${f.format(Date(it.time))} ${it.app} · ${it.title}: ${it.text.take(160)}${if (it.reply != null) " (can reply)" else ""}" }.joinToString("\n")
         }
 
+        /** Latest live chat notification from [name] (optionally in [app]) that has a reply box. */
+        fun replyable(name: String, app: String?): Item? = synchronized(items) { items.toList() }.asReversed().firstOrNull {
+            it.reply != null && it.title.contains(name, true) && (app.isNullOrBlank() || it.app.contains(app, true)) }
+
+        /** Reply through a notification's own reply box (no confirm; the caller confirms). */
+        fun sendReply(ctx: Context, it: Item, text: String): Boolean {
+            val action = it.reply ?: return false
+            val ri = action.remoteInputs?.firstOrNull() ?: return false
+            val intent = Intent(); val b = Bundle(); b.putCharSequence(ri.resultKey, text)
+            RemoteInput.addResultsToIntent(action.remoteInputs, intent, b)
+            return try { action.actionIntent.send(ctx, 0, intent); true } catch (_: PendingIntent.CanceledException) { false }
+        }
+
         suspend fun reply(ctx: Context, n: Int, text: String): String {
             val it = lastList.getOrNull(n) ?: return "Call recent_notifications first and use its number."
             val action = it.reply ?: return "That notification has no reply box."

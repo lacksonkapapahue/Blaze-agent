@@ -383,6 +383,7 @@ private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: ()
 @Composable
 private fun Sidebar(onClose: () -> Unit, onNew: () -> Unit, onAllChats: () -> Unit, onPage: (String) -> Unit, onOpenChat: (String) -> Unit) {
     val c = LocalBlaze.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val chats by Agent.chats.collectAsState()
     val busy by Agent.busyChats.collectAsState()
     val current by Agent.chatId.collectAsState()
@@ -401,10 +402,10 @@ private fun Sidebar(onClose: () -> Unit, onNew: () -> Unit, onAllChats: () -> Un
             contentAlignment = Alignment.Center) { Label("+  New chat", color = c.paper, size = 11.sp) }
         Spacer(Modifier.height(10.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            val nav = listOf("chats" to "Chats", "routines" to "Routines", "memory" to "Memory", "commands" to "Slash commands",
+            val nav = listOf("chats" to "Chats", "browser" to "Browser", "routines" to "Routines", "memory" to "Memory", "commands" to "Slash commands",
                 "usage" to "Usage", "" to "Settings")
             nav.forEach { (id, label) ->
-                Row(Modifier.fillMaxWidth().clickable { if (id == "chats") onAllChats() else onPage(id) }.padding(horizontal = 20.dp, vertical = 13.dp),
+                Row(Modifier.fillMaxWidth().clickable { when (id) { "chats" -> onAllChats(); "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx); else -> onPage(id) } }.padding(horizontal = 20.dp, vertical = 13.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(5.dp).background(c.weak))
                     Spacer(Modifier.width(14.dp))

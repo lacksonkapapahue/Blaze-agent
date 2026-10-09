@@ -64,6 +64,23 @@
         android:theme="@style/Theme.Blaze">
 
         <activity
+            android:name=".browser.BrowserActivity"
+            android:exported="true"
+            android:label="Blaze browser"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.blaze.assistant.browser"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"

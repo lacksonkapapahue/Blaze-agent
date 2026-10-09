@@ -197,7 +197,9 @@ object FastLane {
     fun trimIfIdle() { if (proc != null && System.currentTimeMillis() - lastUse > 5 * 60_000) stop() }
 
     private suspend fun execute(ctx: Context, name: String, a: JSONObject, confirm: suspend (String, String, String) -> Boolean): String? = when (name) {
-        "open_app" -> PhoneTools.run(ctx, "open_app", JSONObject().put("app_name", a.optString("name"))).let {
+        "open_app" -> if (a.optString("name").lowercase().removePrefix("the ").trim() in setOf("browser", "blaze browser", "web browser", "your browser", "internet"))
+            { com.blaze.assistant.browser.BrowserTools.show(ctx); "Browser's open." }
+            else PhoneTools.run(ctx, "open_app", JSONObject().put("app_name", a.optString("name"))).let {
             if (it.startsWith("Opened") || it.startsWith("Opening")) it else null }
         "set_alarm" -> { PhoneTools.run(ctx, "set_alarm", a); "Alarm set for %02d:%02d.".format(a.optInt("hour"), a.optInt("minute")) }
         "set_timer" -> {

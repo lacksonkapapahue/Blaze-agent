@@ -121,7 +121,7 @@ object Skills {
     }
 
     /** A number, or the single contact matching a name. */
-    private fun resolve(ctx: Context, to: String): Pair<String, String>? {
+    internal fun resolve(ctx: Context, to: String): Pair<String, String>? {
         val digits = to.filter { it.isDigit() || it == '+' }
         if (digits.length >= 5 && digits.length >= to.count { !it.isWhitespace() } - 2) return to to digits
         val c = contacts(ctx, to)

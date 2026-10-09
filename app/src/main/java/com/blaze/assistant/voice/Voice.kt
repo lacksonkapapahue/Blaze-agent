@@ -33,6 +33,7 @@ object Voice {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    fun ttsOk() = ttsReady
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
