@@ -181,6 +181,10 @@ private fun AiPage() {
         AutoRouterSection()
     } else {
     Field("${prov.name} key", key, { key = it; Settings.apiKey = it }, prov.keyHint, secret = true)
+    com.blaze.assistant.agent.LlmClient.keyOwner(key)?.takeIf { it != pid && pid != Providers.CUSTOM }?.let { owner ->
+        Text("This looks like a ${Providers.byId(owner).name} key, not a ${prov.name} key. Paste it under ${Providers.byId(owner).name} instead.",
+            modifier = Modifier.padding(bottom = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.accent))
+    }
     if (prov.keyPage.isNotBlank()) {
         val uri = LocalUriHandler.current
         Row(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {

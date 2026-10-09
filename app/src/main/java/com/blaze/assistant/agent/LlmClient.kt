@@ -55,16 +55,22 @@ object LlmClient {
      */
     suspend fun complete(messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)? = null,
                          onThink: ((String) -> Unit)? = null, lane: Lane = Lane.MAIN): JSONObject {
-        if (lane == Lane.STEPS && Settings.stepsProvider.isNotBlank() && Settings.stepsProvider != Providers.AUTO) {
-            val t = target(Settings.stepsProvider, Settings.stepsModel)
-            if (t.key.isNotBlank()) return call(t, messages, tools, onText, null, false).also { lastRoute = t.label }
+        // Steps model: a separate, optional model for in-between phone turns. If it fails, the
+        // turn falls back to the user's main model instead of surfacing another provider's error.
+        val mainAuto = Settings.providerId == Providers.AUTO
+        if (lane == Lane.STEPS && Settings.stepsProvider.isNotBlank() && Settings.stepsProvider != Settings.providerId) {
+            try {
+                if (Settings.stepsProvider == Providers.AUTO) return FreeRouter.complete(messages, tools, onText, onThink, lane)
+                val t = target(Settings.stepsProvider, Settings.stepsModel)
+                if (t.key.isNotBlank()) return call(t, messages, tools, onText, null, false).also { lastRoute = t.label }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) { if (mainAuto) throw e; lastStepsError = e.message.orEmpty() }
         }
         // Daily spend cap: once today's estimated cost passes it, switch to the free chain.
         val cap = Settings.str("daily_cap", "").toDoubleOrNull()
         if (cap != null && cap > 0 && Settings.providerId != Providers.AUTO && try { Usage.today().cost >= cap } catch (_: Exception) { false })
             return FreeRouter.complete(messages, tools, onText, onThink, lane).also { lastRoute = "Free (daily cap) · " + lastRoute }
-        if (Settings.providerId == Providers.AUTO || (lane == Lane.STEPS && Settings.stepsProvider == Providers.AUTO))
-            return FreeRouter.complete(messages, tools, onText, onThink, lane)
+        if (mainAuto) return FreeRouter.complete(messages, tools, onText, onThink, lane)
         val t = target(Settings.providerId)
         val wantThoughts = lane == Lane.MAIN && Settings.showReasoning && !thoughtsRefused && t.pid == "gemini"
         return try { call(t, messages, tools, onText, onThink, wantThoughts).also { lastRoute = t.label } }
@@ -72,7 +78,55 @@ object LlmClient {
             // Older Gemini models don't think; retry once without asking for thoughts.
             if (wantThoughts && (e.message ?: "").let { it.contains("thinking", true) || it.contains("extra_body", true) || it.contains("400") }) {
                 thoughtsRefused = true; call(t, messages, tools, onText, onThink, false).also { lastRoute = t.label }
+            } else if (tooLarge(e)) {
+                // The conversation outgrew this model's limit: retry once with a trimmed copy.
+                call(t, shrink(messages), tools, onText, onThink, false).also { lastRoute = t.label + " · trimmed" }
             } else throw e
+        }
+    }
+
+    /** Why the optional steps model last failed (shown in diagnostics); the main model took over. */
+    @Volatile var lastStepsError: String = ""
+
+    /** Wall-clock time of the latest streamed chunk (text, thinking or tool call), for the hang watchdog. */
+    @Volatile var lastChunkAt: Long = 0
+
+    /** True when a provider refused the request for being too big for the model or the plan. */
+    fun tooLarge(e: Exception): Boolean {
+        val code = (e as? LlmException)?.code ?: 0
+        val m = e.message.orEmpty()
+        return code == 413 || m.contains("too large", true) || m.contains("context length", true) || m.contains("context_length", true) ||
+            m.contains("maximum context", true) || m.contains("too many tokens", true) || m.contains("reduce the length", true)
+    }
+
+    /** Keeps the system prompt and the recent turns, and cuts very long messages, so a request fits. */
+    fun shrink(messages: JSONArray, keep: Int = 10): JSONArray {
+        val all = (0 until messages.length()).map { messages.getJSONObject(it) }
+        val sys = all.takeWhile { it.optString("role") == "system" }
+        var tail = all.drop(sys.size).takeLast(keep)
+        // Never start on a tool result whose call was cut off.
+        while (tail.isNotEmpty() && tail.first().optString("role") == "tool") tail = tail.drop(1)
+        val out = JSONArray()
+        (sys + tail).forEach { m ->
+            val c = JSONObject(m.toString())
+            val content = c.opt("content")
+            if (content is String && content.length > 6000) c.put("content", content.take(2500) + "\n…[trimmed]…\n" + content.takeLast(2500))
+            out.put(c)
+        }
+        return out
+    }
+
+    /** Which provider a key's format belongs to, when the prefix is unmistakable. */
+    fun keyOwner(key: String): String? {
+        val k = key.trim()
+        return when {
+            k.startsWith("nvapi-") -> "nvidia"
+            k.startsWith("gsk_") -> "groq"
+            k.startsWith("sk-or-") -> "openrouter"
+            k.startsWith("AIza") -> "gemini"
+            k.startsWith("sk-ant-") -> "anthropic"
+            k.startsWith("xai-") -> "xai"
+            else -> null
         }
     }
 
@@ -122,6 +176,9 @@ object LlmClient {
         val base = t.base.trimEnd('/')
         if (base.isBlank()) throw LlmException("Add your service address in Settings.")
         if (t.model.isBlank()) throw LlmException("Pick a model in Settings → Model.", 404)
+        val owner = keyOwner(key)
+        if (owner != null && owner != t.pid && t.pid != Providers.CUSTOM && t.pid != Providers.keyless.id)
+            throw LlmException("The key saved under ${Providers.byId(t.pid).name} is actually a ${Providers.byId(owner).name} key. Open Settings → AI and paste the right key for each service.", 401)
         val conn = URL("$base/chat/completions").openConnection() as HttpURLConnection
         conn.requestMethod = "POST"
         // A free-chain call (timeoutMs < 120 s) gives up quickly so the next model gets a turn.
@@ -130,7 +187,7 @@ object LlmClient {
         conn.doOutput = true
         conn.setRequestProperty("Content-Type", "application/json")
         // Streaming: the read timeout is the longest wait for the next chunk, including the first.
-        conn.readTimeout = if (chained && onText != null) minOf(timeoutMs, 20_000) else timeoutMs
+        conn.readTimeout = if (chained && onText != null) minOf(timeoutMs, if (t.pid == "nvidia") 40_000 else 25_000) else timeoutMs
         callStart = System.currentTimeMillis(); gotFirst = false; lastFirstTokenMs = 0; lastFirstTokenAt = 0
         authHeaders(key, t.pid).forEach { (k, v) -> conn.setRequestProperty(k, v) }
 
@@ -153,15 +210,24 @@ object LlmClient {
                 put("tool_choice", "auto")
             }
         }
-        conn.outputStream.use { it.write(body.toString().toByteArray()) }
-
-        val code = conn.responseCode
+        val who = Providers.byId(t.pid).name
+        val code = try {
+            conn.outputStream.use { it.write(body.toString().toByteArray()) }
+            conn.responseCode
+        } catch (e: java.net.SocketTimeoutException) {
+            conn.disconnect(); throw LlmException("$who · ${t.model} didn't start answering in ${conn.readTimeout / 1000}s.", 0)
+        } catch (e: java.io.IOException) {
+            conn.disconnect(); throw LlmException("$who: couldn't reach the service (${e.message?.take(80)}).", 0)
+        }
         if (onText == null || code !in 200..299) markFirst()
         rateHeaders(conn).takeIf { it.isNotEmpty() }?.let { lastRateHeaders = it }
         lastUsage = null
         if (code in 200..299 && onText != null &&
             (conn.contentType ?: "").contains("event-stream", ignoreCase = true)) {
-            try { return@withContext readStream(conn, onText, onThink) } finally { conn.disconnect() }
+            try { return@withContext readStream(conn, onText, onThink) }
+            catch (e: LlmException) { throw LlmException("${Providers.byId(t.pid).name} · ${t.model}: ${e.message}", e.code, e.retryAfterSec) }
+            catch (e: java.net.SocketTimeoutException) { throw LlmException("${Providers.byId(t.pid).name} · ${t.model} stopped sending (timed out mid-reply).", 0) }
+            finally { conn.disconnect() }
         }
         val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
             ?.bufferedReader()?.use { it.readText() } ?: ""
@@ -179,8 +245,10 @@ object LlmClient {
             } catch (_: Exception) { text }
             val retry = conn.getHeaderField("retry-after")?.trim()?.toIntOrNull() ?: 0
             if (code == 404 || msg.contains("no longer available", true) || msg.contains("not found", true))
-                throw LlmException("The model “${t.model}” isn't available to your key. Open Settings → Model and pick one from the list.", 404)
-            throw LlmException("The AI service said ($code): ${msg.take(300)}", code, retry)
+                throw LlmException("$who: the model “${t.model}” isn't available to your key. Open Settings → Model and pick one from the list.", 404)
+            if (code == 401 || code == 403)
+                throw LlmException("$who rejected its key ($code). Check the $who key in Settings → AI: ${msg.take(160)}", code)
+            throw LlmException("$who · ${t.model} said ($code): ${msg.take(300)}", code, retry)
         }
         val json = JSONObject(text)
         lastUsage = json.optJSONObject("usage")
@@ -200,6 +268,7 @@ object LlmClient {
         conn.inputStream.bufferedReader().useLines { lines ->
             for (raw in lines) {
                 val line = raw.trim()
+                lastChunkAt = System.currentTimeMillis()
                 if (!line.startsWith("data:")) continue
                 val data = line.removePrefix("data:").trim()
                 if (data == "[DONE]") break

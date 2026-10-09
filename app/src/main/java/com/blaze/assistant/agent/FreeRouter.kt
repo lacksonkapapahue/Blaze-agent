@@ -118,6 +118,8 @@ object FreeRouter {
         val list = chain(needTools)
         if (list.isEmpty()) throw LlmClient.LlmException("Auto (free) has nothing to route to yet. Add a free key (Gemini, Groq, OpenRouter…) in Settings → AI.")
         var lastErr: Exception? = null
+        val failures = mutableListOf<String>()
+        var allTooLarge = true
         for (t in list) {
             val keyless = t.pid == Providers.keyless.id
             val started = System.currentTimeMillis()
@@ -135,7 +137,12 @@ object FreeRouter {
                 lastErr = e
                 val code = (e as? LlmClient.LlmException)?.code ?: 0
                 val text = e.message.orEmpty()
+                val name = if (keyless) "Keyless" else Providers.byId(t.pid).name
+                failures += "$name: " + text.removePrefix("$name · ${t.model}: ").removePrefix("$name · ").take(110)
                 val toolsProblem = code == 400 && (text.contains("tool", true) || text.contains("function", true))
+                // Too big for this model's plan (e.g. Groq's per-minute token cap): not "busy", just skip it this turn.
+                if (!LlmClient.tooLarge(e) && !keyless) allTooLarge = false
+                if (LlmClient.tooLarge(e)) { mark(t) { h -> h.copy(lastError = text.take(120)) }; continue }
                 val cool = when {
                     code == 429 -> ((e as LlmClient.LlmException).retryAfterSec.takeIf { it > 0 } ?: 60) * 1000L
                     code == 401 || code == 403 || code == 404 -> 30 * 60_000L
@@ -146,6 +153,13 @@ object FreeRouter {
                     lastError = text.take(120), noTools = h.noTools || toolsProblem) }
             }
         }
-        throw LlmClient.LlmException("Every free model is busy or out of quota right now (last: ${lastErr?.message?.take(160)}). Try again in a minute or add another free key.")
+        // Every model said the request was too big: trim the conversation once and go round again.
+        if (lastErr != null && allTooLarge) {
+            val small = LlmClient.shrink(messages, 6)
+            if (small.length() < messages.length()) return complete(small, tools, onText, onThink, lane)
+        }
+        val (code0, ra) = (lastErr as? LlmClient.LlmException)?.let { it.code to it.retryAfterSec } ?: (0 to 0)
+        throw LlmClient.LlmException("No model in your Auto chain could answer:\n" + failures.distinct().take(5).joinToString("\n") { "• $it" } +
+            "\nFix the one marked with a key problem in Settings → AI, or try again in a minute.", code0, ra)
     }
 }

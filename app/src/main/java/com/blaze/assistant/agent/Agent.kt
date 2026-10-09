@@ -212,6 +212,19 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
     }
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
+
+    /** Runs a model call and gives up (null) only if no streamed chunk arrives for [limitMs]. */
+    private suspend fun idleGuard(limitMs: Long, block: suspend () -> JSONObject): JSONObject? {
+        val start = System.currentTimeMillis()
+        val d = kotlinx.coroutines.CoroutineScope(Dispatchers.IO).async { block() }
+        try {
+            while (!d.isCompleted) {
+                kotlinx.coroutines.delay(500)
+                if (System.currentTimeMillis() - maxOf(start, LlmClient.lastChunkAt) > limitMs) { d.cancel(); return null }
+            }
+            return d.await()
+        } finally { if (!d.isCompleted) d.cancel() }
+    }
     fun stopAll() = sessions.values.forEach { it.stop() }
 
     /** A background failure becomes an error line in the chat instead of a crash. */
@@ -724,15 +737,16 @@ When you finish, say what you did in one short sentence.
 
                     val req = requestMessages()
                     tools = ToolRouter.select(allTools, groupsOn)
-                    // Watchdog: a model call that hangs is cut off and retried once instead of freezing the task.
+                    // Watchdog: only a model that goes SILENT (no text, thinking or tool-call chunks) for the
+                    // limit is cut off and retried once on the same model. Long thinking is fine while it streams.
                     val lane = if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS
-                    val limit = Settings.str("model_timeout_s", "75").toLongOrNull()?.coerceIn(20, 300)?.times(1000) ?: 75_000L
-                    val reply = kotlinx.coroutines.withTimeoutOrNull(limit) { LlmClient.complete(req, tools, onText, onThink, lane) }
+                    val limit = Settings.str("model_timeout_s", "100").toLongOrNull()?.coerceIn(30, 600)?.times(1000) ?: 100_000L
+                    val reply = Agent.idleGuard(limit) { LlmClient.complete(req, tools, onText, onThink, lane) }
                         ?: run {
-                            add(Role.STEP, "The model went quiet, retrying")
+                            add(Role.STEP, "The model went silent, retrying")
                             if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
-                            kotlinx.coroutines.withTimeoutOrNull(limit) { LlmClient.complete(req, tools, onText, onThink, LlmClient.Lane.STEPS) }
-                                ?: throw LlmClient.LlmException("The model didn't answer in time twice. Try again, or pick a faster model in settings.")
+                            Agent.idleGuard(limit) { LlmClient.complete(req, tools, onText, onThink, lane) }
+                                ?: throw LlmClient.LlmException("${LlmClient.lastRoute.ifBlank { "The model" }} sent nothing for ${limit / 1000}s, twice. Try again, or pick a faster model in Settings → AI.")
                         }
                     if (firstMs < 0 && LlmClient.lastFirstTokenAt > 0) firstMs = (LlmClient.lastFirstTokenAt - turnStart).coerceAtLeast(0)
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
