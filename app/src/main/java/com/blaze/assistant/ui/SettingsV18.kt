@@ -376,7 +376,7 @@ internal fun V18Field(hint: String, value: String, onChange: (String) -> Unit) {
 @Composable
 fun VoiceExtras() {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    var loop by remember { mutableStateOf(Settings.bool("voice_loop", false)) }
+    var loop by remember { mutableStateOf(Settings.bool("voice_loop", true)) }
     V18Section("Hands-free")
     var conf by remember { mutableStateOf(Settings.str("wake_conf", "0.88")) }
     Label("\u201cHey Blaze\u201d sensitivity", modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))

@@ -15,7 +15,7 @@ object ToolRouter {
     /** Always sent. */
     private val core = setOf(
         "remember", "forget", "processes", "process", "recall_memory", "device_status", "blaze_self", "ask_user",
-        "web_search", "fetch_page", "load_tools", "search_past_chats", "run_skill",
+        "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
         // Basic phone control stays in core: it's the most common thing people ask for.
         "run_plan", "open_app", "search_in_app", "read_screen"
     )
@@ -53,7 +53,7 @@ object ToolRouter {
             { it.startsWith("github_") || it.startsWith("notion_") || it.startsWith("slack_") || it.startsWith("spotify_") }),
         Group("extras", "learned skills, helpers working in parallel, screen memory",
             r("""\b(skill|learn|delegate|parallel|at once|earlier on screen|saw)\b"""),
-            { it in setOf("skill_manage", "delegate", "search_screen_memory") }),
+            { it in setOf("skill_manage", "delegate", "search_screen_memory", "install_skill", "write_skill", "skill_file") }),
     )
 
     private fun nameOf(t: Any?): String = (t as? JSONObject)?.optJSONObject("function")?.optString("name").orEmpty()

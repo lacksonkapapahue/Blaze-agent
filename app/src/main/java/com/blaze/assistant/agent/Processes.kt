@@ -36,7 +36,7 @@ object Processes {
     )
 
     private val prefix = mapOf("alarm" to "A", "timer" to "T", "routine" to "R", "trigger" to "G",
-        "event" to "E", "gevent" to "C", "job" to "J", "watcher" to "W")
+        "event" to "E", "gevent" to "C", "job" to "J", "watcher" to "W", "goal" to "N", "skill" to "K")
     val kinds get() = prefix.keys
 
     private lateinit var app: Context
@@ -125,6 +125,11 @@ object Processes {
         try {
             val ws = com.blaze.assistant.phone.Watchers.states()
             list.removeAll { it.kind == "watcher" && it.ref !in ws }
+            val ks = SkillPacks.all().map { it.dir.name }.toSet()
+            list.removeAll { it.kind == "skill" && it.ref !in ks }
+            val gs = Autonomy.states()
+            list.removeAll { it.kind == "goal" && it.ref !in gs }
+            list = list.map { if (it.kind == "goal") it.copy(status = when (gs[it.ref]) { "done" -> "finished"; "paused" -> "paused"; else -> "active" }) else it }.toMutableList()
             list = list.map { if (it.kind == "watcher") it.copy(status = if (ws[it.ref] == true) "active" else "paused") else it }.toMutableList()
         } catch (_: Exception) { }
         list = list.map {
@@ -189,6 +194,8 @@ object Processes {
             "trigger" -> { Triggers.remove(p.ref.toLong()); "Deleted trigger ${p.id} \u201c${p.title}\u201d." }
             "job" -> com.blaze.assistant.terminal.Terminal.stopJob(p.ref.toInt())
             "watcher" -> { com.blaze.assistant.phone.Watchers.remove(p.ref); "Deleted watcher ${p.id}." }
+            "goal" -> { Autonomy.remove(p.ref); "Deleted goal ${p.id}." }
+            "skill" -> { SkillPacks.delete(p.ref); "Deleted skill ${p.id} \u201c${p.title}\u201d." }
             "event" -> try {
                 val n = ctx.contentResolver.delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, p.ref.toLong()), null, null)
                 if (n > 0) "Deleted calendar event ${p.id} \u201c${p.title}\u201d." else "That event was already gone from the calendar."
@@ -228,6 +235,7 @@ object Processes {
             if (t != null && t.enabled == off) Triggers.toggle(t.id)
             sync(); "Trigger ${p.id} ${if (off) "paused" else "resumed"}."
         }
+        "goal" -> { Autonomy.setStatus(p.ref, if (off) "paused" else "open"); sync(); "Goal ${p.id} ${if (off) "paused" else "resumed"}." }
         "watcher" -> { com.blaze.assistant.phone.Watchers.setEnabled(p.ref, !off); sync(); "Watcher ${p.id} ${if (off) "paused" else "resumed"}." }
         else -> "A ${p.kind} can't be paused, only deleted or rescheduled."
     }

@@ -48,10 +48,8 @@ object Voice {
                         if (id?.startsWith("part-") == true) { if (tts?.isSpeaking != true) _state.value = State.IDLE; return }
                         _state.value = State.IDLE
                         // Hands-free: after answering a spoken question, listen again for the follow-up.
-                        if (com.blaze.assistant.agent.Settings.bool("voice_loop", false) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                listen({ t -> if (t.isNotBlank()) com.blaze.assistant.agent.Agent.send(t, byVoice = true) }, { })
-                            }, 250)
+                        if (com.blaze.assistant.agent.Settings.bool("voice_loop", true) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 200)
                         } else WakeWordService.resume(app)
                     }
                     @Deprecated("old api") override fun onError(id: String?) { _state.value = State.IDLE; WakeWordService.resume(app) }
@@ -61,6 +59,39 @@ object Voice {
     }
 
     fun available() = SpeechRecognizer.isRecognitionAvailable(app)
+
+    private val endWords = Regex("""^(thanks?( you)?|thank u|cheers|that'?s (all|it)|nothing|no( thanks)?|bye|goodbye|good ?night|i'?m (good|done)|done|ok(ay)? thanks?)[.! ]*$""", RegexOption.IGNORE_CASE)
+    private val stopWords = Regex("""^(stop|cancel|never ?mind|abort|quiet|shut up|hold on)[.! ]*$""", RegexOption.IGNORE_CASE)
+    private var silentTurns = 0
+
+    /**
+     * Conversation mode: after a spoken answer, listen again. Ends on silence (twice), or on
+     * "thanks"/"that's all"; "stop"/"cancel" stops whatever Blaze is doing.
+     */
+    fun conversationListen() {
+        com.blaze.assistant.agent.LlmClient.prewarm()   // keep the connection warm while we talk
+        listen({ raw ->
+            val t = raw.trim()
+            when {
+                t.isBlank() -> { silentTurns++; if (silentTurns < 2) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 150) else silentTurns = 0 }
+                stopWords.matches(t) -> { silentTurns = 0; com.blaze.assistant.agent.Agent.stopAll(); com.blaze.assistant.device.Sounds.done() }
+                endWords.matches(t) -> { silentTurns = 0; lastTurnByVoice = false; speakEnd("Anytime.") }
+                else -> { silentTurns = 0; com.blaze.assistant.agent.Agent.send(t, byVoice = true) }
+            }
+        }, { })
+    }
+
+    private fun speakEnd(text: String) {
+        if (!ttsReady) return
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "end-${System.currentTimeMillis()}")
+    }
+
+    /** Short spoken status for a voice turn (acknowledgement, progress). Never interrupts speech. */
+    fun say(text: String) {
+        if (!ttsReady || tts?.isSpeaking == true || _state.value == State.LISTENING) return
+        WakeWordService.pause(app)
+        tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "part-${System.currentTimeMillis()}")
+    }
 
     /** Listen once. [onText] gets the final words (blank when nothing was heard). */
     fun listen(onText: (String) -> Unit, onError: (String) -> Unit) {

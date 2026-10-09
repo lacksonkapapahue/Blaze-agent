@@ -101,6 +101,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>)
      * plus a notification with Allow / Don't when Blaze isn't on screen. Times out as "no".
      */
     suspend fun confirm(title: String, detail: String, action: String): Boolean {
+        if (Autonomy.preApproved(title, detail)) { cur.note("Standing OK: $title", false); return true }
         val d = kotlinx.coroutines.CompletableDeferred<Boolean>()
         _confirm.value = PendingConfirm(title, detail, action, d)
         if (!inForeground) Notifier.confirm(title, detail, action)
@@ -352,6 +353,7 @@ When you finish, say what you did in one short sentence.
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
+            append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillPacks.promptBlock())
         }
     }
 
@@ -369,6 +371,8 @@ When you finish, say what you did in one short sentence.
         Web.tools().forEach { t.put(it) }
         Processes.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.Watchers.tool())
+        SkillPacks.tools().forEach { t.put(it) }
+        t.put(Autonomy.findToolDef()); t.put(Autonomy.goalTool()); t.put(Autonomy.permissionTool())
         com.blaze.assistant.proactive.Triggers.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.Ussd.tool())
         t.put(com.blaze.assistant.phone.Messaging.tool())
@@ -559,6 +563,20 @@ When you finish, say what you did in one short sentence.
             mood = Mood.THINKING
             LlmClient.prewarm()   // speed plan step 10: open the connection while the fast lane checks
             if (!routine) com.blaze.assistant.device.Haptics.tick(app)
+            if (byVoice && !routine) scope.launch {
+                // No-hang voice: say something within about a second, then narrate long work.
+                kotlinx.coroutines.delay(1100)
+                if (job?.isActive != true || Voice.state.value != Voice.State.IDLE) return@launch
+                Voice.say(listOf("On it.", "Sure.", "One sec.").random())
+                var said = ""
+                var waited = 0
+                while (job?.isActive == true && waited < 600) {
+                    kotlinx.coroutines.delay(1000); waited++
+                    if (waited % 9 != 0) continue
+                    val step = msgs.lastOrNull { it.role == Role.STEP }?.text.orEmpty().take(60)
+                    if (step.isNotBlank() && step != said && Voice.state.value == Voice.State.IDLE) { said = step; Voice.say(step) }
+                }
+            }
             job = scope.launch {
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
@@ -681,6 +699,9 @@ When you finish, say what you did in one short sentence.
                 val turnThink = StringBuilder()
                 val turnStart = System.currentTimeMillis()
                 thinking = ""
+                var gateLeft = 2
+                var actedThisTurn = false
+                val lastResults = ArrayList<String>()
                 for (step in 0 until MAX_STEPS) {
                     currentStep = step + 1
                     mood = Mood.THINKING
@@ -702,7 +723,16 @@ When you finish, say what you did in one short sentence.
 
                     val req = requestMessages()
                     tools = ToolRouter.select(allTools, groupsOn)
-                    val reply = LlmClient.complete(req, tools, onText, onThink, if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS)
+                    // Watchdog: a model call that hangs is cut off and retried once instead of freezing the task.
+                    val lane = if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS
+                    val limit = Settings.str("model_timeout_s", "75").toLongOrNull()?.coerceIn(20, 300)?.times(1000) ?: 75_000L
+                    val reply = kotlinx.coroutines.withTimeoutOrNull(limit) { LlmClient.complete(req, tools, onText, onThink, lane) }
+                        ?: run {
+                            add(Role.STEP, "The model went quiet, retrying")
+                            if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                            kotlinx.coroutines.withTimeoutOrNull(limit) { LlmClient.complete(req, tools, onText, onThink, LlmClient.Lane.STEPS) }
+                                ?: throw LlmClient.LlmException("The model didn't answer in time twice. Try again, or pick a faster model in settings.")
+                        }
                     if (firstMs < 0 && LlmClient.lastFirstTokenAt > 0) firstMs = (LlmClient.lastFirstTokenAt - turnStart).coerceAtLeast(0)
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
                     reply.remove("_reasoning")
@@ -729,6 +759,21 @@ When you finish, say what you did in one short sentence.
                         else -> ""
                     }.trim()
 
+                    if ((calls == null || calls.length() == 0) && step < MAX_STEPS - 4 && gateLeft > 0 && !routine) {
+                        val nudge = when {
+                            Autonomy.looksLikeRefusal(textOut) -> Autonomy.REFUSAL_NUDGE
+                            actedThisTurn && Autonomy.lastFailed(lastResults) -> Autonomy.VERIFY_NUDGE
+                            else -> null
+                        }
+                        if (nudge != null) {
+                            gateLeft--
+                            if (liveId >= 0) msgs = msgs.filterNot { it.id == liveId }
+                            add(Role.STEP, "Trying another way")
+                            history.put(JSONObject().put("role", "user").put("content", nudge))
+                            lastResults.clear()
+                            continue
+                        }
+                    }
                     if (calls == null || calls.length() == 0) {
                         kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
                         val secs = (System.currentTimeMillis() - turnStart) / 1000.0
@@ -768,14 +813,23 @@ When you finish, say what you did in one short sentence.
                         val name = fn.getString("name")
                         val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
                             catch (_: Exception) { JSONObject() }
-                        var result = if (pre.containsKey(i)) pre.getValue(i) else if (name == "load_tools") {
+                        var result = if (pre.containsKey(i)) pre.getValue(i) else if (name == "find_tool") {
+                            add(Role.STEP, "Looking for the right tool")
+                            val (txt, g) = Autonomy.findTool(allTools, args.optString("need"))
+                            groupsOn += g
+                            txt
+                        } else if (name == "load_tools") {
                             val g = args.optJSONArray("groups")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
                             groupsOn += g
                             add(Role.STEP, "Loading ${g.joinToString(", ")} tools")
                             "Loaded: ${g.joinToString(", ")}. Those tools are available now."
-                        } else runTool(name, args, shots)
+                        } else if (name == "ask_user") runTool(name, args, shots)
+                        else kotlinx.coroutines.withTimeoutOrNull(Settings.str("tool_timeout_s", "180").toLongOrNull()?.coerceIn(30, 900)?.times(1000) ?: 180_000L) { runTool(name, args, shots) }
+                            ?: "Error: $name took too long and was stopped. Try a quicker way or run it as a background job." 
                         // A tool from a group pulls in the rest of that group (e.g. a stuck run_plan brings tap/scroll).
                         ToolRouter.groupOf(name)?.let { groupsOn += it }
+                        if (name !in parallelSafe && name !in setOf("find_tool", "load_tools", "goal", "processes")) actedThisTurn = true
+                        lastResults += result
                         if (name == "run_plan" || name == "read_screen") groupsOn += "screen"
                         if (name in screenActions && !result.startsWith("Error") && !result.startsWith("Couldn't")) com.blaze.assistant.device.Haptics.tick(app)
                         if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
@@ -929,7 +983,13 @@ When you finish, say what you did in one short sentence.
                     val shot = PhoneTools.screenshot()
                     if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
                 }
+                in SkillPacks.names -> {
+                    add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; else -> "Reading a skill file" })
+                    try { SkillPacks.run(name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                }
                 "watch" -> { add(Role.STEP, "Setting a watcher"); com.blaze.assistant.phone.Watchers.run(args) }
+                "goal" -> { add(Role.STEP, if (args.optString("action") == "add") "Planning \u201c${args.optString("title").take(40)}\u201d" else "Updating the plan"); Autonomy.goal(args) }
+                "standing_permission" -> { add(Role.STEP, "Updating permissions"); Autonomy.setPermission(args) }
                 in Processes.names -> {
                     add(Role.STEP, if (name == "processes") "Checking what's running" else "${args.optString("action").replaceFirstChar { it.uppercase() }} ${args.optString("id")}")
                     try { Processes.run(app, name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
