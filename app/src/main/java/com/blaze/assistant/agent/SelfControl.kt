@@ -101,7 +101,7 @@ object SelfControl {
         "crash_log" -> com.blaze.assistant.device.CrashLog.read().takeLast(3000).ifBlank { "No errors logged." }
         "set_model" -> {
             val p = args.optString("provider")
-            if (p.isNotBlank()) Providers.all.firstOrNull { it.id.equals(p, true) || it.name.equals(p, true) }?.let { Settings.providerId = it.id }
+            if (p.isNotBlank()) Providers.all.firstOrNull { it.id.equals(p, true) || it.name.equals(p, true) }?.let { Settings.providerId = it.id; if (it.id != Providers.AUTO && Settings.stepsProvider == Providers.AUTO) Settings.stepsProvider = "" }
             if (args.optString("model").isNotBlank()) Settings.model = args.optString("model")
             "Now using ${Settings.provider.name} · ${Settings.model}."
         }

@@ -59,7 +59,7 @@ object CommandRunner {
             "model" -> if (arg.isEmpty()) openSettings("ai") else { Settings.model = arg; Agent.note("Model: $arg") }
             "provider" -> {
                 val p = Providers.all.firstOrNull { it.id.equals(arg, true) || it.name.equals(arg, true) || it.name.lowercase().startsWith(arg.lowercase()) }
-                if (p == null) openSettings("ai") else { Settings.providerId = p.id; Agent.note("Provider: ${p.name} · ${Settings.model}") }
+                if (p == null) openSettings("ai") else { Settings.providerId = p.id; if (p.id != com.blaze.assistant.agent.Providers.AUTO && Settings.stepsProvider == com.blaze.assistant.agent.Providers.AUTO) Settings.stepsProvider = ""; Agent.note("Provider: ${p.name} · ${Settings.model}") }
             }
             "persona" -> {
                 val p = Personas.all.firstOrNull { it.id.equals(arg, true) || it.name.equals(arg, true) }

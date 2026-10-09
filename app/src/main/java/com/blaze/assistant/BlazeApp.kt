@@ -10,6 +10,12 @@ class BlazeApp : Application() {
         com.blaze.assistant.device.CrashLog.init(this)
         com.blaze.assistant.device.CrashLog.shieldMainThread()
         Settings.init(this)
+        // v1.9.10 fix: a leftover "Auto" steps model silently sent phone steps through the free chain
+        // even after the user picked a specific model. Clear it once; they can set it again.
+        if (Settings.str("mig_steps_auto", "").isEmpty()) {
+            if (Settings.providerId != com.blaze.assistant.agent.Providers.AUTO && Settings.stepsProvider == com.blaze.assistant.agent.Providers.AUTO) Settings.stepsProvider = ""
+            Settings.setStr("mig_steps_auto", "1")
+        }
         com.blaze.assistant.agent.IntentCache.init(this)
         com.blaze.assistant.phone.Watchers.init(this)
         com.blaze.assistant.agent.Autonomy.init(this)

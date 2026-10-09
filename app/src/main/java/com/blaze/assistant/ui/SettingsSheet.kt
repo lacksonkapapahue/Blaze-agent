@@ -164,6 +164,9 @@ private fun AiPage() {
     fun switchTo(newPid: String) {
         Settings.apiKey = key; Settings.model = model
         Settings.providerId = newPid
+        // Picking a specific model means that model does the work: a leftover "Auto" for phone
+        // steps would otherwise quietly route half of every task through the free chain.
+        if (newPid != Providers.AUTO && Settings.stepsProvider == Providers.AUTO) Settings.stepsProvider = ""
         pid = newPid; key = Settings.apiKey; model = Settings.model
     }
     // Saved when you leave the page.

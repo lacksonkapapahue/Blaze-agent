@@ -375,7 +375,11 @@ private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: ()
                 Mood.THINKING -> "Thinking"
                 Mood.IDLE -> if (controlOn) "Phone control on" else "Chat only"
             }, size = 10.sp, modifier = Modifier.weight(1f))
-            Label(Settings.model.substringAfterLast('/').take(28), color = c.weak, size = 9.sp)
+            // Show what really answers: Auto, the picked model, and a separate steps model if one is set.
+            val main = if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "AUTO (FREE)" else Settings.model.substringAfterLast('/').take(24)
+            val steps = Settings.stepsProvider.takeIf { it.isNotBlank() && it != Settings.providerId }
+                ?.let { if (it == com.blaze.assistant.agent.Providers.AUTO) " + steps: auto" else " + steps: " + Settings.stepsModel.substringAfterLast('/').take(12) }.orEmpty()
+            Label(main + steps, color = c.weak, size = 9.sp)
         }
     }
 }
