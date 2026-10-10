@@ -27,7 +27,7 @@ object Attachments {
             when {
                 mime.startsWith("image/") -> {
                     val bmp = decodeScaled(ctx, uri, 1536) ?: return@withContext null
-                    Attachment(name, listOf(image(bmp)))
+                    Attachment(name, listOf(image(bmp)), saveThumb(ctx, bmp, name))
                 }
                 mime == "application/pdf" -> {
                     val parts = mutableListOf<JSONObject>()
@@ -44,7 +44,9 @@ object Attachments {
                             }
                         }
                     }
-                    Attachment(name, parts)
+                    val first = try { cr.openFileDescriptor(uri, "r")?.use { fd -> PdfRenderer(fd).use { pdf -> pdf.openPage(0).use { pg ->
+                        Bitmap.createBitmap(480, (480f * pg.height / pg.width).toInt(), Bitmap.Config.ARGB_8888).also { b -> b.eraseColor(Color.WHITE); pg.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY) } } } } } catch (_: Exception) { null }
+                    Attachment(name, parts, first?.let { saveThumb(ctx, it, name) })
                 }
                 mime.startsWith("text/") || name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".csv") || name.endsWith(".json") -> {
                     val body = cr.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty().take(60_000)
@@ -65,6 +67,16 @@ object Attachments {
         val s = minOf(1f, max.toFloat() / maxOf(bmp.width, bmp.height))
         return if (s < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true) else bmp
     }
+
+    /** A small copy kept with the chat so your own photos show as pictures, not file names. */
+    private fun saveThumb(ctx: Context, bmp: Bitmap, name: String): String? = try {
+        val dir = java.io.File(ctx.filesDir, "attachments").apply { mkdirs() }
+        val s = minOf(1f, 720f / maxOf(bmp.width, bmp.height))
+        val b = if (s < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true) else bmp
+        val f = java.io.File(dir, "${System.currentTimeMillis()}_${name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)}.jpg")
+        f.outputStream().use { b.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+        f.absolutePath
+    } catch (_: Exception) { null }
 
     private fun image(bmp: Bitmap, q: Int = 82): JSONObject {
         val out = ByteArrayOutputStream()

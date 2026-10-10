@@ -10,6 +10,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -172,6 +175,27 @@ fun GalleryScreen(onDismiss: () -> Unit) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+
+/** Your own attached photos/PDF pages, shown as pictures in your message. Tap to open full size. */
+@Composable
+fun AttachedThumbs(paths: List<String>) {
+    val c = LocalBlaze.current
+    val ctx = LocalContext.current
+    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        paths.take(5).forEach { p ->
+            val bmp = rememberThumb(p, 360)
+            val single = paths.size == 1
+            Box(Modifier.then(if (single) Modifier.widthIn(max = 220.dp) else Modifier.size(84.dp)).background(c.hair.copy(alpha = 0.3f)).border(1.dp, c.hair)
+                .clickable { try { ctx.startActivity(Media.viewIntent(File(p))) } catch (_: Exception) { } }) {
+                if (bmp != null) Image(bmp, contentDescription = "Attached picture",
+                    modifier = if (single) Modifier.widthIn(max = 220.dp).heightIn(max = 300.dp) else Modifier.fillMaxSize(),
+                    contentScale = if (single) ContentScale.Fit else ContentScale.Crop)
+                else Box(Modifier.size(84.dp))
             }
         }
     }

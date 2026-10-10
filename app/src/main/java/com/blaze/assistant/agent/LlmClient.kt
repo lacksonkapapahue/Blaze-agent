@@ -64,7 +64,13 @@ object LlmClient {
         // Every request goes out clean (each tool call answered once, valid JSON, no orphans).
         // If the provider still refuses its shape (400 INVALID_ARGUMENT and friends), retry once
         // with the tool turns flattened to plain text, which every provider accepts.
-        val clean = try { ToolCalls.clean(messages) } catch (_: Exception) { messages }
+        var clean = try { ToolCalls.clean(messages) } catch (_: Exception) { messages }
+        // Photos: if this turn's brain can't see, have a vision brain describe them first.
+        if (Vision.hasImages(clean)) {
+            val auto = Settings.providerId == Providers.AUTO
+            val model = if (auto) "" else target(Settings.providerId).model
+            if (auto || !Vision.canSee(model)) clean = Vision.describeAll(clean)
+        }
         return try { completeRaw(clean, tools, onText, onThink, lane) }
         catch (e: LlmException) {
             if (!ToolCalls.isShapeError(e)) throw e
@@ -105,6 +111,11 @@ object LlmClient {
             } else if (tooLarge(e)) {
                 // The conversation outgrew this model's limit: retry once with a trimmed copy.
                 call(t, shrink(messages), tools, onText, onThink, false).also { lastRoute = t.label + " · trimmed" }
+            } else if (e.code == 429 || e.code in 500..599 || (e.message ?: "").contains("quota", true)) {
+                // Your chosen brain is out of free quota or down: carry on with the free chain instead of stopping.
+                try { FreeRouter.complete(if (Vision.hasImages(messages)) Vision.describeAll(messages) else messages, tools, onText, onThink, lane).also { lastRoute = "Free (${t.label} resting) · " + lastRoute } }
+                catch (e2: kotlinx.coroutines.CancellationException) { throw e2 }
+                catch (_: Exception) { throw e }
             } else throw e
         }
     }
@@ -262,7 +273,7 @@ object LlmClient {
 
         if (code !in 200..299) {
             val msg = try {
-                val o = JSONObject(text)
+                val o = if (text.trimStart().startsWith("[")) JSONArray(text).getJSONObject(0) else JSONObject(text)
                 val e = o.opt("error")
                 when (e) {
                     is JSONObject -> e.optString("message", text)

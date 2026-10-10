@@ -64,7 +64,7 @@ data class PendingQuestion(val question: String, val options: List<String>, val 
                            val answer: kotlinx.coroutines.CompletableDeferred<String>)
 
 /** Something the user attached: [parts] are OpenAI content parts (image_url / text). */
-data class Attachment(val name: String, val parts: List<JSONObject>)
+data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: String? = null)
 
 /** The brain: keeps the conversation and runs the think → act → look loop. */object Agent {
     private const val MAX_STEPS = 30
@@ -386,6 +386,9 @@ When you finish, say what you did in one short sentence.
                 "Beats: run_code python `import sys; sys.path.insert(0,'/root/phone/blaze_lib'); from beats import make; print(make(style='trap', bpm=140, bars=8, key='A', out='/root/phone/beat.wav'))` (styles trap, boombap, afro, house, lofi; vary seed). " +
                 "Save outputs under /root/phone/ (that is ~ for the file tools): new pictures, audio and video files there are added to the user's Gallery and shown in the chat automatically. " +
                 "Only drive the screen when the task truly lives inside another app (sending in WhatsApp, a setting with no tool). Never tell the user you can't make images or music. " +
+                "DO IT, DON'T DIRECT: when something needs a permission or a setting, YOU fix it: ask with the tool that triggers Android's own pop-up, open the exact screen with blaze_self open, and when phone control is on, tap through it yourself (find the switch, flip it, come back). " +
+                "Never hand the user a numbered list of where to tap in Settings; only if you tried and truly can't, say the ONE thing they must tap. Never ask them to type terminal commands: run them yourself. " +
+                "For terminal work use Blaze's own Linux (run_code / run_shell) first; Termux only if the user asks for it. " +
                 "generate_image is ONLY for art and photos; charts, graphs, tables, PDFs and documents are always made with run_code. If the terminal fails, say so plainly; never substitute an AI picture.")
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
@@ -510,7 +513,7 @@ When you finish, say what you did in one short sentence.
         }
         fun add(role: Role, text: String, files: List<String> = emptyList()): Long {
             val id = ids.getAndIncrement()
-            msgs = msgs + ChatMessage(id, role, text, files)
+            msgs = msgs + ChatMessage(id, role, if (role == Role.ERROR) PlainError.of(text) else text, files)
             if (role == Role.STEP && !inForeground && mood != Mood.IDLE) Notifier.working(if (currentStep > 0) "Step $currentStep · $text" else text)
             return id
         }
@@ -600,6 +603,7 @@ When you finish, say what you did in one short sentence.
             val shown = text.trim().ifEmpty { "Take a look at this." }
             LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
             val id = add(Role.USER, shown, attachments.map { it.name })
+            attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
             historyMark[id] = history.length()
             val content: Any = if (attachments.isEmpty()) shown else JSONArray().apply {
                 put(JSONObject().put("type", "text").put("text", shown))
@@ -969,7 +973,7 @@ When you finish, say what you did in one short sentence.
                 add(Role.ERROR, e.message ?: "Something went wrong.")
             } catch (e: Exception) {
                 com.blaze.assistant.device.CrashLog.error("agent loop", e)
-                add(Role.ERROR, "Something went wrong: ${e.message}")
+                add(Role.ERROR, e.message ?: "Something went wrong.")
             } finally {
                 LlmClient.liteTurn = false
                 thinking = ""

@@ -303,21 +303,68 @@ object Terminal {
 
     fun termuxInstalled(ctx: Context) = try { ctx.packageManager.getPackageInfo("com.termux", 0); true } catch (_: Exception) { false }
 
-    /** Needs Termux with allow-external-apps=true in ~/.termux/termux.properties, and the RUN_COMMAND permission granted to Blaze. */
-    fun runInTermux(ctx: Context, cmd: String, background: Boolean): String {
-        if (!termuxInstalled(ctx)) return "Termux isn't installed. Get it from F-Droid (not Play Store) for a full Linux with pkg install python, nodejs, git, openjdk, gradle."
+    const val TERMUX_FIX = "mkdir -p ~/.termux && echo \"allow-external-apps=true\" >> ~/.termux/termux.properties && termux-reload-settings"
+    private const val RESULT_ACTION = "com.blaze.assistant.TERMUX_RESULT"
+
+    /**
+     * Runs [cmd] in Termux and (in background mode) returns its real output. Sets itself up:
+     * asks Android for the "Run commands in Termux" permission with the system dialog (one tap,
+     * no Settings digging) and, if Termux still refuses, puts the one-line fix on the clipboard
+     * and opens Termux so the user only has to paste.
+     */
+    suspend fun runInTermux(ctx: Context, cmd: String, background: Boolean): String {
+        if (!termuxInstalled(ctx)) return "Termux isn't installed. Blaze's own Linux (run_code / run_shell) does the same job with no setup; use that."
+        val perm = "com.termux.permission.RUN_COMMAND"
+        if (!com.blaze.assistant.device.Perms.ensure(ctx, perm))
+            return "The user didn't allow 'Run commands in Termux' in the Android pop-up. Use Blaze's own Linux (run_code / run_shell) instead."
+        val id = System.nanoTime().toInt()
+        val result = kotlinx.coroutines.CompletableDeferred<android.os.Bundle?>()
+        val rx = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { result.complete(i.getBundleExtra("result")) }
+        }
+        val action = "$RESULT_ACTION.$id"
+        androidx.core.content.ContextCompat.registerReceiver(ctx, rx, android.content.IntentFilter(action), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        val pi = android.app.PendingIntent.getBroadcast(ctx, id, Intent(action).setPackage(ctx.packageName),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or (if (android.os.Build.VERSION.SDK_INT >= 31) android.app.PendingIntent.FLAG_MUTABLE else 0))
         val i = Intent().setClassName("com.termux", "com.termux.app.RunCommandService").setAction("com.termux.RUN_COMMAND")
             .putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
             .putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", cmd))
             .putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
             .putExtra("com.termux.RUN_COMMAND_BACKGROUND", background)
             .putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", "0")
+            .putExtra("com.termux.RUN_COMMAND_PENDING_INTENT", pi)
         return try {
             if (android.os.Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
-            "Sent to Termux${if (background) " (background)" else " (opens a Termux session)"}: $cmd. Output appears in Termux; for results you can read, redirect to a file under ~/storage or run it here with run_shell."
-        } catch (e: SecurityException) {
-            "Termux refused: grant Blaze the 'Run commands in Termux' permission (App info → Permissions → Additional) and set allow-external-apps=true in ~/.termux/termux.properties."
-        } catch (e: Exception) { "Error: ${e.message}" }
+            val b = kotlinx.coroutines.withTimeoutOrNull(if (background) 120_000L else 8_000L) { result.await() }
+            val err = b?.getInt("err", -1) ?: -1
+            val errmsg = b?.getString("errmsg").orEmpty()
+            when {
+                b == null && background -> "Sent to Termux; no answer within 2 minutes (still running, or Termux blocked it silently). If nothing happened, call termux_run with command 'echo ok' to test the link."
+                b == null -> "Opened in a Termux window: $cmd"
+                errmsg.contains("allow-external-apps", true) || errmsg.contains("external app", true) -> needsFix(ctx)
+                else -> {
+                    val out = b.getString("stdout").orEmpty(); val se = b.getString("stderr").orEmpty()
+                    val code = if (b.containsKey("exitCode")) b.getInt("exitCode") else err
+                    buildString {
+                        append("exit ").append(code).append('\n')
+                        if (out.isNotBlank()) append(out.takeLast(6000))
+                        if (se.isNotBlank()) append("\n[stderr]\n").append(se.takeLast(3000))
+                        if (errmsg.isNotBlank() && out.isBlank()) append("\n[termux] ").append(errmsg.take(500))
+                    }
+                }
+            }
+        } catch (e: SecurityException) { needsFix(ctx) }
+        catch (e: Exception) { "Error: ${e.message}" }
+        finally { runCatching { ctx.unregisterReceiver(rx) } }
+    }
+
+    /** Termux blocks other apps until allow-external-apps is set inside Termux: copy the fix and open Termux. */
+    private fun needsFix(ctx: Context): String {
+        try { ctx.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Termux fix", TERMUX_FIX)) } catch (_: Exception) { }
+        try { ctx.packageManager.getLaunchIntentForPackage("com.termux")?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } catch (_: Exception) { }
+        return "Termux is blocking other apps until one setting is on. Blaze already copied the fix to the clipboard and opened Termux. " +
+            "Tell the user in ONE short line: 'Termux is open: long-press, tap Paste, press Enter, then come back.' When they're back, retry termux_run. " +
+            "(Better: Blaze's own Linux via run_code / run_shell needs none of this.)"
     }
 
     // ---------- Tool definitions ----------
@@ -337,7 +384,7 @@ object Terminal {
         add(fn("preview_server", "Open a local server running on the phone (e.g. a dev server started as a background job) in Blaze's built-in browser and show it to the user.",
             JSONObject().put("port", p("integer", "Port, e.g. 8000")).put("path", p("string", "Optional path, e.g. /index.html")), listOf("port")))
         add(fn("terminal_stop", "Stop a background shell job.", JSONObject().put("id", p("integer", "Job number")), listOf("id")))
-        if (termuxInstalled(ctx)) add(fn("termux_run", "Run a command in Termux (full Linux: pkg install python nodejs git openjdk-17 gradle, build Android apps, etc.).",
+        if (termuxInstalled(ctx)) add(fn("termux_run", "Run a command in the Termux app and get its output back. Only when the user wants Termux; Blaze's own Linux (run_code/run_shell) is the default. Sets itself up (permission pop-up, copies the one-line fix if Termux blocks it).",
             JSONObject().put("command", p("string", "bash command")).put("background", p("boolean", "Run without opening a Termux window")), listOf("command")))
     }
 }

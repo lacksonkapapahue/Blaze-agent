@@ -631,7 +631,9 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
                     Text(body, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp, color = c.paper))
                 }
             }
-            if (m.files.isNotEmpty()) Label("Attached: " + m.files.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
+            if (m.media.isNotEmpty()) AttachedThumbs(m.media)
+            val unpictured = if (m.media.isNotEmpty()) m.files.drop(m.media.size) else m.files
+            if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             Actions(m, canAct, onQuote, allowQuote = false)
         }
         Role.BLAZE -> Column(Modifier.fillMaxWidth()) {
