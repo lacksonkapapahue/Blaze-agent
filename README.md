@@ -23,6 +23,12 @@ Keep this repository private because it holds the signing key.
 v1.9.15 (versionCode 26) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
+## v1.12.0: Blaze Desktop pairing
+- Settings › Blaze Desktop › Scan QR code (from Blaze Desktop › Phone), or paste the pairing link. Code in `link/DesktopLink.kt`, screen in `ui/DesktopPage.kt`.
+- `ask_pc`: runs a Blaze turn on the paired computer (files, code, programs, installs); the PC's approval requests show as confirm cards here. Tool group `pc`.
+- The other way: while Blaze runs, it long-polls the PC; Blaze Desktop's `phone_ask` requests run in a "From <PC>" chat and the answer goes back. Toggle: `pc_inbox`.
+- Direct HTTPS to the PC (port 7377), pinned to the certificate fingerprint in the QR code; the token is stored encrypted (`conn_tok_pc`). Same Wi-Fi, or anywhere over Tailscale.
+
 ## v1.9.15: Batch 1, dev toolkit hardening
 - `self_test` tool + Settings → Device & diagnostics → Run self-check: API key, internet, AI, terminal, Linux, git/GitHub, phone control, notifications, permissions, exact alarms, storage, voice, browser.
 - `schedule_command`: cron for shell commands (time + days, or every N min ≥ 15), no AI involved, survives reboots, notifies always / on failure / never. Listed with routines.

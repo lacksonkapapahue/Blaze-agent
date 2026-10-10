@@ -71,6 +71,12 @@
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.Blaze">
 
+        <!-- QR scanner for Blaze Desktop pairing: follow the phone's rotation instead of forcing landscape. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
+
         <activity
             android:name=".device.PermissionActivity"
             android:exported="false"

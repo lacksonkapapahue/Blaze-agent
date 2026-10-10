@@ -58,12 +58,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 data class SettingsPage(val id: String, val title: String, val sub: String)
 
 /** The four that matter, shown first; the rest sit under Advanced. */
-val essentialPages = setOf("ai", "persona", "voice", "control", "connections", "privacy")
+val essentialPages = setOf("ai", "persona", "voice", "control", "connections", "desktop", "privacy")
 
 val settingsPages = listOf(
     SettingsPage("ai", "Brain", "Free sign-ins; models and keys for power users"),
     SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
     SettingsPage("connections", "Connected accounts", "Google, GitHub, Spotify, Notion, Slack"),
+    SettingsPage("desktop", "Blaze Desktop", "Pair with Blaze on your computer"),
     SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
     SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
     SettingsPage("terminal", "Terminal", "A real shell, jobs, Termux"),
@@ -136,6 +137,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 }
                 "feel" -> FeelPage()
                 "connections" -> ConnectionsPage()
+                "desktop" -> DesktopPage()
                 "persona" -> PersonaSection()
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)
                 "commands" -> CommandsSection()
