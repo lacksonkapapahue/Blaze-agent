@@ -189,6 +189,7 @@ private fun AiPage() {
         AutoRouterSection()
     } else {
     Field("${prov.name} key", key, { key = it; Settings.apiKey = it }, prov.keyHint, secret = true)
+    ExtraKeys(pid)
     com.blaze.assistant.agent.LlmClient.keyOwner(key)?.takeIf { it != pid && pid != Providers.CUSTOM }?.let { owner ->
         Text("This looks like a ${Providers.byId(owner).name} key, not a ${prov.name} key. Paste it under ${Providers.byId(owner).name} instead.",
             modifier = Modifier.padding(bottom = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.accent))
@@ -817,4 +818,28 @@ private fun SecuritySection() {
     Label("Privacy & safety", modifier = Modifier.padding(bottom = 4.dp))
     ToggleRow("Lock Blaze", "Fingerprint, face or PIN to open the app", lock) { lock = !lock; Settings.appLock = lock }
     ToggleRow("Ask before risky actions", "Blaze asks before tapping Send, Pay, Buy, Delete or Post", risky) { risky = !risky; Settings.confirmRisky = risky }
+}
+
+
+/** More keys for the same provider: when one runs out, Blaze moves to the next with the same model. */
+@Composable
+internal fun ExtraKeys(pid: String) {
+    val c = LocalBlaze.current
+    var tick by remember { mutableStateOf(0) }
+    val extras = remember(pid, tick) { com.blaze.assistant.agent.KeyRing.extras(pid) }
+    var adding by remember(pid) { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+        extras.forEachIndexed { i, k ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Key ${i + 2}  \u2022\u2022\u2022\u2022${k.takeLast(4)}", modifier = Modifier.weight(1f),
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
+                Label("Remove", color = c.accent, size = 9.sp, modifier = Modifier.clickable {
+                    com.blaze.assistant.agent.KeyRing.removeExtra(pid, k); tick++ }.padding(6.dp))
+            }
+        }
+        Field("Add another key (optional)", adding, { adding = it }, "Used when the first key runs out", secret = true)
+        if (adding.isNotBlank()) Label("Save this key", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+            com.blaze.assistant.agent.KeyRing.add(pid, adding); com.blaze.assistant.agent.KeyRing.clear(pid); adding = ""; tick++
+        }.padding(vertical = 8.dp))
+    }
 }

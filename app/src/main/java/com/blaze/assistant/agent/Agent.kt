@@ -969,6 +969,9 @@ When you finish, say what you did in one short sentence.
             } catch (e: CancellationException) {
                 add(Role.STEP, "Stopped.")
                 throw e
+            } catch (e: LlmClient.UsedUp) {
+                val id = add(Role.ERROR, e.message ?: "Credits used up.")
+                msgs = msgs.map { if (it.id == id) it.copy(meta = "usedup:${e.pid}|${e.model}") else it }
             } catch (e: LlmClient.LlmException) {
                 add(Role.ERROR, e.message ?: "Something went wrong.")
             } catch (e: Exception) {

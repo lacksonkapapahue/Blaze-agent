@@ -37,7 +37,9 @@ object Brains {
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
 
     private fun saveKey(pid: String, key: String) {
-        Settings.setKeyFor(pid, key)
+        // A second key for a provider you already have joins the key ring instead of replacing it.
+        if (Settings.keyFor(pid).isBlank()) Settings.setKeyFor(pid, key) else KeyRing.add(pid, key)
+        KeyRing.clear(pid)
         if (!hasCustomBrain()) Settings.providerId = Providers.AUTO
         try { FreeRouter.added(pid) } catch (_: Throwable) { }
     }

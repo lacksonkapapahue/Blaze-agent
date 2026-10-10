@@ -12,6 +12,9 @@ object LlmClient {
 
     class LlmException(msg: String, val code: Int = 0, val retryAfterSec: Int = 0) : Exception(msg)
 
+    /** Every key for the user's chosen model ran out: the chat shows a provider/model switcher. */
+    class UsedUp(val pid: String, val model: String, msg: String) : Exception(msg)
+
     /** Which service + model one call goes to. */
     data class Target(val pid: String, val base: String, val key: String, val model: String) {
         val label get() = "${Providers.byId(pid).name.substringBefore(" (")} · $model"
@@ -20,8 +23,8 @@ object LlmClient {
     fun target(pid: String, model: String? = null): Target {
         val p = Providers.byId(pid)
         val base = if (pid == Providers.CUSTOM) Settings.customBase else p.baseUrl
-        return Target(pid, base, if (pid == Providers.keyless.id) "" else Providers.keyOf(pid),
-            model?.takeIf { it.isNotBlank() } ?: Settings.modelFor(pid))
+        val m = model?.takeIf { it.isNotBlank() } ?: Settings.modelFor(pid)
+        return Target(pid, base, if (pid == Providers.keyless.id) "" else KeyRing.active(pid, m), m)
     }
 
     /** MAIN = the user's turn, STEPS = a turn right after a phone action, BACKGROUND = learning/summaries. */
@@ -111,9 +114,20 @@ object LlmClient {
             } else if (tooLarge(e)) {
                 // The conversation outgrew this model's limit: retry once with a trimmed copy.
                 call(t, shrink(messages), tools, onText, onThink, false).also { lastRoute = t.label + " · trimmed" }
-            } else if (e.code == 429 || e.code in 500..599 || (e.message ?: "").contains("quota", true)) {
-                // Your chosen brain is out of free quota or down: carry on with the free chain instead of stopping.
-                try { FreeRouter.complete(if (Vision.hasImages(messages)) Vision.describeAll(messages) else messages, tools, onText, onThink, lane).also { lastRoute = "Free (${t.label} resting) · " + lastRoute } }
+            } else if (KeyRing.isQuota(e)) {
+                // This key is out of credits for this model: rest it and carry on with your next key, same model.
+                KeyRing.rest(t.pid, t.key, t.model)
+                for (k in KeyRing.fresh(t.pid, t.model, t.key)) {
+                    try { return call(t.copy(key = k), messages, tools, onText, onThink, false).also { lastRoute = t.label + " · key ${KeyRing.all(t.pid).indexOf(k) + 1}" } }
+                    catch (e2: kotlinx.coroutines.CancellationException) { throw e2 }
+                    catch (e2: LlmException) { if (KeyRing.isQuota(e2)) KeyRing.rest(t.pid, k, t.model) else throw e2 }
+                }
+                val n = KeyRing.all(t.pid).size
+                throw UsedUp(t.pid, t.model, "${Providers.byId(t.pid).name.substringBefore(" (")} has used up its credits on ${t.model}" +
+                    (if (n > 1) " on all $n of your keys" else "") + ". Pick another brain to keep going.")
+            } else if (e.code in 500..599) {
+                // Your chosen brain is down: carry on with the free chain instead of stopping.
+                try { FreeRouter.complete(if (Vision.hasImages(messages)) Vision.describeAll(messages) else messages, tools, onText, onThink, lane).also { lastRoute = "Free (${t.label} down) · " + lastRoute } }
                 catch (e2: kotlinx.coroutines.CancellationException) { throw e2 }
                 catch (_: Exception) { throw e }
             } else throw e

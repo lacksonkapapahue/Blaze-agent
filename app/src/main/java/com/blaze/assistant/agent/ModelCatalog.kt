@@ -131,6 +131,15 @@ object ModelCatalog {
     private fun version(id: String): Double =
         Regex("""(\d+(?:\.\d+)?)""").find(id)?.value?.toDoubleOrNull() ?: 0.0
 
+    /** Chat models one provider offers to your key (for the "switch brain" picker). */
+    suspend fun modelsFor(pid: String): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val p = Providers.byId(pid); val key = KeyRing.all(pid).firstOrNull() ?: return@withContext emptyList()
+            val base = if (pid == Providers.CUSTOM) Settings.customBase else p.baseUrl
+            (if (isGoogle(base)) listGemini(key) else listOpenAi(base.trimEnd('/'), key)).map { it.id }.filter { isChat(it) }.distinct().take(40)
+        } catch (_: Exception) { emptyList() }
+    }
+
     private fun listGemini(key: String): List<Model> {
         val out = mutableListOf<Model>()
         var token = ""

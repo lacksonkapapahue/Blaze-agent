@@ -661,8 +661,9 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
                 }
             }
             Actions(m, canAct, onQuote, allowQuote = false)
+            if (canAct && m.meta.startsWith("usedup:")) BrainSwitcher(m.meta.removePrefix("usedup:")) { onFollowup("Continue where you stopped") }
             // Pick up where it broke instead of starting over: the history keeps the steps done so far.
-            if (canAct) Followups(listOf("Continue where you stopped"), onFollowup)
+            else if (canAct) Followups(listOf("Continue where you stopped"), onFollowup)
         }
         Role.STEP -> {}
     }
@@ -944,5 +945,67 @@ private fun MicGlyph(color: androidx.compose.ui.graphics.Color, speaking: Boolea
             size = androidx.compose.ui.geometry.Size(6.4f * u, 6.4f * u), style = st)
         drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(4.4f * u, 7.9f * u), size = androidx.compose.ui.geometry.Size(1.2f * u, 1.6f * u))
         drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(3f * u, 9f * u), size = androidx.compose.ui.geometry.Size(4f * u, 1f * u))
+    }
+}
+
+
+/**
+ * Shown under "credits used up": pick another provider + model in two taps, then Blaze carries on.
+ * The model that just ran out (and any model whose keys are all resting) is left out of the list.
+ */
+@Composable
+private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
+    val c = LocalBlaze.current
+    val (spentPid, spentModel) = spent.substringBefore('|') to spent.substringAfter('|')
+    val P = com.blaze.assistant.agent.Providers
+    val R = com.blaze.assistant.agent.KeyRing
+    val providers = remember { P.all.filter { it.id != P.AUTO && R.all(it.id).isNotEmpty() } }
+    var open by remember { mutableStateOf(false) }
+    var pid by remember { mutableStateOf(spentPid.takeIf { s -> providers.any { it.id == s } } ?: providers.firstOrNull()?.id.orEmpty()) }
+    var models by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(pid, open) {
+        if (!open || pid.isBlank()) return@LaunchedEffect
+        models = null
+        val l = com.blaze.assistant.agent.ModelCatalog.modelsFor(pid)
+        models = l.filter { !(pid == spentPid && it == spentModel) && !R.usedUp(pid, it) }
+    }
+    Column(Modifier.padding(top = 8.dp).widthIn(max = 330.dp).fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().background(c.ink).clickable { open = !open }.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Label("Switch brain and continue", color = c.paper, size = 10.sp, modifier = Modifier.weight(1f))
+            Label(if (open) "\u25B2" else "\u25BC", color = c.paper, size = 10.sp)
+        }
+        if (open) Column(Modifier.fillMaxWidth().hairline(c.hair).padding(10.dp)) {
+            // Fastest option: hand it to the free brains.
+            Label("Auto \u00b7 free brains", color = c.accent, size = 10.sp, modifier = Modifier.fillMaxWidth().clickable {
+                Settings.providerId = P.AUTO; open = false; onPicked() }.padding(vertical = 10.dp))
+            if (providers.isNotEmpty()) {
+                Label("Provider", size = 9.sp, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    providers.forEach { p ->
+                        val on = p.id == pid
+                        Box(Modifier.padding(end = 6.dp).background(if (on) c.ink else c.paper).hairline(c.hair).clickable { pid = p.id }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)) {
+                            Label(p.name.substringBefore(" ("), color = if (on) c.paper else c.ink, size = 9.sp)
+                        }
+                    }
+                }
+                Label("Model", size = 9.sp, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                val l = models
+                when {
+                    l == null -> Label("Loading models\u2026", size = 9.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    l.isEmpty() -> Label("No other models on this provider. Pick another provider or Auto.", size = 9.sp, modifier = Modifier.padding(vertical = 8.dp))
+                    else -> Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
+                        l.forEach { id ->
+                            Text(id, modifier = Modifier.fillMaxWidth().clickable {
+                                Settings.providerId = pid
+                                Settings.setStr("model_$pid", id)
+                                open = false; onPicked()
+                            }.padding(vertical = 9.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
+                        }
+                    }
+                }
+            }
+        }
     }
 }

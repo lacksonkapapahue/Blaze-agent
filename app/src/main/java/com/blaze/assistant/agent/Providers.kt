@@ -62,5 +62,5 @@ object Providers {
     )
 
     /** The key Blaze would use for [pid]. (GitHub Models was retired on 30 Jul 2026, so no GitHub fallback.) */
-    fun keyOf(pid: String): String = Settings.keyFor(pid)
+    fun keyOf(pid: String): String = KeyRing.active(pid, Settings.modelFor(pid))
 }
