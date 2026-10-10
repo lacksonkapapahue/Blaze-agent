@@ -47,7 +47,8 @@ fun CallScreen(onHangUp: () -> Unit) {
     val question by Agent.pendingQuestion.collectAsState()
     val ended by Voice.callEnded.collectAsState()
     var muted by remember { mutableStateOf(false) }
-    var earpiece by remember { mutableStateOf(false) }
+    var earpiece by remember { mutableStateOf(com.blaze.assistant.agent.Settings.bool("call_earpiece", false)) }
+    val greet = remember { com.blaze.assistant.agent.Settings.bool("call_greet", true) }
     var seconds by remember { mutableStateOf(0) }
     val startEnded = remember { Voice.callEnded.value }
 
@@ -64,6 +65,8 @@ fun CallScreen(onHangUp: () -> Unit) {
         Voice.inCall = true; Voice.callMuted = false
         view.keepScreenOn = true
         Voice.hushBeeps(true)
+        if (earpiece) Voice.setEarpiece(true)
+        if (greet) Voice.speak(listOf("Hey, I'm here. What's up?", "Hi! What can I do?", "Hey Luke, go ahead.").random())
         com.blaze.assistant.device.Haptics.tick(view.context)
         onDispose { if (Voice.inCall) { Voice.inCall = false; Voice.cancelListening(); Voice.stopSpeaking(); Voice.setEarpiece(false); Voice.hushBeeps(false); view.keepScreenOn = false } }
     }
@@ -75,7 +78,7 @@ fun CallScreen(onHangUp: () -> Unit) {
     // This also starts the call and covers replies that weren't spoken.
     LaunchedEffect(mood, voice, muted, question) {
         if (muted || mood != Mood.IDLE || voice != Voice.State.IDLE) return@LaunchedEffect
-        delay(if (seconds == 0) 300 else 900)
+        delay(if (seconds == 0) (if (greet) 1800L else 300L) else 900L)
         if (Voice.inCall && !Voice.callMuted && Agent.mood.value == Mood.IDLE && Voice.state.value == Voice.State.IDLE) Voice.conversationListen()
     }
 

@@ -84,9 +84,11 @@ val settingsPages = listOf(
 @Composable
 fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalBlaze.current
-    var page by remember { mutableStateOf(start?.takeIf { it.isNotEmpty() }) }
+    // An unknown page id falls back to the list instead of a blank screen.
+    var page by remember { mutableStateOf(start?.takeIf { s -> settingsPages.any { it.id == s } }
+        ?: start?.let { com.blaze.assistant.agent.settingsPageFor(it) }?.takeIf { it.isNotEmpty() }) }
     // Opened straight onto a page (from the sidebar or a /command): back closes settings.
-    val direct = remember { start?.isNotEmpty() == true }
+    val direct = remember { page != null }
     fun back() { if (page != null && !direct) page = null else onDismiss() }
     BackHandler { back() }
     val current = settingsPages.firstOrNull { it.id == page }
@@ -137,7 +139,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "persona" -> PersonaSection()
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)
                 "commands" -> CommandsSection()
-                "voice" -> { VoiceSection(); VoiceExtras() }
+                "voice" -> { VoiceSection(); VoiceTuning(); VoiceExtras() }
                 "orb" -> OrbSection()
                 "routines" -> RoutinesSection()
                 "memory" -> { MemorySection(); LearningSection() }

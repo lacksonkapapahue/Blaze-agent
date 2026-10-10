@@ -50,6 +50,7 @@ object Voice {
             ttsReady = status == TextToSpeech.SUCCESS
             if (ttsReady) {
                 tts?.language = Locale.getDefault()
+                applyPrefs()
                 tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
                     override fun onStart(id: String?) { _state.value = State.SPEAKING }
                     override fun onDone(id: String?) {
@@ -86,7 +87,7 @@ object Voice {
             val t = raw.trim()
             when {
                 t.isBlank() && inCall -> { if (!callMuted) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (inCall && !callMuted) conversationListen() }, 300) }
-                endWords.matches(t) && inCall -> { lastTurnByVoice = false; speakEnd("Talk soon.") }
+                endWords.matches(t) && inCall && com.blaze.assistant.agent.Settings.bool("call_bye", true) -> { lastTurnByVoice = false; speakEnd("Talk soon.") }
                 t.isBlank() -> { silentTurns++; if (silentTurns < 2) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 150) else silentTurns = 0 }
                 stopWords.matches(t) -> { silentTurns = 0; com.blaze.assistant.agent.Agent.stopAll(); com.blaze.assistant.device.Sounds.done() }
                 endWords.matches(t) -> { silentTurns = 0; lastTurnByVoice = false; speakEnd("Anytime.") }
@@ -144,7 +145,7 @@ object Voice {
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, com.blaze.assistant.agent.Settings.str("stt_lang", "").ifBlank { Locale.getDefault().toLanguageTag() })
         r.startListening(i)
     }
 
@@ -195,6 +196,34 @@ object Voice {
             val dir = if (on) android.media.AudioManager.ADJUST_MUTE else android.media.AudioManager.ADJUST_UNMUTE
             listOf(android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_NOTIFICATION).forEach { am.adjustStreamVolume(it, dir, 0) }
         } catch (_: Exception) { }
+    }
+
+    /** Blaze's voice, speed and pitch from settings. */
+    fun applyPrefs() {
+        val t = tts ?: return
+        if (!ttsReady) return
+        val S = com.blaze.assistant.agent.Settings
+        try {
+            t.setSpeechRate(S.str("tts_rate", "1.0").toFloatOrNull() ?: 1f)
+            t.setPitch(S.str("tts_pitch", "1.0").toFloatOrNull() ?: 1f)
+            val name = S.str("tts_voice", "")
+            if (name.isNotBlank()) t.voices?.firstOrNull { it.name == name }?.let { t.voice = it }
+            else t.language = Locale.getDefault()
+        } catch (_: Exception) { }
+    }
+
+    /** Voices the phone's speech engine has installed, the phone's language first. */
+    fun voices(): List<android.speech.tts.Voice> = try {
+        val lang = Locale.getDefault().language
+        tts?.voices.orEmpty()
+            .filter { !it.features.orEmpty().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+            .sortedWith(compareBy({ it.locale.language != lang }, { it.locale.displayName }, { it.isNetworkConnectionRequired }, { it.name }))
+    } catch (_: Exception) { emptyList() }
+
+    fun preview(text: String = "Hi Luke, this is how I sound.") {
+        if (!ttsReady) return
+        applyPrefs()
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview-${System.currentTimeMillis()}")
     }
 
     fun stopSpeaking() {

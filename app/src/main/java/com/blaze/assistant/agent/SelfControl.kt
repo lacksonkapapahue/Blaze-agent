@@ -151,7 +151,7 @@ object SelfControl {
                 "voice_on", "voice_off", "status", "setup_check", "open", "install", "crash_log", "speed_stats", "tool_stats", "set_model", "set_persona", "set_setting"))))
             .put("provider", JSONObject().put("type", "string")).put("model", JSONObject().put("type", "string"))
             .put("persona", JSONObject().put("type", "string"))
-            .put("target", JSONObject().put("type", "string").put("description", "open: accessibility, overlay, app_permissions, battery, notification_access, assistant, exact_alarms, or a Blaze settings page (settings ai/control/voice/terminal/connections/feel…)"))
+            .put("target", JSONObject().put("type", "string").put("description", "open: accessibility, overlay, app_permissions, battery, notification_access, assistant, exact_alarms, or ONE Blaze settings page id: ai, voice, control, terminal, connections, feel, persona, memory, routines, privacy, device, orb, backup"))
             .put("what", JSONObject().put("type", "string").put("description", "install: linux, wake_model or fast_lane"))
             .put("key", JSONObject().put("type", "string")).put("value", JSONObject().put("type", "string")))
             .put("required", JSONArray(listOf("action")))))

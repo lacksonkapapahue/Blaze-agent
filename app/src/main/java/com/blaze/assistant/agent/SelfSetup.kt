@@ -85,7 +85,7 @@ object SelfSetup {
             ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); "Opened the ${target.replace('_', ' ')} screen. Tell the user what to switch on there."
         } catch (e: Exception) { "Couldn't open it: ${e.message}" }
         // Otherwise a page inside Blaze's own settings.
-        val page = target.lowercase().removePrefix("settings").trim().ifBlank { "ai" }
+        val page = settingsPageFor(target)
         openPage.value = page
         ctx.startActivity(Intent(ctx, com.blaze.assistant.MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
         return "Opened Blaze settings \u2192 $page."
@@ -97,4 +97,24 @@ object SelfSetup {
         "fast_lane" -> FastLane.download(ctx).fold({ "Fast lane installed." }, { "Download failed: ${it.message}" })
         else -> "I can install: linux, wake_model, fast_lane."
     }
+}
+
+
+/**
+ * Turns whatever the model wrote ("settings voice", "Voice & wake word", "ai/control/voice/term")
+ * into a real settings page id. Unknown → "" (the settings list), never a blank page.
+ */
+fun settingsPageFor(raw: String): String {
+    val ids = com.blaze.assistant.ui.settingsPages.map { it.id }
+    val alias = mapOf("brain" to "ai", "model" to "ai", "models" to "ai", "keys" to "ai", "provider" to "ai",
+        "wake" to "voice", "speech" to "voice", "tts" to "voice", "call" to "voice", "mic" to "voice", "speak" to "voice",
+        "term" to "terminal", "shell" to "terminal", "termux" to "terminal", "linux" to "terminal",
+        "look" to "feel", "theme" to "feel", "sounds" to "feel", "accounts" to "connections", "connected" to "connections",
+        "personality" to "persona", "phone" to "control", "accessibility" to "control", "skills" to "control",
+        "lock" to "privacy", "safety" to "privacy", "diagnostics" to "device", "health" to "device", "export" to "backup")
+    val words = raw.lowercase().replace("settings", " ").split(Regex("[^a-z_]+")).filter { it.isNotBlank() }
+    if (words.isEmpty()) return ""
+    // Several pages listed (the model copied the example): only trust it when they all point to one page.
+    val hits = words.mapNotNull { w -> if (w in ids) w else alias[w] ?: com.blaze.assistant.ui.settingsPages.firstOrNull { p -> p.title.lowercase().split(Regex("[^a-z]+")).contains(w) }?.id }.distinct()
+    return if (hits.size == 1) hits.first() else ""
 }

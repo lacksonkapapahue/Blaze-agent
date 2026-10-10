@@ -248,6 +248,7 @@ object FastLane {
                 ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(a.optString("place")))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             "Directions to ${a.optString("place")} are open."
         }
+        "blaze_self" -> SelfSetup.open(ctx, a.optString("target"))
         else -> null
     }
 }

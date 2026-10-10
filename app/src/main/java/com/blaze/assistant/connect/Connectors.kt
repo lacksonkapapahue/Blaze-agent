@@ -212,7 +212,8 @@ object Connectors {
             fn("github_my_prs", "List the user's open pull requests and ones awaiting their review."),
             fn("github_issues", "List open issues in a repo.", JSONObject().put("repo", s("owner/name")), listOf("repo")),
             fn("github_create_issue", "Open an issue in a repo. The user approves first.", JSONObject().put("repo", s("owner/name")).put("title", s("Title")).put("body", s("Body")), listOf("repo", "title")),
-            fn("github_search_repos", "Search GitHub repositories.", JSONObject().put("query", s("Search words")), listOf("query")),
+            fn("github_my_repos", "List ALL of the user's own repositories, private ones included, newest activity first. Use this (not search) for 'my repos'."),
+            fn("github_search_repos", "Search public GitHub repositories (not for the user's own list: use github_my_repos).", JSONObject().put("query", s("Search words")), listOf("query")),
         ),
         "spotify" to listOf(
             fn("spotify_now_playing", "What's playing on the user's Spotify right now."),
@@ -390,6 +391,19 @@ object Connectors {
                 if (!Agent.confirm("Open an issue in ${a.optString("repo")}?", a.optString("title"), "Create")) return "The user declined."
                 val r = send("POST", "$api/repos/${a.optString("repo")}/issues", JSONObject().put("title", a.optString("title")).put("body", a.optString("body")), t, h)
                 "Created issue #${r.optInt("number")}: ${r.optString("html_url")}"
+            }
+            "github_my_repos" -> {
+                val all = mutableListOf<JSONObject>()
+                for (page in 1..5) {
+                    val l = get("$api/user/repos?per_page=100&page=$page&sort=pushed&affiliation=owner,collaborator,organization_member", t, h).optJSONArray("items") ?: JSONArray()
+                    for (k in 0 until l.length()) all += l.getJSONObject(k)
+                    if (l.length() < 100) break
+                }
+                if (all.isEmpty()) "No repositories on this GitHub account."
+                else "${all.size} repos (${all.count { it.optBoolean("private") }} private), most recently pushed first:\n" + all.take(60).joinToString("\n") { r ->
+                    "${r.optString("full_name")}${if (r.optBoolean("private")) " · private" else ""} · pushed ${r.optString("pushed_at").take(10)}" +
+                        r.optString("description").takeIf { it.isNotBlank() && it != "null" }?.let { " · ${it.take(60)}" }.orEmpty()
+                }
             }
             "github_search_repos" -> {
                 val l = get("$api/search/repositories?per_page=8&q=" + Http.enc(a.optString("query")), t, h).optJSONArray("items") ?: JSONArray()
