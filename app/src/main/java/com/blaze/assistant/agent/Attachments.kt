@@ -17,13 +17,19 @@ import java.io.ByteArrayOutputStream
 object Attachments {
     private const val MAX_PDF_PAGES = 6
 
-    suspend fun load(ctx: Context, uri: Uri): Attachment? = withContext(Dispatchers.IO) {
+    /**
+     * [mimeHint] is the type the sender declared (e.g. a clipboard item's description). Some
+     * providers (Samsung clipboard, keyboards, screenshots) don't answer getType, so we fall back
+     * to the hint, the file name, and finally a peek at the bytes.
+     */
+    suspend fun load(ctx: Context, uri: Uri, mimeHint: String = ""): Attachment? = withContext(Dispatchers.IO) {
         try {
             val cr = ctx.contentResolver
-            val mime = cr.getType(uri) ?: ""
-            val name = cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            val mime = (try { cr.getType(uri) } catch (_: Exception) { null }).orEmpty()
+                .ifBlank { mimeHint }.ifBlank { guessMime(ctx, uri) }
+            val name = (try { cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
-            } ?: uri.lastPathSegment ?: "file"
+            } } catch (_: Exception) { null }) ?: uri.lastPathSegment ?: "file"
             when {
                 mime.startsWith("image/") -> {
                     val bmp = decodeScaled(ctx, uri, 1536) ?: return@withContext null
@@ -55,6 +61,22 @@ object Attachments {
                 else -> null
             }
         } catch (_: Exception) { null }
+    }
+
+    /** Type from the file name, or by sniffing the first bytes (images and PDFs). */
+    private fun guessMime(ctx: Context, uri: Uri): String {
+        val ext = uri.lastPathSegment.orEmpty().substringAfterLast('.', "").lowercase()
+        android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)?.let { return it }
+        val head = try { ctx.contentResolver.openInputStream(uri)?.use { s -> ByteArray(8).also { s.read(it) } } } catch (_: Exception) { null } ?: return ""
+        if (head[0] == '%'.code.toByte() && head[1] == 'P'.code.toByte()) return "application/pdf"
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try { ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) } } catch (_: Exception) { }
+        return if (o.outWidth > 0) (o.outMimeType ?: "image/*") else ""
+    }
+
+    /** A picture at [uri] as a data: URL the model can look at (for tools). */
+    suspend fun imageUrl(ctx: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
+        try { decodeScaled(ctx, uri, 1536)?.let { image(it).getJSONObject("image_url").getString("url") } } catch (_: Exception) { null }
     }
 
     private fun decodeScaled(ctx: Context, uri: Uri, max: Int): Bitmap? {

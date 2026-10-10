@@ -17,7 +17,9 @@ object ToolRouter {
         "remember", "forget", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user", "self_test",
         "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
         // Basic phone control stays in core: it's the most common thing people ask for.
-        "run_plan", "open_app", "search_in_app", "read_screen"
+        "run_plan", "open_app", "search_in_app", "read_screen",
+        // Calls: "loudspeaker", "mute", "hang up" must work mid-call without guessing a group.
+        "call_control"
     )
 
     data class Group(val id: String, val about: String, val match: Regex, val names: (String) -> Boolean)

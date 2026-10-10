@@ -23,6 +23,13 @@ Keep this repository private because it holds the signing key.
 v1.9.15 (versionCode 26) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
+## v1.12.1: call controls and clipboard
+- `call_control` (core tool): loudspeaker, mute, end, answer, decline, hold, keypad digits and call volume, for calls with Blaze and real phone calls
+  (telecom API for answer/end, the dialer's own buttons via accessibility for speaker/mute/hold/keypad). Call screen state lives in `Voice.callSpeaker` / `Voice.callMute`.
+- "Let's get on a call", "can we have a call" etc. start a call with Blaze (they used to phone a contact). New permissions: READ_PHONE_STATE, ANSWER_PHONE_CALLS, MODIFY_AUDIO_SETTINGS.
+- Clipboard: pasting a copied image works with providers that don't report a file type (Samsung clipboard, keyboards). `clipboard` tool reads in the background
+  (brief focus window, `phone/ClipAccess.kt`), looks at copied images (get_image), copies files/images (set_image), keeps a text history (sensitive clips skipped) and can clear it.
+
 ## v1.12.0: Blaze Desktop pairing
 - Settings › Blaze Desktop › Scan QR code (from Blaze Desktop › Phone), or paste the pairing link. Code in `link/DesktopLink.kt`, screen in `ui/DesktopPage.kt`.
 - `ask_pc`: runs a Blaze turn on the paired computer (files, code, programs, installs); the PC's approval requests show as confirm cards here. Tool group `pc`.

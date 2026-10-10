@@ -394,6 +394,9 @@ When you finish, say what you did in one short sentence.
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
             append(com.blaze.assistant.link.DesktopLink.promptLine())
+            append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
+                "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
+            if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
             append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillPacks.promptBlock())
         }
     }
@@ -430,6 +433,7 @@ When you finish, say what you did in one short sentence.
         Learning.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.phone.CallControl.tool())
         if (com.blaze.assistant.link.DesktopLink.paired) t.put(com.blaze.assistant.link.DesktopLink.tool())
         com.blaze.assistant.connect.Connectors.tools().forEach { t.put(it) }
         try { com.blaze.assistant.connect.Mcp.tools().forEach { t.put(it) } } catch (_: Exception) { }
@@ -1206,6 +1210,40 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, "Looking at a screenshot")
                     val shot = PhoneTools.screenshot()
                     if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
+                }
+                "call_control" -> {
+                    add(Role.STEP, when (args.optString("action")) { "speaker" -> if (args.optBoolean("on", true)) "Loudspeaker on" else "Loudspeaker off"; "mute" -> if (args.optBoolean("on", true)) "Muting" else "Unmuting"
+                        "end" -> "Hanging up"; "answer" -> "Answering"; "decline" -> "Declining"; "start_blaze_call" -> "Starting a call"; "keypad" -> "Pressing ${args.optString("digits")}"; else -> "Call controls" })
+                    com.blaze.assistant.phone.CallControl.run(app, args)
+                }
+                "clipboard" -> {
+                    val C = com.blaze.assistant.phone.ClipAccess
+                    when (args.optString("action")) {
+                        "set" -> { add(Role.STEP, "Copying to your clipboard"); kotlinx.coroutines.withContext(Dispatchers.Main) { C.setText(app, args.optString("text")) }; "Copied to the clipboard." }
+                        "set_image" -> {
+                            val p = args.optString("path")
+                            val f = com.blaze.assistant.media.Media.find(p) ?: com.blaze.assistant.terminal.DevTools.resolve(p)
+                            if (!f.isFile) "No such file: $p" else { add(Role.STEP, "Copying ${f.name} to your clipboard"); kotlinx.coroutines.withContext(Dispatchers.Main) { C.setFile(app, f) } }
+                        }
+                        "clear" -> { kotlinx.coroutines.withContext(Dispatchers.Main) { C.clear(app) }; "Clipboard cleared." }
+                        "history" -> C.history().take(15).mapIndexed { i, t -> "${i + 1}. ${t.take(300)}" }.joinToString("\n").ifBlank { "No clipboard history yet." }
+                        "get_image" -> {
+                            add(Role.STEP, "Looking at your clipboard")
+                            val clip = C.read(app)
+                            val u = clip?.uris?.firstOrNull()
+                            if (u == null) (if (clip == null) "Couldn't read the clipboard." else "There's no image on the clipboard" + (if (clip.text.isNotEmpty()) ", only text: ${clip.text.take(500)}" else "."))
+                            else Attachments.imageUrl(app, u.first)?.let { shots += it; "The copied image is attached in the next message." } ?: "There's a file on the clipboard (${u.second.ifBlank { "unknown type" }}) but it isn't a picture I can open."
+                        }
+                        else -> {
+                            add(Role.STEP, "Reading your clipboard")
+                            val clip = C.read(app)
+                            when {
+                                clip == null -> "Couldn't read the clipboard. Turn on Blaze's accessibility service or 'draw over apps' so it can read it in the background."
+                                clip.text.isEmpty() && clip.uris.isEmpty() -> "The clipboard is empty."
+                                else -> clip.text.take(4000) + (if (clip.uris.isNotEmpty()) "\n[Also ${clip.uris.size} file(s) on the clipboard (${clip.uris.first().second.ifBlank { "file" }}). Use clipboard get_image to look at a picture.]" else "")
+                            }
+                        }
+                    }
                 }
                 in com.blaze.assistant.phone.AndroidControl.names -> {
                     add(Role.STEP, name.replace('_', ' ').replaceFirstChar { it.uppercase() })
