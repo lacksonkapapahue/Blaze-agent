@@ -189,7 +189,9 @@ object PhoneTools {
                 Triple(ri, label, score)
             }
             .filter { it.third < 99 }
-            .sortedBy { it.third }
+            // "whatsapp settings" contains both "WhatsApp" and "Settings": never let the generic Settings app win a partial match.
+            .filter { it.third == 0 || q == "settings" || it.second.lowercase() != "settings" }
+            .sortedWith(compareBy({ it.third }, { -it.second.length }))
         val best = scored.firstOrNull()
             ?: return "No app called '$name' is installed. Installed apps include: " +
                 apps.map { it.loadLabel(pm).toString() }.sorted().take(60).joinToString(", ")

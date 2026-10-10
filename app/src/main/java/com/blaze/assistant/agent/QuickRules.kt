@@ -106,10 +106,28 @@ object QuickRules {
             if (page.isNotEmpty() && (own || what in blazeOnly)) return "blaze_self" to JSONObject().put("action", "open").put("target", page)
         }
 
+        // "wifi settings", "battery settings" → that Android page. "whatsapp settings" (another app's own settings)
+        // is multi-step (open the app, find its menu), so the full agent handles it instead of opening Android Settings.
+        Regex("""^(?:(?:please |can you |could you )?(?:open|show|go to|take me to|bring up)?(?: me)?\s*)?(?:the |my )?(?:phone'?s? )?([a-z0-9 .&'-]{2,28}?) (?:settings|setting|preferences|options|menu)(?: page| again| please)?$""").matchEntire(t)?.let { m ->
+            val what = m.groupValues[1].trim()
+            val sys = mapOf("wifi" to "wifi", "wi-fi" to "wifi", "wi fi" to "wifi", "internet" to "wifi", "bluetooth" to "bluetooth", "hotspot" to "hotspot",
+                "location" to "location", "gps" to "location", "battery" to "battery", "display" to "display", "screen" to "display", "brightness" to "display",
+                "sound" to "sound", "sounds" to "sound", "volume" to "sound", "ringtone" to "sound", "apps" to "apps", "app" to "apps", "storage" to "storage",
+                "notification" to "notifications", "notifications" to "notifications", "data" to "data_usage", "data usage" to "data_usage",
+                "mobile data" to "data_usage", "mobile network" to "mobile_network", "network" to "mobile_network", "sim" to "mobile_network",
+                "language" to "language", "keyboard" to "language", "date and time" to "date_time", "date & time" to "date_time", "time" to "date_time",
+                "security" to "security", "lock screen" to "security", "developer" to "developer", "developer options" to "developer", "vpn" to "vpn",
+                "nfc" to "nfc", "accessibility" to "accessibility", "default apps" to "default_apps", "airplane" to "airplane", "dnd" to "dnd", "do not disturb" to "dnd")
+            sys[what]?.let { return "open_settings_page" to JSONObject().put("page", it) }
+            val verb = Regex("^(open|show|show me|go to|take me to|bring up|the|my|open the|open my)$").matches(what)
+            if (!verb && what !in setOf("phone", "android", "system", "device")) return null
+        }
+
         // Open an app: "open whatsapp", "launch the camera", "go to settings". Single target only.
         Regex("""^(?:open|launch|start|go to|take me to|bring up|show me|run) (?:the |my |up )?([a-z0-9][a-z0-9 .+&'-]{1,28}?)(?: app)?$""").matchEntire(t)?.let { m ->
             val app = m.groupValues[1].trim()
-            if (app.split(' ').size <= 3 && !Regex("\\b(and|then|search|play|on|in|with|to|for|about)\\b").containsMatchIn(app))
+            if (app.split(' ').size <= 3 && !Regex("\\b(and|then|search|play|on|in|with|to|for|about)\\b").containsMatchIn(app)
+                && !Regex(".+ (settings?|preferences|options|menu|chats?|status|profile|page)$").matches(app))
                 return "open_app" to JSONObject().put("name", app)
         }
         return null
