@@ -95,7 +95,13 @@ class MainActivity : FragmentActivity() {
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) com.blaze.assistant.agent.Brains.catchKey(this)?.let { android.widget.Toast.makeText(this, it, android.widget.Toast.LENGTH_LONG).show() }
+        // Android only lets the focused app read the clipboard, and focus can land a beat after resume.
+        if (hasFocus) window.decorView.postDelayed({
+            lifecycleScope.launch {
+                com.blaze.assistant.agent.Brains.takeFromClipboard(this@MainActivity, userTapped = false)
+                    ?.let { android.widget.Toast.makeText(this@MainActivity, it, android.widget.Toast.LENGTH_LONG).show() }
+            }
+        }, 600)
     }
 
     override fun onPause() {

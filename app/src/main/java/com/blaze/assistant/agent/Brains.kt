@@ -96,7 +96,7 @@ object Brains {
     }
 
     private val patterns = listOf(
-        "gemini" to Regex("^AIza[0-9A-Za-z_\\-]{30,45}$"),
+        "gemini" to Regex("^(AIza[0-9A-Za-z_\\-]{30,45}|AQ\\.[0-9A-Za-z_\\-]{30,100})$"),
         "groq" to Regex("^gsk_[0-9A-Za-z]{40,64}$"),
         "openrouter" to Regex("^sk-or-v1-[0-9a-f]{48,80}$"),
         "cerebras" to Regex("^csk-[0-9a-z]{30,64}$"),
@@ -107,21 +107,56 @@ object Brains {
      * Key catcher: when Blaze comes to the front and the clipboard holds exactly one free-provider
      * key (and nothing else), it's saved for that provider. Returns a message to show, or null.
      */
+    fun clipText(ctx: Context): String = try {
+        val cm = ctx.getSystemService(ClipboardManager::class.java)
+        cm?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim().orEmpty()
+    } catch (_: Exception) { "" }
+
+    /** Asks Google whether [k] is a working Gemini key (catches new key formats the patterns don't know). */
+    private fun geminiWorks(k: String): Boolean = try {
+        Http.req("GET", "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=" + Http.enc(k), timeoutMs = 15_000).first == 200
+    } catch (_: Exception) { false }
+
+    /**
+     * "I copied it" button / coming back from Google: reads the clipboard (allowed, the user just
+     * tapped or Blaze has focus), recognises the key, checks it with the provider if the format is
+     * unfamiliar, and saves it. Runs network checks, so call off the main thread.
+     */
+    suspend fun takeFromClipboard(ctx: Context, userTapped: Boolean): String? = withContext(Dispatchers.IO) {
+        val t = withContext(Dispatchers.Main) { clipText(ctx) }.trim().trim('"', '\'')
+        if (t.isEmpty() || t.length > 200 || t.contains(' ') || t.contains('\n')) {
+            return@withContext if (userTapped) "Nothing that looks like a key is copied yet. On Google's page tap the copy icon next to your key, then come back.".also { _status.value = it } else null
+        }
+        patterns.firstOrNull { it.second.matches(t) }?.let { (pid, _) ->
+            if (Settings.keyFor(pid) == t) return@withContext if (userTapped) "That key is already saved \u2713".also { _status.value = it } else null
+            return@withContext withContext(Dispatchers.Main) { save(ctx, pid, t) }
+        }
+        // Unknown shape: if we sent them to Google (or they tapped), see if Google accepts it.
+        if ((userTapped || Settings.bool("key_catch_armed", false)) && Regex("^[A-Za-z0-9_.\\-]{25,120}$").matches(t)) {
+            _status.value = "Checking your key\u2026"
+            if (geminiWorks(t)) return@withContext withContext(Dispatchers.Main) { save(ctx, "gemini", t) }
+            if (userTapped) return@withContext "Google didn't accept that key. Copy it again from the key list and tap here.".also { _status.value = it }
+        }
+        null
+    }
+
+    private fun save(ctx: Context, pid: String, t: String): String {
+        saveKey(pid, t)
+        Settings.setBool("key_catch_armed", false)
+        try { if (android.os.Build.VERSION.SDK_INT >= 28) ctx.getSystemService(ClipboardManager::class.java)?.clearPrimaryClip() } catch (_: Exception) { }
+        val name = Providers.byId(pid).name
+        _status.value = "Saved your $name key \u2713"
+        return "Got your $name key. Blaze will use it automatically."
+    }
+
     fun catchKey(ctx: Context): String? {
         if (!Settings.bool("key_catcher", true)) return null
         return try {
-            val cm = ctx.getSystemService(ClipboardManager::class.java) ?: return null
-            val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString()?.trim().orEmpty()
+            val t = clipText(ctx)
             if (t.isEmpty() || t.length > 120 || t.contains(' ')) return null
             val (pid, _) = patterns.firstOrNull { it.second.matches(t) } ?: return null
             if (Settings.keyFor(pid) == t) return null
-            saveKey(pid, t)
-            Settings.setBool("key_catch_armed", false)
-            // Clear it so it doesn't linger on the clipboard.
-            try { if (android.os.Build.VERSION.SDK_INT >= 28) cm.clearPrimaryClip() } catch (_: Exception) { }
-            val name = Providers.byId(pid).name
-            _status.value = "Saved your $name key \u2713"
-            "Got your $name key. Blaze will use it automatically."
+            save(ctx, pid, t)
         } catch (_: Exception) { null }
     }
 }

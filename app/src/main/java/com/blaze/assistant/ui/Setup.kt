@@ -118,6 +118,11 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
     val have = remember(tick, brainStatus) { Brains.connected() }
     val state = remember(tick) { needs.associate { it.id to it.ok(ctx) } }
     BackHandler(enabled = page > 0) { page-- }
+    var hadBrain by remember { mutableStateOf(have.isNotEmpty()) }
+    LaunchedEffect(have) {
+        if (page == 0 && !hadBrain && have.isNotEmpty()) { delay(1200); if (page == 0) page = 1 }
+        hadBrain = have.isNotEmpty()
+    }
     fun finish(prompt: String?) { Settings.setBool("onboarded", true); ComeBack.prefetch(ctx); onDone(prompt) }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++ }
@@ -173,10 +178,16 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                             if (!busy && !orOn) { busy = true; scope.launch { Brains.connectOpenRouter(ctx); busy = false } }
                         }
                         Spacer(Modifier.height(10.dp))
-                        SetupRow(if (gOn) "Google Gemini connected \u2713" else "Get a free Google brain", "Opens Google. Tap Create API key, then Copy, then come back. I'll grab it.", gOn) {
+                        SetupRow(if (gOn) "Google Gemini connected \u2713" else "Get a free Google brain", "Opens Google. Tap Create API key, then the copy icon, then come back here.", gOn) {
                             if (!gOn) Brains.getGoogleKey(ctx)
                         }
                         Spacer(Modifier.height(10.dp))
+                        if (!gOn && Settings.bool("key_catch_armed", false)) {
+                            Box(Modifier.fillMaxWidth().height(52.dp).background(c.accent).clickable {
+                                scope.launch { Brains.takeFromClipboard(ctx, userTapped = true) }
+                            }, contentAlignment = Alignment.Center) { Label("I copied my key \u2713  tap here", color = c.paper, size = 11.sp) }
+                            Spacer(Modifier.height(10.dp))
+                        }
                         if (brainStatus.isNotBlank()) Label(brainStatus, color = c.accent, size = 10.sp)
                         if (have.isEmpty()) {
                             Spacer(Modifier.height(10.dp))

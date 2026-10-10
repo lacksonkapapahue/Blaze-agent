@@ -32,7 +32,12 @@ object Linux {
 
     suspend fun install(): String = withContext(Dispatchers.IO) {
         if (!supported()) return@withContext "This phone's CPU isn't supported for Linux."
-        if (installing.value) return@withContext "Already installing."
+        if (installing.value) {   // another caller (e.g. the setup prefetch) is on it: wait for it instead of skipping
+            var waited = 0
+            while (installing.value && waited < 600) { kotlinx.coroutines.delay(1000); waited++ }
+            return@withContext if (installed()) "Alpine Linux $VER installed." else "Install didn't finish: ${status.value}"
+        }
+        if (installed()) return@withContext "Alpine Linux $VER is already installed."
         installing.value = true
         try {
             Terminal.setup()
@@ -49,19 +54,79 @@ object Linux {
             } }
             status.value = "Unpacking…"
             rootfs().deleteRecursively(); rootfs().mkdirs()
-            val bb = File(app.applicationInfo.nativeLibraryDir, "libbusybox.so").absolutePath
-            val p = ProcessBuilder(bb, "tar", "-xzf", tgz.absolutePath, "-C", rootfs().absolutePath).redirectErrorStream(true).start()
-            val log = p.inputStream.bufferedReader().readText(); p.waitFor()
+            val n = try { untar(tgz, rootfs()) } catch (e: Exception) {
+                tgz.delete(); status.value = "Unpacking failed: ${e.message}. Tap Install to retry."
+                return@withContext "Unpacking failed: ${e.message}"
+            }
             tgz.delete()
-            if (!File(rootfs(), "bin/busybox").exists()) return@withContext "Unpacking failed: ${log.take(300)}"
+            if (!File(rootfs(), "bin/busybox").exists()) {
+                status.value = "Unpacking failed ($n files). Tap Install to retry."
+                return@withContext "Unpacking failed: busybox missing after $n files."
+            }
             prepare()
             File(rootfs(), ".blaze_ok").writeText(VER)
             status.value = "Installed. Run: apk update && apk add python3"
             "Alpine Linux $VER installed."
         } catch (e: Exception) {
-            status.value = "Install failed: ${e.message}"
+            status.value = "Install failed: ${e.message}. Tap Install to retry."
             "Install failed: ${e.message}"
         } finally { installing.value = false }
+    }
+
+    /**
+     * Pure-Kotlin .tar.gz unpacker (files, folders, symlinks, hard links, modes). Replaces the
+     * busybox `tar` call, which could stall or die silently on some phones and left "Unpacking…".
+     */
+    private fun untar(tgz: File, dest: File): Int {
+        val root = dest.canonicalPath
+        var count = 0; var longName: String? = null; var longLink: String? = null
+        val hard = mutableListOf<Pair<File, String>>()
+        java.util.zip.GZIPInputStream(java.io.BufferedInputStream(tgz.inputStream(), 64 * 1024)).use { inp ->
+            val hdr = ByteArray(512)
+            fun readFully(b: ByteArray, len: Int): Boolean { var o = 0; while (o < len) { val r = inp.read(b, o, len - o); if (r < 0) return false; o += r }; return true }
+            fun str(o: Int, l: Int): String { var e = o; while (e < o + l && hdr[e] != 0.toByte()) e++; return String(hdr, o, e - o, Charsets.UTF_8) }
+            fun oct(o: Int, l: Int): Long = str(o, l).trim().ifEmpty { "0" }.toLong(8)
+            fun skip(n: Long) { var left = n; val b = ByteArray(8192); while (left > 0) { val r = inp.read(b, 0, minOf(b.size.toLong(), left).toInt()); if (r < 0) break; left -= r } }
+            while (true) {
+                if (!readFully(hdr, 512)) break
+                if (hdr.all { it == 0.toByte() }) break
+                val size = oct(124, 12); val type = hdr[156].toInt().toChar()
+                val padded = (size + 511) / 512 * 512
+                if (type == 'L' || type == 'K') {               // GNU long name / long link
+                    val b = ByteArray(padded.toInt()); readFully(b, padded.toInt())
+                    val v = String(b, 0, size.toInt(), Charsets.UTF_8).trimEnd('\u0000')
+                    if (type == 'L') longName = v else longLink = v; continue
+                }
+                if (type == 'x' || type == 'g') { skip(padded); continue }   // pax headers: not needed for Alpine
+                val prefix = str(345, 155)
+                var name = longName ?: (if (prefix.isNotEmpty()) "$prefix/" else "") + str(0, 100)
+                val link = longLink ?: str(157, 100)
+                longName = null; longLink = null
+                name = name.removePrefix("./").trimEnd('/')
+                val mode = (oct(100, 8) and 0xFFF).toInt()
+                if (name.isEmpty()) { skip(padded); continue }
+                val out = File(dest, name)
+                if (!out.canonicalPath.startsWith(root) && type != '2') { skip(padded); continue }
+                out.parentFile?.mkdirs()
+                when (type) {
+                    '5' -> { out.mkdirs(); runCatching { Os.chmod(out.path, mode or 0b111_000_000) } }
+                    '2' -> { runCatching { out.delete(); Os.symlink(link, out.path) } }
+                    '1' -> hard += out to link.removePrefix("./")
+                    '0', '\u0000', '7' -> {
+                        out.delete()
+                        out.outputStream().use { o -> var left = size; val b = ByteArray(64 * 1024)
+                            while (left > 0) { val r = inp.read(b, 0, minOf(b.size.toLong(), left).toInt()); if (r < 0) throw java.io.EOFException("archive cut short"); o.write(b, 0, r); left -= r } }
+                        skip(padded - size)
+                        runCatching { Os.chmod(out.path, mode or 0b110_000_000) }
+                    }
+                    else -> skip(padded)
+                }
+                count++
+                if (count % 50 == 0) status.value = "Unpacking… $count files"
+            }
+        }
+        for ((f, target) in hard) runCatching { File(dest, target).copyTo(f, overwrite = true); Os.chmod(f.path, Os.stat(File(dest, target).path).st_mode and 0xFFF) }
+        return count
     }
 
     /** DNS, hosts, a profile, and stand-ins for /proc files Android hides from apps. */

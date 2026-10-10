@@ -240,16 +240,26 @@ object Overlay {
     private var cardWatch: kotlinx.coroutines.Job? = null
 
     /**
-     * While Blaze works and you're in another app, a slim card at the top shows the step it's
-     * on with Stop. Tap it to open the panel. Hidden when Blaze is on screen or the panel is open.
+     * While Blaze works and you're in another app, a slim card pops up at the top for a few seconds
+     * (step + Stop), then hides; the notification shade keeps the progress. Tap it to open the panel.
      */
     fun watchTasks(ctx: Context) {
         if (cardWatch != null) return
         val app = ctx.applicationContext
         cardWatch = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard).launch {
+            var wasBusy = false; var wasFg = Agent.inForeground; var popUntil = 0L
             while (true) {
                 val busy = Agent.busyChats.value.isNotEmpty()
-                val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app)
+                val now = System.currentTimeMillis()
+                // Pop up briefly when a task starts (or you leave Blaze mid-task), then get out of the way.
+                // The ongoing notification keeps showing progress and Stop.
+                if (busy && (!wasBusy || (wasFg && !Agent.inForeground))) {
+                    popUntil = now + 3500
+                    if (!Agent.inForeground) com.blaze.assistant.notify.Notifier.working(Agent.lastStep())
+                }
+                if (!busy && wasBusy) popUntil = 0L
+                wasBusy = busy; wasFg = Agent.inForeground
+                val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app) && now < popUntil
                 if (want && cardView == null) showCard(app) else if (!want && cardView != null) hideCard()
                 kotlinx.coroutines.delay(400)
             }
