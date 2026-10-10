@@ -21,7 +21,7 @@ class MainActivity : FragmentActivity() {
     private val locked = mutableStateOf(false)
     private var leftAt = 0L
 
-    companion object { const val EXTRA_LISTEN = "listen" }
+    companion object { const val EXTRA_LISTEN = "listen"; const val ACTION_CALL = "com.blaze.assistant.CALL" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +38,14 @@ class MainActivity : FragmentActivity() {
             requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7)
         }
         if (savedInstanceState == null) handle(intent)
+        // Long-press the Blaze icon → "Call Blaze".
+        try {
+            val sm = getSystemService(android.content.pm.ShortcutManager::class.java)
+            sm?.dynamicShortcuts = listOf(android.content.pm.ShortcutInfo.Builder(this, "call")
+                .setShortLabel("Call Blaze").setLongLabel("Call Blaze")
+                .setIcon(android.graphics.drawable.Icon.createWithResource(this, applicationInfo.icon))
+                .setIntent(android.content.Intent(this, MainActivity::class.java).setAction(ACTION_CALL)).build())
+        } catch (_: Exception) { }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -49,6 +57,7 @@ class MainActivity : FragmentActivity() {
         i ?: return
         val listen = i.getBooleanExtra(EXTRA_LISTEN, false) ||
             i.action == android.content.Intent.ACTION_ASSIST || i.action == android.content.Intent.ACTION_VOICE_COMMAND
+        if (i.action == ACTION_CALL) { i.action = null; Voice.callRequests.value = Voice.callRequests.value + 1; return }
         if (listen) {
             i.removeExtra(EXTRA_LISTEN); i.action = null
             Voice.listenRequests.value = Voice.listenRequests.value + 1

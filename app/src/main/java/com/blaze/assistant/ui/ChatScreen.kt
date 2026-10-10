@@ -219,7 +219,7 @@ fun ChatScreen() {
     val voiceState by Voice.state.collectAsState()
     val listenReq by Voice.listenRequests.collectAsState()
     fun startVoice() {
-        Voice.listen(onText = { if (it.isNotBlank()) Agent.send(it, byVoice = true) },
+        Voice.listen(onText = { if (callWords.matches(it.trim())) Voice.callRequests.value++ else if (it.isNotBlank()) Agent.send(it, byVoice = true) },
             onError = { Toast.makeText(ctx, it, Toast.LENGTH_SHORT).show() })
     }
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
@@ -235,8 +235,21 @@ fun ChatScreen() {
     }
     LaunchedEffect(listenReq) { if (listenReq > 0 && mood == Mood.IDLE) onMic() }
 
+    // Call Blaze: full-screen voice call.
+    var inCall by remember { mutableStateOf(false) }
+    val callPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) inCall = true else Toast.makeText(ctx, "Blaze needs the microphone for calls.", Toast.LENGTH_SHORT).show()
+    }
+    fun startCall() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) inCall = true
+        else callPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+    val callReq by Voice.callRequests.collectAsState()
+    LaunchedEffect(callReq) { if (callReq > 0) startCall() }
+
     fun send(raw: String) {
         val text = raw.trim()
+        if (callWords.matches(text)) { input = TextFieldValue(""); startCall(); return }
         val cmd = CommandRunner.run(ctx, text, openSettings = { settingsPage = it }, openChats = { Agent.refreshChats(); showChats = true }, listen = { onMic() })
         if (cmd == "") { input = TextFieldValue(""); return }
         val body = cmd ?: text
@@ -253,10 +266,11 @@ fun ChatScreen() {
     var tbAll by remember { mutableStateOf<(() -> Unit)?>(null) }
     val toolbar = remember { BlazeToolbar({ r, cp, all -> tbRect = r; tbCopy = cp; tbAll = all }, { tbRect = null }) }
 
+    if (inCall) { CallScreen(onHangUp = { inCall = false }); return }
     Box(Modifier.fillMaxSize().background(c.paper)) {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            TopBar(mood, controlOn = Settings.phoneControl && a11yOn, onMenu = { drawer = true }, onNew = { Agent.clear(); quote = "" })
+            TopBar(mood, controlOn = Settings.phoneControl && a11yOn, onMenu = { drawer = true }, onNew = { Agent.clear(); quote = "" }, onCall = { startCall() })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (!hasMessages) {
                     Welcome(needsSetup = !com.blaze.assistant.agent.Brains.hasAny(), onSetup = { setupPage = 0; onboard = true }) { Agent.send(it) }
@@ -357,7 +371,7 @@ fun ChatScreen() {
 }
 
 @Composable
-private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: () -> Unit) {
+private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: () -> Unit, onCall: () -> Unit = {}) {
     val c = LocalBlaze.current
     Column(Modifier.fillMaxWidth().background(c.paper).hairlineBottom(c.hair)) {
         Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -373,6 +387,9 @@ private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: ()
             Spacer(Modifier.width(10.dp))
             Text("Blaze", modifier = Modifier.weight(1f),
                 style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, letterSpacing = (-0.015).em, color = c.ink))
+            Box(Modifier.padding(end = 8.dp).size(38.dp).hairline(c.hair).clickable(onClick = onCall), contentAlignment = Alignment.Center) {
+                PhoneGlyph(c.ink, 16.dp)
+            }
             Row(Modifier.hairline(c.hair).clickable(onClick = onNew).padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("+", style = TextStyle(fontFamily = Type.Display, fontSize = 15.sp, color = c.ink))
                 Spacer(Modifier.width(6.dp))
@@ -1009,3 +1026,7 @@ private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
         }
     }
 }
+
+
+/** "call blaze", "let's talk", "voice call"… opens the call screen. */
+private val callWords = Regex("""^(call( blaze)?|call me|let'?s talk|voice (call|chat|mode)|talk to me)[.!]?$""", RegexOption.IGNORE_CASE)

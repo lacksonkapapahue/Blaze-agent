@@ -26,6 +26,15 @@ object Voice {
     /** Set by the app (MainActivity / assistant session) to ask the chat screen to start listening. */
     val listenRequests = MutableStateFlow(0)
 
+    /** Call Blaze: a full-screen voice call. While on, replies are always spoken and the mic reopens after each one. */
+    @Volatile var inCall = false
+    @Volatile var callMuted = false
+    /** Bumped to ask the chat screen to open the call screen (launcher shortcut, "call Blaze"). */
+    val callRequests = MutableStateFlow(0)
+    /** Bumped when the caller ends the call by voice ("bye", "that's all"). */
+    val callEnded = MutableStateFlow(0)
+    fun shouldSpeak() = inCall || com.blaze.assistant.agent.Settings.speakReplies
+
     /** True when the current turn started by voice, so the reply is read aloud. */
     @Volatile var lastTurnByVoice = false
 
@@ -48,7 +57,10 @@ object Voice {
                         if (id?.startsWith("part-") == true) { if (tts?.isSpeaking != true) _state.value = State.IDLE; return }
                         _state.value = State.IDLE
                         // Hands-free: after answering a spoken question, listen again for the follow-up.
-                        if (com.blaze.assistant.agent.Settings.bool("voice_loop", true) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
+                        if (id?.startsWith("end-") == true && inCall) { callEnded.value = callEnded.value + 1; return }
+                        if (inCall && !callMuted && id?.startsWith("blaze-") == true) {
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (inCall && !callMuted) conversationListen() }, 250)
+                        } else if (com.blaze.assistant.agent.Settings.bool("voice_loop", true) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
                             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 200)
                         } else WakeWordService.resume(app)
                     }
@@ -73,6 +85,8 @@ object Voice {
         listen({ raw ->
             val t = raw.trim()
             when {
+                t.isBlank() && inCall -> { if (!callMuted) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (inCall && !callMuted) conversationListen() }, 300) }
+                endWords.matches(t) && inCall -> { lastTurnByVoice = false; speakEnd("Talk soon.") }
                 t.isBlank() -> { silentTurns++; if (silentTurns < 2) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 150) else silentTurns = 0 }
                 stopWords.matches(t) -> { silentTurns = 0; com.blaze.assistant.agent.Agent.stopAll(); com.blaze.assistant.device.Sounds.done() }
                 endWords.matches(t) -> { silentTurns = 0; lastTurnByVoice = false; speakEnd("Anytime.") }
@@ -160,6 +174,27 @@ object Voice {
         val clean = com.blaze.assistant.ui.Md.plain(text).replace(Regex("[*_`#>•]"), "").trim().take(3900)
         if (clean.isBlank()) return
         tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, "part-${System.currentTimeMillis()}")
+    }
+
+    /** Phone-call style: earpiece instead of loudspeaker. */
+    fun setEarpiece(on: Boolean) {
+        try {
+            val am = app.getSystemService(android.media.AudioManager::class.java)
+            val usage = if (on) android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION else android.media.AudioAttributes.USAGE_ASSISTANT
+            tts?.setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(usage)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            am.mode = if (on) android.media.AudioManager.MODE_IN_COMMUNICATION else android.media.AudioManager.MODE_NORMAL
+            @Suppress("DEPRECATION") am.isSpeakerphoneOn = !on
+        } catch (_: Exception) { }
+    }
+
+    /** The recognizer beeps every time it reopens; hush system sounds for the call. */
+    fun hushBeeps(on: Boolean) {
+        try {
+            val am = app.getSystemService(android.media.AudioManager::class.java)
+            val dir = if (on) android.media.AudioManager.ADJUST_MUTE else android.media.AudioManager.ADJUST_UNMUTE
+            listOf(android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.STREAM_NOTIFICATION).forEach { am.adjustStreamVolume(it, dir, 0) }
+        } catch (_: Exception) { }
     }
 
     fun stopSpeaking() {

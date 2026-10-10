@@ -135,7 +135,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
                 kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Overlay.openPanel(app, false) }; popped = true
             } else Notifier.question(question)
         }
-        if (Voice.lastTurnByVoice && Settings.speakReplies) Voice.speak(question)
+        if (Voice.lastTurnByVoice && Voice.shouldSpeak()) Voice.speak(question)
         val a = kotlinx.coroutines.withTimeoutOrNull(15 * 60_000) { d.await() }
         _question.value = null
         Notifier.clearQuestion()
@@ -592,7 +592,7 @@ When you finish, say what you did in one short sentence.
                 val id = add(Role.BLAZE, reply)
                 addMeta(id, chip)
                 history.put(JSONObject().put("role", "assistant").put("content", reply))
-                if (byVoice && Settings.speakReplies && !reply.startsWith("Going quiet")) Voice.speak(reply)
+                if (byVoice && Voice.shouldSpeak() && !reply.startsWith("Going quiet")) Voice.speak(reply)
             }
             persist()
         }
@@ -720,7 +720,7 @@ When you finish, say what you did in one short sentence.
          * is always held back for announce(), which speaks it as the final utterance.
          */
         fun speakAsItStreams(text: String) {
-            if (!(Voice.lastTurnByVoice && Settings.speakReplies && Settings.bool("speak_streaming", true))) return
+            if (!(Voice.lastTurnByVoice && Voice.shouldSpeak() && Settings.bool("speak_streaming", true))) return
             if (!text.startsWith(spokenPrefix)) return
             val ends = Regex("[.!?](\\s|$)|\n").findAll(text, spokenPrefix.length).map { it.range.first + 1 }
                 .filter { e -> text.substring(e).isNotBlank() }.toList()
@@ -1388,7 +1388,7 @@ When you finish, say what you did in one short sentence.
             if (sessions.values.none { it !== this && it.job?.isActive == true }) Notifier.doneWorking()
             val last = msgs.lastOrNull() ?: return
             if (last.role != Role.BLAZE && last.role != Role.ERROR) return
-            if (Voice.lastTurnByVoice && Settings.speakReplies) {
+            if (Voice.lastTurnByVoice && Voice.shouldSpeak()) {
                 if (streamedVoice) {
                     val rest = if (spokenPrefix.isNotEmpty() && last.text.startsWith(spokenPrefix)) last.text.substring(spokenPrefix.length) else if (spokenPrefix.isEmpty()) last.text else ""
                     Voice.speak(rest.ifBlank { " " }, queue = true)
