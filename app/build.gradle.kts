@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 36
-        versionName = "1.11.1"
+        versionCode = 37
+        versionName = "1.12.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -55,6 +55,7 @@ dependencies {
     val bom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(bom)
     implementation("androidx.core:core-ktx:1.13.1")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0") // QR scan for Blaze Desktop pairing
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.3")
     implementation("androidx.activity:activity-compose:1.9.2")

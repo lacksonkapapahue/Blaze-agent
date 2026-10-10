@@ -393,6 +393,7 @@ When you finish, say what you did in one short sentence.
             append(SelfSetup.promptLine(app))
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
+            append(com.blaze.assistant.link.DesktopLink.promptLine())
             append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillPacks.promptBlock())
         }
     }
@@ -429,6 +430,7 @@ When you finish, say what you did in one short sentence.
         Learning.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
+        if (com.blaze.assistant.link.DesktopLink.paired) t.put(com.blaze.assistant.link.DesktopLink.tool())
         com.blaze.assistant.connect.Connectors.tools().forEach { t.put(it) }
         try { com.blaze.assistant.connect.Mcp.tools().forEach { t.put(it) } } catch (_: Exception) { }
         if (Settings.phoneControl) t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "run_plan")
@@ -1119,6 +1121,11 @@ When you finish, say what you did in one short sentence.
                         "delete" -> M.find(args.optString("path"))?.let { f -> if (confirm("Delete from Gallery?", f.name, "Delete")) { M.delete(f); "Deleted ${f.name}." } else "The user did NOT approve deleting it." } ?: "Not in the gallery."
                         else -> M.list()
                     }
+                }
+                "ask_pc" -> {
+                    val L = com.blaze.assistant.link.DesktopLink
+                    add(Role.STEP, "Asking ${L.pcName}: \u201c${args.optString("task").take(60)}\u201d")
+                    L.askPc(args.optString("task"), args.optBoolean("new_conversation")) { line -> add(Role.STEP, "${L.pcName}: ${line.take(90)}") }
                 }
                 "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
                 "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }

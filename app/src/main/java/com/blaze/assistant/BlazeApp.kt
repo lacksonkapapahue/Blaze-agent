@@ -37,6 +37,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.proactive.Triggers.init(this)
         com.blaze.assistant.proactive.Proactive.start(this)
         com.blaze.assistant.ui.Overlay.watchTasks(this)
+        com.blaze.assistant.link.DesktopLink.start()
         if (Settings.bool("dash_auto", false)) com.blaze.assistant.dashboard.Dashboard.start(this)
         if (Settings.orbPinned && android.provider.Settings.canDrawOverlays(this)) com.blaze.assistant.ui.Overlay.showOrb(this)
     }
