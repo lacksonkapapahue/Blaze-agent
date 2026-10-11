@@ -150,10 +150,11 @@ fun ConnectionsPage() {
     Spacer(Modifier.height(10.dp))
     val acct by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
     LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.blaze.assistant.connect.BlazeAccount.refreshProviders(true) } }
-    Note(if (acct.connectors.values.any { it }) "Let Blaze use your accounts. Most connect in one tap: sign in in the browser and you're done. Tokens stay encrypted on this phone. Sending or posting always asks you first."
-         else "Let Blaze use your accounts. You create a free app key with each service once (steps inside); sign-in tokens stay encrypted on this phone. Sending or posting always asks you first.")
+    Note("Let Blaze use your accounts: tap Connect, approve in your browser, and you're back. Tokens stay encrypted on this phone. Sending or posting always asks you first.")
+    if (!acct.online) Note("Can't reach Blaze's sign-in service right now. Check your connection.")
     Connectors.all.forEach { conn ->
         val on = remember(tick, st) { Connectors.connected(conn.id) }
+        val one = acct.connectors[conn.id] == true
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { open = if (open == conn.id) "" else conn.id }.padding(vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(if (on) c.accent else c.weak)); Spacer(Modifier.width(12.dp))
@@ -161,31 +162,17 @@ fun ConnectionsPage() {
                 Text(conn.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = c.ink))
                 Text(st[conn.id]?.takeIf { it.isNotBlank() } ?: conn.blurb, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
             }
-            Label(if (on) "On" else "Set up", color = if (on) c.accent else c.sub, size = 10.sp)
+            Label(when { on -> "On"; one -> "Connect"; acct.online -> "Soon"; else -> "Offline" }, color = if (on) c.accent else c.sub, size = 10.sp)
         }
         if (open == conn.id) Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-            val one = acct.connectors[conn.id] == true
-            var manual by remember(conn.id) { mutableStateOf(Connectors.clientId(conn.id).isNotBlank()) }
-            if (on) Button("Disconnect", primary = false) { Connectors.disconnect(conn.id); tick++ }
-            else if (one && !manual) {
-                Note("Connect in one tap: Blaze opens ${conn.name} in your browser, you approve, and you're back here.")
-                Button("Connect ${conn.name}") { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
-                Label("Use your own key instead  ↓", color = c.accent, size = 10.sp, modifier = Modifier.padding(top = 12.dp).clickable { manual = true })
-            }
-            if (!on && (!one || manual)) {
-            Note(conn.help)
-            Label("Open setup page →", color = c.accent, size = 10.sp, modifier = Modifier.padding(bottom = 12.dp).clickable { uri.openUri(conn.setupUrl) })
-            if (conn.kind == Connectors.Kind.TOKEN) {
-                var tok by remember { mutableStateOf("") }
-                Field("Token", tok, { tok = it }, if (conn.id == "slack") "xoxp-…" else "ntn_…", secret = true)
-                Button("Save") { Connectors.saveToken(conn.id, tok); tok = ""; tick++ }
-            } else {
-                var cid by remember { mutableStateOf(Connectors.clientId(conn.id)) }
-                var sec by remember { mutableStateOf(Connectors.clientSecret(conn.id)) }
-                Field("Client ID", cid, { cid = it; Connectors.setClientId(conn.id, it) }, "Paste client ID")
-                if (conn.needsSecret) Field("Client secret", sec, { sec = it; Connectors.setClientSecret(conn.id, it) }, "Paste client secret", secret = true)
-                Button("Connect") { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
-            }
+            when {
+                on -> Button("Disconnect", primary = false) { Connectors.disconnect(conn.id); tick++ }
+                one -> {
+                    Note("Blaze opens ${conn.name} in your browser. Approve, and you're back here connected.")
+                    Button("Connect ${conn.name}") { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
+                }
+                acct.online -> Note("One-tap Connect for ${conn.name} is coming soon.")
+                else -> Note("Connect needs Blaze's sign-in service, which can't be reached right now.")
             }
         }
     }
