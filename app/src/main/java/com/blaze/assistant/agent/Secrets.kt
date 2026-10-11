@@ -18,6 +18,15 @@ object Secrets {
     private const val ALIAS = "blaze_secrets"
     private const val PREFIX = "enc1:"
 
+    /** True when this phone already has Blaze's Keystore key. False on a fresh install or a restore onto a new phone. */
+    fun hasKey(): Boolean = try {
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(ALIAS)
+    } catch (_: Exception) { true }   // can't tell: assume yes, so nothing is dropped by mistake
+
+    /** How many values this run had to keep in plain text because the Keystore failed (shown in the self-check). */
+    @Volatile var plainFallbacks = 0
+        private set
+
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
@@ -38,7 +47,12 @@ object Secrets {
             c.init(Cipher.ENCRYPT_MODE, key())
             val out = c.iv + c.doFinal(plain.toByteArray())
             PREFIX + Base64.encodeToString(out, Base64.NO_WRAP)
-        } catch (_: Exception) { plain }   // Keystore unavailable: keep working rather than lose the key.
+        } catch (e: Exception) {
+            // Keystore unavailable: keep working rather than lose the key, but say so (log + self-check).
+            plainFallbacks++
+            com.blaze.assistant.device.CrashLog.error("Secrets.encrypt fell back to plain text", e)
+            plain
+        }
     }
 
     private val cache = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -54,6 +68,18 @@ object Secrets {
         } catch (_: Exception) { "" }   // e.g. restored onto another phone
     }
 
-    /** Pref names that hold secrets. */
-    fun isSecretPref(k: String) = k.startsWith("key_") || k.startsWith("conn_tok_") || k.startsWith("mcp_tok_") || k == "mcp_config"
+    /**
+     * Pref names that hold secrets. `keys_extra_<pid>` (extra keys per provider) is a secret too; `key_rest`
+     * (which key is resting on which model) is not, and encrypting it made the resting marks unreadable.
+     */
+    fun isSecretPref(k: String) = k != "key_rest" &&
+        (k.startsWith("key_") || k.startsWith("keys_extra_") || k.startsWith("conn_tok_") || k.startsWith("mcp_tok_") || k == "mcp_config")
+
+    /** Provider id a key pref belongs to (`key_groq`, `keys_extra_groq` -> `groq`), or null. */
+    fun providerOf(k: String): String? = when {
+        k == "key_rest" -> null
+        k.startsWith("keys_extra_") -> k.removePrefix("keys_extra_").ifBlank { null }
+        k.startsWith("key_") -> k.removePrefix("key_").ifBlank { null }
+        else -> null
+    }
 }

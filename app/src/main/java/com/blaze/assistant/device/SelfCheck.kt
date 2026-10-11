@@ -29,6 +29,17 @@ object SelfCheck {
         val needsKey = pid !in setOf(com.blaze.assistant.agent.Providers.AUTO, "pollinations", com.blaze.assistant.agent.Providers.CUSTOM)
         val hasKey = !needsKey || Settings.keyFor(pid).isNotBlank()
         out += Item("API key", hasKey, if (hasKey) "Key present for ${pid}" else "No key saved for $pid (Settings → AI & model).", "settings ai")
+        val dropped = Settings.secretsDropped
+        val plain = com.blaze.assistant.agent.Secrets.plainFallbacks
+        out += Item("Saved keys", dropped == 0 && plain == 0, when {
+            plain > 0 -> "The phone's secure key store failed, so $plain key(s) were saved unencrypted this run. Restart the phone; if it keeps happening, send the crash report."
+            dropped > 0 -> "$dropped key(s) or sign-in(s) came from another phone and couldn't be read here. Sign in to your Blaze account to sync model keys back, and reconnect accounts."
+            else -> "Encrypted with this phone's Keystore" }, if (dropped > 0) "settings account" else "")
+        val http = (listOf(Settings.customBase) + com.blaze.assistant.connect.Mcp.servers.value.map { it.url })
+            .filter { it.isNotBlank() && com.blaze.assistant.connect.UrlSafety.isRiskyCleartext(it) }
+        out += Item("Unencrypted links", http.isEmpty(), if (http.isEmpty()) "No http:// servers on the open internet"
+            else "These use plain http:// over the internet, so keys and chats travel unencrypted: " +
+                http.joinToString(", ") { com.blaze.assistant.connect.UrlSafety.host(it) } + ". Switch them to https://.")
         // Internet
         val net = try {
             withTimeoutOrNull(8_000) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

@@ -27,6 +27,12 @@ object Settings {
             if (prefs.getFloat("fast_lane_min", 0.55f) < 0.5f) e.putFloat("fast_lane_min", 0.55f)
             e.apply()
         }
+        // v0.9.1: secrets restored from another phone (Android backup / device transfer) were encrypted with
+        // that phone's Keystore key, which never leaves it. They can't be read here, so drop them, and drop
+        // their key-sync stamps too so the Blaze account's copy wins instead of being overwritten with nothing.
+        dropUnreadableSecrets()
+        // v0.9.1: key_rest was wrongly treated as a secret and encrypted at start; it's only resting marks.
+        if (Secrets.isEncrypted(prefs.getString("key_rest", "") ?: "")) prefs.edit().remove("key_rest").apply()
         // v1.7: API keys and tokens move into Keystore-encrypted form (plain values still read).
         try {
             val e = prefs.edit(); var n = 0
@@ -41,6 +47,36 @@ object Settings {
         }
     }
 
+    private fun dropUnreadableSecrets() {
+        try {
+            val enc = prefs.all.filter { (k, v) -> Secrets.isSecretPref(k) && v is String && Secrets.isEncrypted(v) }.keys
+            if (enc.isEmpty() || Secrets.hasKey()) return
+            val e = prefs.edit()
+            enc.forEach { k ->
+                e.remove(k)
+                Secrets.providerOf(k)?.let { e.remove("keysync_t_$it") }
+            }
+            if ("mcp_config" in enc) e.remove("keysync_t_mcp")
+            e.putString("secrets_dropped", enc.size.toString()).putBoolean("secrets_dropped_told", false).commit()
+            com.blaze.assistant.device.CrashLog.write("Dropped ${enc.size} secrets restored from another phone")
+        } catch (_: Exception) { }
+    }
+
+    /** How many saved keys/sign-ins came from another phone and had to be dropped (0 if none). */
+    val secretsDropped: Int get() = prefs.getString("secrets_dropped", "")?.toIntOrNull() ?: 0
+
+    /** Once per restore: a heads-up saying keys and sign-ins need to come back. Call after Notifier.init. */
+    fun tellIfSecretsDropped() {
+        if (secretsDropped == 0 || prefs.getBoolean("secrets_dropped_told", true)) return
+        prefs.edit().putBoolean("secrets_dropped_told", true).apply()
+        try {
+            com.blaze.assistant.notify.Notifier.proactive(
+                "Your settings and chats came over from your old phone, but API keys and sign-ins can't move between phones. " +
+                    "Sign in to your Blaze account to sync your model keys back, then reconnect your accounts in Settings.",
+                "", false)
+        } catch (_: Exception) { }
+    }
+
     var providerId: String
         get() = prefs.getString("provider", "gemini") ?: "gemini"
         set(v) = prefs.edit().putString("provider", v).apply()
@@ -51,13 +87,14 @@ object Settings {
     fun setKeyFor(pid: String, v: String) {
         val t = v.trim()
         if (t == keyFor(pid)) return
-        prefs.edit().putString("key_$pid", Secrets.encrypt(t)).apply()
+        prefs.edit().putString("key_$pid", Secrets.encrypt(t)).remove("secrets_dropped").apply()
         com.blaze.assistant.connect.KeySync.localChange(pid)   // follows the Blaze account to the PC
     }
     /** Writes a key that came from the Blaze account (no new change stamp, no sync back). */
     fun setKeyForSynced(pid: String, v: String) {
         val t = v.trim()
-        if (t.isEmpty()) prefs.edit().remove("key_$pid").apply() else prefs.edit().putString("key_$pid", Secrets.encrypt(t)).apply()
+        if (t.isEmpty()) prefs.edit().remove("key_$pid").apply()
+        else prefs.edit().putString("key_$pid", Secrets.encrypt(t)).remove("secrets_dropped").apply()   // keys are back
     }
 
     /** Any secret pref (connector tokens etc.), stored encrypted. */
