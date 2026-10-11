@@ -25,6 +25,7 @@ class BlazeApp : Application() {
         try { com.blaze.assistant.agent.ToolStats.init(this) } catch (_: Exception) { }
         com.blaze.assistant.agent.Learning.init(this)
         com.blaze.assistant.connect.Mcp.load()
+        com.blaze.assistant.connect.BlazeAccount.start()
         com.blaze.assistant.agent.Traces.init(this)
         Agent.init(this)
         com.blaze.assistant.agent.BgAgents.init(this)
