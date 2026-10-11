@@ -46,15 +46,27 @@ object SkillPacks {
             Processes.register("skill", p.name, p.dir.name, props = JSONObject().put("about", p.description.take(160)))
     }
 
-    /** System prompt block: names and one-line descriptions only. */
-    fun promptBlock(): String {
-        val l = all(); if (l.isEmpty()) return ""
-        return "\nSKILLS (call use_skill to read one before doing a matching task): " +
-            l.take(40).joinToString("; ") { "${it.name}: ${it.description.take(120)}" }
+    /**
+     * System prompt block. With a handful of skills, names and one-line descriptions; with more,
+     * the ones that match this request in full plus the rest by name only (like Blaze Desktop).
+     * Skills switched off in Settings are left out.
+     */
+    fun promptBlock(query: String = ""): String {
+        val l = all().filter { SkillLibrary.isOn(it.dir.name) }; if (l.isEmpty()) return ""
+        fun words(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 3 }.toSet()
+        val head = "\nSKILLS (call use_skill to read one before doing a matching task): "
+        if (l.size <= 12 || query.isBlank()) return head + l.take(40).joinToString("; ") { "${it.name}: ${it.description.take(120)}" }
+        val q = words(query)
+        val hits = l.map { it to (words(it.name.replace('-', ' ') + " " + it.description) intersect q).size }
+            .filter { it.second > 0 }.sortedByDescending { it.second }.take(6).map { it.first }
+        val rest = l - hits.toSet()
+        return head + (if (hits.isNotEmpty()) hits.joinToString("; ") { "${it.name}: ${it.description.take(140)}" } + ". Also: " else "") +
+            rest.take(40).joinToString(", ") { it.name }
     }
 
     fun use(name: String): String {
         val p = find(name) ?: return "No skill \u201c$name\u201d. Installed: ${all().joinToString { it.name }.ifBlank { "none" }}."
+        if (!SkillLibrary.isOn(p.dir.name)) return "The skill ${p.name} is switched off in Settings \u203a Skill library. Do the task without it."
         val body = File(p.dir, "SKILL.md").readText()
         val files = p.dir.walkTopDown().filter { it.isFile && it.name != "SKILL.md" }.map { it.relativeTo(p.dir).path }.take(30).toList()
         return body.take(12_000) + (if (files.isNotEmpty()) "\n\nFiles in this skill (folder ~/skills/${p.dir.name}/; read with skill_file, run scripts with run_shell): ${files.joinToString()}" else "")
@@ -75,7 +87,7 @@ object SkillPacks {
         return "Skill ${p.name} saved [ID ${Processes.idFor("skill", d.name)}]."
     }
 
-    fun delete(dirName: String) { File(root(), dirName).deleteRecursively() }
+    fun delete(dirName: String) = SkillLibrary.delete(dirName)
 
     // ---------- Install ----------
 
