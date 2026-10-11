@@ -50,6 +50,42 @@ jobs:
           set -o pipefail
           ./gradlew assembleRelease --stacktrace 2>&1 | tee build.log
 
+      # Key rotation (v1.14.2+): v1/v2 stay on the old key for Android 8, v3 moves to the new key with a lineage
+      # for Android 9+. The old key keeps installed-data (so current installs update) but loses rollback,
+      # permission, shared-uid and auth, so an APK signed only with the old (public) key can't replace a rotated install.
+      # The new key lives only in Actions secrets; PR builds never see it.
+      - name: Rotate signing key
+        if: github.event_name != 'pull_request' && github.repository == 'lacksonkapapahue/Blaze-agent'
+        env:
+          NEW_P12: ${{ secrets.BLAZE_SIGNING_P12 }}
+          NEW_PASS: ${{ secrets.BLAZE_SIGNING_PASS }}
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          SIGNER="$BT/apksigner"
+          umask 077; mkdir -p "$RUNNER_TEMP/k"; K="$RUNNER_TEMP/k"
+          DRY=""
+          if [ -z "$NEW_P12" ] || [ -z "$NEW_PASS" ]; then
+            echo "::warning::BLAZE_SIGNING_P12 / BLAZE_SIGNING_PASS not set; this build stays on the old key. Dry-running the rotation with a throwaway key."
+            DRY=1; NEW_PASS=dryrunpass; export NEW_PASS
+            keytool -genkeypair -keystore "$K/new.p12" -storetype PKCS12 -alias blaze -keyalg RSA -keysize 2048 -validity 1 \
+              -dname "CN=dry" -storepass "$NEW_PASS" -keypass "$NEW_PASS" >/dev/null
+          else
+            echo "$NEW_P12" | base64 -d > "$K/new.p12"
+          fi
+          export OLD_PASS=android
+          "$SIGNER" rotate --out "$K/lineage" \
+            --old-signer --ks keystore/blaze.keystore --ks-key-alias androiddebugkey --ks-pass env:OLD_PASS --key-pass env:OLD_PASS \
+              --set-installed-data true --set-rollback false --set-permission false --set-shared-uid false --set-auth false \
+            --new-signer --ks "$K/new.p12" --ks-type PKCS12 --ks-key-alias blaze --ks-pass env:NEW_PASS --key-pass env:NEW_PASS
+          for APK in app/build/outputs/apk/release/*.apk; do
+            if [ -n "$DRY" ]; then cp "$APK" "$K/dry.apk"; APK="$K/dry.apk"; fi
+            "$SIGNER" sign --ks keystore/blaze.keystore --ks-key-alias androiddebugkey --ks-pass env:OLD_PASS --key-pass env:OLD_PASS \
+              --next-signer --ks "$K/new.p12" --ks-type PKCS12 --ks-key-alias blaze --ks-pass env:NEW_PASS --key-pass env:NEW_PASS \
+              --lineage "$K/lineage" --rotation-min-sdk-version 28 "$APK"
+            "$SIGNER" verify --print-certs -v "$APK" | grep -E "Verified using|Signer|SHA-256" | head -20
+          done
+          rm -rf "$K"
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
