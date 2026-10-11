@@ -416,11 +416,11 @@ private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: ()
         Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 20.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).background(if (controlOn) c.accent else c.weak))
             Spacer(Modifier.width(8.dp))
+            val status by Agent.status.collectAsState()
             Label(when (mood) {
-                Mood.ACTING -> "Working on your phone"
-                Mood.THINKING -> "Thinking"
                 Mood.IDLE -> if (controlOn) "Phone control on" else "Chat only"
-            }, size = 10.sp, modifier = Modifier.weight(1f))
+                else -> status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) }
+            }, size = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
             // Show what really answers: Auto, the picked model, and a separate steps model if one is set.
             val main = if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "AUTO (FREE)" else Settings.model.substringAfterLast('/').take(24)
             val steps = Settings.stepsProvider.takeIf { it.isNotBlank() && it != Settings.providerId }
@@ -541,12 +541,13 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
             }
             item(key = "working") {
                 val live by Agent.thinking.collectAsState()
+                val status by Agent.status.collectAsState()
                 AnimatedVisibility(mood != Mood.IDLE, enter = fadeIn(), exit = fadeOut()) {
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                             BrandMark(mood, 22.dp)
                             Spacer(Modifier.width(10.dp))
-                            BlinkLabel(if (mood == Mood.ACTING) "Working" else "Thinking")
+                            BlinkLabel(status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) })
                         }
                         if (live.isNotBlank() && Settings.showReasoning) ReasoningBlock(live, liveNow = true)
                     }
@@ -651,7 +652,7 @@ fun BrainGlyph(color: Color) {
 private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, followups: List<String>, onFollowup: (String) -> Unit) {
     val c = LocalBlaze.current
     when (m.role) {
-        Role.USER -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        Role.USER -> SwipeToQuote(true, onQuote = { onQuote(splitQuote(m.text).second) }) { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
             Label("You", color = c.weak, size = 10.sp)
             Spacer(Modifier.height(6.dp))
             val (quoted, body) = splitQuote(m.text)
@@ -669,10 +670,10 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             val unpictured = if (m.media.isNotEmpty()) m.files.drop(m.media.size) else m.files
             if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             Actions(m, canAct, onQuote, allowQuote = false)
-        }
+        } }
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
         else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
-        else Column(Modifier.fillMaxWidth()) {
+        else SwipeToQuote(true, onQuote = { onQuote(m.text) }) { Column(Modifier.fillMaxWidth()) {
             Label("Blaze", color = c.accent, size = 10.sp)
             if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
             Spacer(Modifier.height(6.dp))
@@ -682,7 +683,7 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             Actions(m, canAct, onQuote, allowQuote = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)
-        }
+        } }
         Role.ERROR -> Column(Modifier.fillMaxWidth()) {
             Label("Error", color = c.accent, size = 10.sp)
             Spacer(Modifier.height(6.dp))

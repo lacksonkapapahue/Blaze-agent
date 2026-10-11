@@ -87,13 +87,13 @@ fun CallScreen(onHangUp: () -> Unit) {
     }
 
     val lastReply = remember(messages) { messages.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.text.orEmpty() }
+    val agentStatus by Agent.status.collectAsState()
     val step = remember(messages) { messages.lastOrNull()?.takeIf { it.role == Role.STEP }?.text.orEmpty() }
     val status = when {
         muted -> "Muted"
         voice == Voice.State.LISTENING -> "Listening"
         voice == Voice.State.SPEAKING -> "Blaze is talking · tap to cut in"
-        mood == Mood.ACTING -> "Working on it"
-        mood == Mood.THINKING -> "Thinking"
+        mood != Mood.IDLE -> agentStatus.ifBlank { com.blaze.assistant.agent.Friendly.between(null) }
         else -> "Connecting"
     }
     val caption = when {

@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,7 +41,8 @@ import com.blaze.assistant.agent.ChatMessage
 
 /**
  * Calm steps: while Blaze works, one shimmering plain-English line ("Searching the web for …").
- * When done, "Worked for 12s · 5 steps"; tap to see each step and the exact call behind it.
+ * When done, "Worked for 12s · 5 steps"; tap to see each step in plain words. Exact calls and
+ * commands only show with Settings › "Show every step" (StepsGroup), never here.
  */
 @Composable
 fun CalmSteps(steps: List<ChatMessage>, live: Boolean, endAt: Long) {
@@ -59,7 +59,7 @@ fun CalmSteps(steps: List<ChatMessage>, live: Boolean, endAt: Long) {
                 val start = steps.first().at
                 val secs = if (start > 0 && endAt >= start) (endAt - start) / 1000 else -1
                 val head = when {
-                    live -> "Working · $count"
+                    live -> steps.last().text + " · $count"
                     secs >= 60 -> "Worked for ${secs / 60}m ${secs % 60}s · $count"
                     secs >= 1 -> "Worked for ${secs}s · $count"
                     else -> "Worked · $count"
@@ -78,10 +78,6 @@ fun CalmSteps(steps: List<ChatMessage>, live: Boolean, endAt: Long) {
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text(s.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.body))
-                            if (s.meta.isNotBlank()) SelectionContainer {
-                                Text(s.meta, maxLines = 4, overflow = TextOverflow.Ellipsis,
-                                    style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, lineHeight = 15.sp, color = c.weak))
-                            }
                         }
                     }
                 }

@@ -93,9 +93,61 @@ object Friendly {
             "ask_pc" -> "Asking your PC"
             "processes", "goal" -> "Keeping track of the task"
             "run_plan", "do_actions" -> "Working on your phone"
-            else -> name.replace('_', ' ').replaceFirstChar { it.uppercase() }
+            else -> when {
+                name.startsWith("mcp__") || name.startsWith("mcp_") -> "Using " + name.removePrefix("mcp__").removePrefix("mcp_").substringBefore("__").replace('_', ' ').ifBlank { "a connected service" }
+                name.startsWith("github_") -> "Working in GitHub"
+                name.startsWith("gmail_") -> "Working in your email"
+                name.startsWith("browser_") -> "Using the browser"
+                else -> "Working on it"
+            }
         }
         return if (s.length > 60) s.take(59) + "…" else s
+    }
+
+    // ---------- Natural status lines (never commands) ----------
+
+    private val fence = Regex("```[\\s\\S]*?(```|$)")
+    private val inline = Regex("`[^`]*`")
+    private val promptLine = Regex("(?m)^\\s*(\\$|>>>|PS>|#|>)\\s.*$")
+    private val snake = Regex("\\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\\b(\\s*\\([^)]*\\))?")
+    private val cmdish = Regex("""(?i)\b(sudo|pip3?|npm|npx|pnpm|yarn|apk|apt(-get)?|git|python3?|node|bash|sh|curl|wget|chmod|ls|cat|echo|gradlew?|mkdir|rm|cd|kotlinc|java)\s+(install|add|run|clone|push|commit|-\S+|\S*[./=]\w\S*)""")
+    private val symbols = Regex("""&&|\|\||[{}<>]|=>|==|:=|;\s|\$\(""")
+    private val url = Regex("""https?://\S+""")
+
+    /**
+     * The model's narration as one plain sentence for the status line: code, commands, tool
+     * names and links are removed; a sentence that is mostly a command is dropped. "" when
+     * nothing natural is left.
+     */
+    fun plain(text: String): String {
+        var t = fence.replace(text, " ")
+        t = promptLine.replace(t, " ")
+        t = inline.replace(t, " ")
+        t = url.replace(t, " ")
+        val sentences = t.replace(Regex("\\s+"), " ").trim().split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !cmdish.containsMatchIn(it) && !symbols.containsMatchIn(it) }
+            .map { snake.replace(it, "").replace(Regex("\\s+"), " ").replace(Regex("\\s+([,.!?:])"), "$1").trim() }
+            .filter { it.count { c -> c.isLetter() } >= 4 }
+        val first = sentences.firstOrNull() ?: return ""
+        val s = first.trimEnd(':', ',', ' ', ';', '.', '…').replace(Regex("\\s+(with|using|via|by|in|to|on|from)$", RegexOption.IGNORE_CASE), "")
+            .trimEnd(':', ',', ' ', ';', '.').replaceFirstChar { it.uppercase() }
+        if (s.count { it.isLetter() } < 4) return ""
+        return if (s.length > 80) s.take(79).trimEnd() + "…" else s
+    }
+
+    /** What Blaze is doing while the model reads the result of [lastTool] (null = the user's message). */
+    fun between(lastTool: String?): String = when {
+        lastTool == null -> "Reading your message"
+        lastTool == "web_search" -> "Going through the search results"
+        lastTool in setOf("fetch_page", "browser_read") || lastTool.startsWith("browser_") -> "Reading the page"
+        lastTool.startsWith("file_") -> "Going through the files"
+        lastTool in setOf("run_shell", "termux_run", "run_code") -> "Checking how that went"
+        lastTool in setOf("read_screen", "look_at_screen", "tap", "type_text", "scroll", "run_plan", "do_actions", "open_app") -> "Looking at the screen"
+        lastTool.startsWith("gmail_") -> "Going through your email"
+        lastTool.contains("calendar") || lastTool.startsWith("gcal_") -> "Checking your schedule"
+        lastTool.startsWith("github_") || lastTool == "git" -> "Going through the project"
+        else -> "Working out the next step"
     }
 
     /** The exact call, for the expanded view. */
