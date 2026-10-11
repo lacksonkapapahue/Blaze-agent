@@ -46,14 +46,16 @@ fun CallScreen(onHangUp: () -> Unit) {
     val messages by Agent.messages.collectAsState()
     val question by Agent.pendingQuestion.collectAsState()
     val ended by Voice.callEnded.collectAsState()
-    var muted by remember { mutableStateOf(false) }
-    var earpiece by remember { mutableStateOf(com.blaze.assistant.agent.Settings.bool("call_earpiece", false)) }
+    val muted by Voice.callMute.collectAsState()
+    val speakerOn by Voice.callSpeaker.collectAsState()
+    val earpiece = !speakerOn
+    remember { Voice.callMute.value = false; Voice.callSpeaker.value = !com.blaze.assistant.agent.Settings.bool("call_earpiece", false); 0 }
     val greet = remember { com.blaze.assistant.agent.Settings.bool("call_greet", true) }
     var seconds by remember { mutableStateOf(0) }
     val startEnded = remember { Voice.callEnded.value }
 
     fun hangUp() {
-        Voice.inCall = false; Voice.callMuted = false
+        Voice.inCall = false; Voice.callMuted = false; Voice.callMute.value = false
         Voice.cancelListening(); Voice.stopSpeaking()
         Voice.setEarpiece(false); Voice.hushBeeps(false)
         view.keepScreenOn = false
@@ -65,12 +67,14 @@ fun CallScreen(onHangUp: () -> Unit) {
         Voice.inCall = true; Voice.callMuted = false
         view.keepScreenOn = true
         Voice.hushBeeps(true)
-        if (earpiece) Voice.setEarpiece(true)
         if (greet) Voice.speak(listOf("Hey, I'm here. What's up?", "Hi! What can I do?", "Hey Luke, go ahead.").random())
         com.blaze.assistant.device.Haptics.tick(view.context)
         onDispose { if (Voice.inCall) { Voice.inCall = false; Voice.cancelListening(); Voice.stopSpeaking(); Voice.setEarpiece(false); Voice.hushBeeps(false); view.keepScreenOn = false } }
     }
     LaunchedEffect(Unit) { while (true) { delay(1000); seconds++ } }
+    // Speaker and mute can change from the buttons or from Blaze itself (call_control).
+    LaunchedEffect(speakerOn) { Voice.setEarpiece(!speakerOn) }
+    LaunchedEffect(muted) { Voice.callMuted = muted; if (muted) Voice.cancelListening() }
     LaunchedEffect(ended) { if (ended != startEnded) hangUp() }
     BackHandler { hangUp() }
 
@@ -132,8 +136,7 @@ fun CallScreen(onHangUp: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 26.dp), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
                 CallButton(if (muted) "Unmute" else "Mute", on = muted, onClick = {
-                    muted = !muted; Voice.callMuted = muted
-                    if (muted) Voice.cancelListening()
+                    Voice.callMute.value = !muted
                 }) { col -> MicSlash(col, muted) }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(76.dp).clip(CircleShape).background(Color(0xFFE5484D)).clickable { hangUp() },
@@ -142,7 +145,7 @@ fun CallScreen(onHangUp: () -> Unit) {
                     Label("End", color = c.paper.copy(alpha = 0.7f), size = 9.sp)
                 }
                 CallButton(if (earpiece) "Earpiece" else "Speaker", on = !earpiece, onClick = {
-                    earpiece = !earpiece; Voice.setEarpiece(earpiece)
+                    Voice.callSpeaker.value = earpiece
                 }) { col -> SpeakerGlyph(col, !earpiece) }
             }
         }

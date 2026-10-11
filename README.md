@@ -20,8 +20,13 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.13.0 (versionCode 39) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.14.0 (versionCode 40) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.14.0: Modes and background agents
+- Composer modes (`agent/Modes.kt`, port of desktop modes.go). **Plan** = read and look only: the tool list is filtered and every other call is refused at dispatch (`Session.runTool`), the fast lane is skipped, and git is read-only (`planGit`). **Build** = full access (default). **Auto** = confirm cards (default). **Autopilot** = ordinary confirms pass, destructive ones (delete, wipe, uninstall, money, messages and calls in the user's name) keep the card; `ask_user` shows its card for 60 s, then Blaze decides itself; a reply that only asks a question gets "decide yourself" (max 8); runs capped at `autopilot_steps` (150) and `autopilot_minutes` (45). Prefs `work_mode`, `approval`. Switches: chips above the message box (`ModeBar`, pref `mode_bar`), `/plan [goal]`, `/build`, `/autopilot`, `/auto`.
+- Background agents (`agent/BgAgents.kt`, port of desktop internal/agents + bgagents.go). Tools `start_agent`, `list_agents`, `check_agent`, `message_agent`, `cancel_agent` (core) and `/agent <task>`, `/agents`. Each agent runs in its own chat (`⚙ B1 · title`, IDs from Processes kind `agent` = B), 1 at a time (2 with 6 GB+ RAM), the rest queue. Live card in the chat (`ui/AgentCard.kt`): current step, time, steps, Steer / Stop / Open, Follow up when done. Confirms and questions from an agent are labelled with its ID. The result wakes the chat that started it (queued behind a turn in progress). State in `filesDir/bg_agents.json`; running agents resume after a restart. Agents can't start agents; an agent started in Plan stays Plan. Pref `bg_agents`.
+- Also in this build (from the unmerged v1.12.1 branch): `call_control` (speaker, mute, end, answer, decline, hold, keypad, call volume for Blaze calls and phone calls), "let's get on a call" starts a Blaze call, clipboard image paste fix, background clipboard access (`phone/ClipAccess.kt`) with get_image / set_image / history.
 
 ## v1.13.0: Calm chat
 - Plain steps: while working, one shimmering plain-English line ("Searching the web for …", `agent/Friendly.kt`); when done, "Worked for 12s · 5 steps", tap for each step and its exact call (`ui/CalmSteps.kt`). Setting "Show every step" (`show_steps`, off) brings back the full list.

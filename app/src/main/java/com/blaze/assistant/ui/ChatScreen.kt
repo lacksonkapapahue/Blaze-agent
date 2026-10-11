@@ -170,11 +170,11 @@ fun ChatScreen() {
 
     var pending by remember { mutableStateOf(listOf<Attachment>()) }
     var loadingFiles by remember { mutableStateOf(false) }
-    fun addUris(uris: List<Uri>) {
+    fun addUris(uris: List<Uri>, mimeHint: String = "") {
         if (uris.isEmpty()) return
         loadingFiles = true
         scope.launch {
-            val loaded = uris.take(5).mapNotNull { Attachments.load(ctx, it) }
+            val loaded = uris.take(5).mapNotNull { Attachments.load(ctx, it, mimeHint) }
             if (loaded.size < uris.take(5).size) Toast.makeText(ctx, "Some files couldn't be read (photos, PDFs and text work).", Toast.LENGTH_SHORT).show()
             pending = pending + loaded; loadingFiles = false
         }
@@ -203,10 +203,15 @@ fun ChatScreen() {
         onDispose { sysClip.removePrimaryClipChangedListener(l) }
     }
     fun pasteImage() {
-        val clipData = try { sysClip.primaryClip } catch (_: Exception) { null } ?: return
+        clipHasImage = false
+        val clipData = try { sysClip.primaryClip } catch (_: Exception) { null }
+        if (clipData == null) { Toast.makeText(ctx, "Android didn't let Blaze read the clipboard. Copy the image again, then paste.", Toast.LENGTH_SHORT).show(); return }
+        val d = clipData.description
+        // Some keyboards and the Samsung clipboard don't say the file type when asked, so pass on what the clip declared.
+        val hint = (0 until d.mimeTypeCount).map { d.getMimeType(it) }.firstOrNull { it.startsWith("image/") }.orEmpty()
         val uris = (0 until clipData.itemCount).mapNotNull { clipData.getItemAt(it).uri }
-        if (uris.isEmpty()) Toast.makeText(ctx, "That image can't be pasted here.", Toast.LENGTH_SHORT).show()
-        addUris(uris); clipHasImage = false
+        if (uris.isEmpty()) { Toast.makeText(ctx, "That image can't be pasted here.", Toast.LENGTH_SHORT).show(); return }
+        addUris(uris, hint)
     }
 
     var a11yOn by remember { mutableStateOf(BlazeAccessibilityService.isEnabled(ctx)) }
@@ -308,6 +313,7 @@ fun ChatScreen() {
                 Label("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
                 Label("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
             }
+            if (com.blaze.assistant.agent.Settings.bool("mode_bar", true)) ModeBar()
             InputBar(input, { input = it }, busy = mood != Mood.IDLE, voice = voiceState, hasFiles = pending.isNotEmpty(),
                 onCamera = { openCamera() },
                 onPhotos = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
@@ -654,7 +660,9 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             Actions(m, canAct, onQuote, allowQuote = false)
         }
-        Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard() else Column(Modifier.fillMaxWidth()) {
+        Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
+        else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
+        else Column(Modifier.fillMaxWidth()) {
             Label("Blaze", color = c.accent, size = 10.sp)
             if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
             Spacer(Modifier.height(6.dp))
@@ -1027,4 +1035,5 @@ private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
 
 
 /** "call blaze", "let's talk", "voice call"… opens the call screen. */
-private val callWords = Regex("""^(call( blaze)?|call me|let'?s talk|voice (call|chat|mode)|talk to me)[.!]?$""", RegexOption.IGNORE_CASE)
+// Also "let's get on a call", "can we have a call", "start a voice call with blaze". "call Sam" is NOT this.
+private val callWords = Regex("""^(?:(?:hey |ok )?(?:blaze[, ]+)?)(?:(?:can we|could we|can you|let['’]?s|lets|i want to|i wanna|wanna|please)\s+)?(?:(?:get|hop|jump|be)\s+on\s+(?:a\s+)?(?:voice\s+)?call|(?:start|have|do|make)\s+a\s+(?:voice\s+)?call|call(?:\s+(?:blaze|me))?|talk(?:\s+to\s+me)?|voice\s+(?:call|chat|mode))(?:\s+(?:with\s+(?:me|blaze|you)|blaze|now|please))*[.!?]*$""", RegexOption.IGNORE_CASE)

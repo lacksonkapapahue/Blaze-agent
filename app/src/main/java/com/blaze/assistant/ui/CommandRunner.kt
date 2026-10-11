@@ -70,6 +70,14 @@ object CommandRunner {
             "retry" -> Agent.retryLast()
             "update", "upgrade" -> com.blaze.assistant.update.Updater.start(ctx)
             "stop" -> Agent.stop()
+            "plan" -> { com.blaze.assistant.agent.Modes.setWork("plan"); Agent.note("Plan mode: I'll only read and look, then give you a plan. /build to let me act.")
+                if (arg.isNotEmpty()) return arg }
+            "build" -> { com.blaze.assistant.agent.Modes.setWork("build"); Agent.note("Build mode: full access.") }
+            "autopilot" -> { com.blaze.assistant.agent.Modes.setApproval("autopilot")
+                Agent.note("Autopilot on: I keep going without asking, up to ${com.blaze.assistant.agent.Modes.apSteps} steps or ${com.blaze.assistant.agent.Modes.apMinutes} min. Deleting, paying and messaging people still need your tap.") }
+            "auto" -> { com.blaze.assistant.agent.Modes.setApproval("auto"); Agent.note("Auto: I'll ask before risky actions.") }
+            "agent" -> if (arg.isEmpty()) toast("Type the task after /agent") else Agent.startAgentFromUser(arg)
+            "agents" -> Agent.note(com.blaze.assistant.agent.BgAgents.run("list_agents", org.json.JSONObject(), ""), asReply = true)
             "remember" -> if (arg.isNotEmpty()) { Memory.add(arg); Agent.note("Remembered: $arg") } else openSettings("memory")
             "forget" -> if (arg.isNotEmpty()) Agent.note(Memory.forget(arg)) else openSettings("memory")
             "memory" -> openSettings("memory")

@@ -44,7 +44,8 @@ object AndroidControl {
     )
 
     fun tools(): List<JSONObject> = listOf(
-        fn("clipboard", "Read or set the clipboard.", JSONObject().put("action", en("get", "set")).put("text", str()), listOf("action")),
+        fn("clipboard", "The phone's clipboard, even while Blaze is in the background. get: text on it (and whether there's an image). get_image: look at a copied picture. set: copy text. set_image: copy a file or picture (path) so the user can paste it into any app. history: recent copied text. clear.",
+            JSONObject().put("action", en("get", "get_image", "set", "set_image", "history", "clear")).put("text", str("Text to copy (set)")).put("path", str("File to copy (set_image), e.g. a Gallery file or /root/phone/chart.png")), listOf("action")),
         fn("post_notification", "Show a notification from Blaze (a reminder, a test, a progress bar). Tapping it can ask Blaze to do something.",
             JSONObject().put("title", str()).put("text", str()).put("progress", JSONObject().put("type", "integer").put("description", "0-100, optional"))
                 .put("on_tap", str("Request Blaze runs when tapped, optional")), listOf("title")),

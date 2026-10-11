@@ -27,6 +27,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.connect.Mcp.load()
         com.blaze.assistant.agent.Traces.init(this)
         Agent.init(this)
+        com.blaze.assistant.agent.BgAgents.init(this)
         com.blaze.assistant.routine.Routines.init(this)
         com.blaze.assistant.notify.Notifier.init(this)
         com.blaze.assistant.voice.Voice.init(this)

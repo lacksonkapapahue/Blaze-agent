@@ -169,6 +169,8 @@ private fun AiPage() {
     var think by remember { mutableStateOf(Settings.showReasoning) }
     var showSteps by remember { mutableStateOf(Settings.showSteps) }
     var fold by remember { mutableStateOf(Settings.foldAnswers) }
+    var bgAgents by remember { mutableStateOf(Settings.bool("bg_agents", true)) }
+    var modeBar by remember { mutableStateOf(Settings.bool("mode_bar", true)) }
     var fu by remember { mutableStateOf(Settings.followups) }
     val c = LocalBlaze.current
 
@@ -216,6 +218,8 @@ private fun AiPage() {
     Spacer(Modifier.height(10.dp))
     ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
     ToggleRow("Show every step", "List each tool call as it happens, instead of one plain line and \"Worked for 12s\"", showSteps) { showSteps = !showSteps; Settings.showSteps = showSteps }
+    ToggleRow("Background agents", "Blaze can hand long work to an agent and keep chatting (${com.blaze.assistant.agent.BgAgents.cap()} at a time on this phone)", bgAgents) { bgAgents = !bgAgents; Settings.setBool("bg_agents", bgAgents) }
+    ToggleRow("Mode switches", "Show Plan/Build and Auto/Autopilot above the message box", modeBar) { modeBar = !modeBar; Settings.setBool("mode_bar", modeBar) }
     ToggleRow("Fold long answers", "Long tables, lists, code and reports open as cards you tap to expand", fold) { fold = !fold; Settings.foldAnswers = fold }
     ToggleRow("Suggested follow-ups", "Three tap-to-send ideas under each answer", fu) { fu = !fu; Settings.followups = fu }
     FastLaneSection()

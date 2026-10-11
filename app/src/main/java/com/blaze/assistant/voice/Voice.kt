@@ -33,6 +33,9 @@ object Voice {
     val callRequests = MutableStateFlow(0)
     /** Bumped when the caller ends the call by voice ("bye", "that's all"). */
     val callEnded = MutableStateFlow(0)
+    /** Call screen state, shared so Blaze can flip it by voice ("put me on loudspeaker", "mute"). */
+    val callSpeaker = MutableStateFlow(true)
+    val callMute = MutableStateFlow(false)
     fun shouldSpeak() = inCall || com.blaze.assistant.agent.Settings.speakReplies
 
     /** True when the current turn started by voice, so the reply is read aloud. */

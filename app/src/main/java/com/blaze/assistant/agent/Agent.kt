@@ -106,12 +106,19 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
      * Ask the user to approve something risky. Shows a card in the chat and the orb panel,
      * plus a notification with Allow / Don't when Blaze isn't on screen. Times out as "no".
      */
-    suspend fun confirm(title: String, detail: String, action: String): Boolean {
-        if (Autonomy.preApproved(title, detail)) { cur.note("Standing OK: $title", false); return true }
+    suspend fun confirm(title0: String, detail: String, action: String): Boolean {
+        val tag = kotlin.coroutines.coroutineContext[BgAgents.Tag]
+        val title = if (tag != null) "${tag.id} · $title0" else title0
+        if (Autonomy.preApproved(title0, detail)) { cur.note("Standing OK: $title", false); return true }
+        // Autopilot: the user is away, so ordinary confirms pass. Destructive ones (delete, money,
+        // messages and calls in their name) still wait for their tap.
+        if (Modes.autopilot && !Modes.destructive(title0, detail)) { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
         val d = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        tag?.let { BgAgents.setWaiting(it.id, true) }
         _confirm.value = PendingConfirm(title, detail, action, d)
         if (!inForeground) Notifier.confirm(title, detail, action)
         val ok = kotlinx.coroutines.withTimeoutOrNull(120_000) { d.await() } ?: false
+        tag?.let { BgAgents.setWaiting(it.id, false) }
         _confirm.value = null
         Notifier.clearConfirm()
         cur.note(if (ok) "You approved: $title" else "Not approved: $title", false)
@@ -128,8 +135,11 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
      * Pause the task and ask the user. In Blaze it's a card in the chat; over another app the
      * orb panel pops up with the question so the task continues right where it is.
      */
-    suspend fun askUser(question: String, options: List<String>, chat: String): String = askLock.withLock {
+    suspend fun askUser(question0: String, options: List<String>, chat: String): String = askLock.withLock {
+        val tag = kotlin.coroutines.coroutineContext[BgAgents.Tag]
+        val question = if (tag != null) "${tag.id} asks: $question0" else question0
         val d = kotlinx.coroutines.CompletableDeferred<String>()
+        tag?.let { BgAgents.setWaiting(it.id, true) }
         _question.value = PendingQuestion(question, options.filter { it.isNotBlank() }.take(5), chat, d)
         var popped = false
         if (!inForeground && !overlayOpen) {
@@ -138,11 +148,14 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             } else Notifier.question(question)
         }
         if (Voice.lastTurnByVoice && Voice.shouldSpeak()) Voice.speak(question)
-        val a = kotlinx.coroutines.withTimeoutOrNull(15 * 60_000) { d.await() }
+        // Autopilot: the card stays up for a minute in case they're there, then Blaze decides itself.
+        val ap = Modes.autopilot
+        val a = kotlinx.coroutines.withTimeoutOrNull(if (ap) 60_000L else 15 * 60_000L) { d.await() }
+        tag?.let { BgAgents.setWaiting(it.id, false) }
         _question.value = null
         Notifier.clearQuestion()
         if (popped && a != null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Overlay.closePanel() }
-        a ?: "(The user didn't answer within 15 minutes. Stop and say what you need.)"
+        a ?: if (ap) Modes.AUTO_PREFIX + Modes.AUTO_REPLY else "(The user didn't answer within 15 minutes. Stop and say what you need.)"
     }
 
     fun answerQuestion(text: String) { _question.value?.answer?.complete(text) }
@@ -334,6 +347,39 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 
     fun lastStep(): String = cur.msgs.lastOrNull { it.role == Role.STEP }?.text ?: "Thinking"
 
+    // ---------- Background agents ----------
+
+    /** An agent's own chat: live if it's working, else read back from disk. */
+    fun agentSession(bg: BgAgents.Bg): Session {
+        val s = sessions[bg.chat] ?: load(bg.chat) ?: Session(bg.chat)
+        s.agentId = bg.id; s.agentPlan = bg.plan; s.ctxTag = BgAgents.Tag(bg.id)
+        s.title = "\u2699 ${bg.id} · ${bg.title}"
+        sessions[s.id] = s
+        return s
+    }
+
+    fun stopAgent(bg: BgAgents.Bg) { sessions[bg.chat]?.stop() }
+
+    /** "/agent <task>": the card goes in the open chat, and the result wakes it. */
+    fun startAgentFromUser(task: String) {
+        val s = cur
+        val bg = BgAgents.start(task, "", s.id)
+        s.add(Role.USER, "/agent $task")
+        s.history.put(JSONObject().put("role", "user").put("content", "[I handed this to background agent ${bg.id}: $task]"))
+        s.history.put(JSONObject().put("role", "assistant").put("content", "Started background agent ${bg.id}."))
+        val mid = s.add(Role.BLAZE, "Background agent ${bg.id}: ${bg.title}")
+        s.msgs = s.msgs.map { if (it.id == mid) it.copy(meta = BgAgents.CARD + bg.id) else it }
+        s.persist()
+    }
+
+    /** An agent finished: its result wakes the chat that started it (queued behind a turn in progress). */
+    fun agentFinished(bg: BgAgents.Bg) {
+        refreshChats()
+        val p = sessions[bg.parent] ?: load(bg.parent) ?: return
+        sessions[p.id] = p
+        p.wake(BgAgents.resultMessage(bg))
+    }
+
     // ---------- Prompt ----------
 
     private fun personaText(): String =
@@ -403,6 +449,9 @@ When you finish, say what you did in one short sentence.
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
             append(com.blaze.assistant.link.DesktopLink.promptLine())
+            append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
+                "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
+            if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
             append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillPacks.promptBlock())
         }
     }
@@ -440,6 +489,8 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.update.Updater.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.phone.CallControl.tool())
+        if (Settings.bool("bg_agents", true)) BgAgents.tools().forEach { t.put(it) }
         if (com.blaze.assistant.link.DesktopLink.paired) t.put(com.blaze.assistant.link.DesktopLink.tool())
         com.blaze.assistant.connect.Connectors.tools().forEach { t.put(it) }
         try { com.blaze.assistant.connect.Mcp.tools().forEach { t.put(it) } } catch (_: Exception) { }
@@ -485,6 +536,14 @@ When you finish, say what you did in one short sentence.
      * one) never stops it or sends its answer to the wrong place.
      */
     class Session(val id: String) {
+        /** Set when this chat is a background agent's (B1…). */
+        var agentId: String? = null
+        var agentPlan = false
+        var ctxTag: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext
+        /** Instructions the user (or the lead) sent while this chat works; read at the next step. */
+        val steer = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        /** Agent results waiting for the turn in progress to end. */
+        val wakes = java.util.concurrent.ConcurrentLinkedQueue<String>()
         /** Speed plan step 11: text of the current step already handed to TTS while it streamed. */
         var spokenPrefix = ""
         var streamedVoice = false
@@ -660,10 +719,11 @@ When you finish, say what you did in one short sentence.
                     if (step.isNotBlank() && step != said && Voice.state.value == Voice.State.IDLE) { said = step; Voice.say(step) }
                 }
             }
-            job = scope.launch {
+            job = scope.launch(ctxTag) {
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
-                if (attachments.isEmpty() && !routine) {
+                // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
+                if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null) {
                     mood = Mood.THINKING
                     val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
@@ -716,12 +776,26 @@ When you finish, say what you did in one short sentence.
             list.drop(userIdx + 1).forEach { historyMark.remove(it.id) }
             msgs = list.take(userIdx + 1)
             Voice.lastTurnByVoice = false
-            job = scope.launch { runLoop() }
+            job = scope.launch(ctxTag) { runLoop() }
+        }
+
+        /**
+         * A turn started by the platform, not the user (a background agent's result): it goes into
+         * the history as a hidden message and the model answers in this chat. One at a time.
+         */
+        fun wake(text: String) {
+            if (job?.isActive == true) { wakes.add(text); return }
+            history.put(JSONObject().put("role", "user").put("content", text))
+            mood = Mood.THINKING
+            Voice.lastTurnByVoice = false
+            job = scope.launch(ctxTag) { runLoop() }
         }
 
         /** Only the newest screenshot is sent as an image; older ones become a note. */
         fun requestMessages(): JSONArray {
-            val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", systemPrompt(lastUserText())))
+            val sys = systemPrompt(lastUserText()) + Modes.promptLine(agentPlan) +
+                (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine())
+            val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
             // Speed plan step 3 (sliding window): long chats send only the recent part. The cut moves
@@ -792,7 +866,10 @@ When you finish, say what you did in one short sentence.
 
         suspend fun runLoop() {
             try {
-                val allTools = tools().apply { put(ToolRouter.loadTool()) }
+                val allTools0 = tools().apply { put(ToolRouter.loadTool()) }
+                // Agents don't start or steer other agents; Plan keeps only read-only tools.
+                val allTools = Modes.filterTools(if (agentId == null) allTools0 else JSONArray().apply {
+                    for (i in 0 until allTools0.length()) allTools0.getJSONObject(i).let { t -> if (t.optJSONObject("function")?.optString("name") !in BgAgents.leadOnly) put(t) } }, agentPlan)
                 val routine = lastUserText().startsWith("[Scheduled routine")
                 // Speed plan step 1: core tools + the groups this request (and this chat) needs.
                 val groupsOn = HashSet<String>().apply {
@@ -814,8 +891,22 @@ When you finish, say what you did in one short sentence.
                 var gateLeft = 2
                 var actedThisTurn = false
                 val lastResults = ArrayList<String>()
-                for (step in 0 until MAX_STEPS) {
+                // Autopilot: a bigger step budget and a clock; normal turns keep the old cap.
+                val autopilot = Modes.autopilot && !routine
+                val maxSteps = if (autopilot) Modes.apSteps else MAX_STEPS
+                val deadline = if (autopilot) turnStart + Modes.apMinutes * 60_000L else Long.MAX_VALUE
+                var autoReplies = 0
+                for (step in 0 until maxSteps) {
                     currentStep = step + 1
+                    // Steering: what the user added while this chat worked joins before the next model call.
+                    generateSequence { steer.poll() }.toList().takeIf { it.isNotEmpty() }?.let { notes ->
+                        notes.forEach { n -> add(Role.USER, n) }
+                        history.put(JSONObject().put("role", "user").put("content", "[The user adds, while you work: ${notes.joinToString("\n")}]"))
+                    }
+                    if (System.currentTimeMillis() > deadline) {
+                        add(Role.BLAZE, "Autopilot stopped at its time budget (${Modes.apMinutes} min). Say \"continue\" to keep going.")
+                        break
+                    }
                     mood = Mood.THINKING
                     var liveId = -1L
                     spokenPrefix = ""
@@ -899,7 +990,15 @@ When you finish, say what you did in one short sentence.
                         else -> ""
                     }.trim()
 
-                    if ((calls == null || calls.length() == 0) && step < MAX_STEPS - 4 && gateLeft > 0 && !routine) {
+                    // Autopilot: a reply that just asks the user something gets "decide yourself" (at most 8 times).
+                    if ((calls == null || calls.length() == 0) && autopilot && autoReplies < 8 && step < maxSteps - 2 && Modes.asksUser(textOut)) {
+                        autoReplies++
+                        if (liveId < 0 && textOut.isNotBlank()) add(Role.BLAZE, ReplyParts.split(textOut, final = true).text)
+                        add(Role.STEP, "Autopilot: deciding myself")
+                        history.put(JSONObject().put("role", "user").put("content", Modes.AUTO_PREFIX + Modes.AUTO_REPLY))
+                        continue
+                    }
+                    if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && !routine) {
                         val nudge = when {
                             Autonomy.looksLikeRefusal(textOut) -> Autonomy.REFUSAL_NUDGE
                             actedThisTurn && Autonomy.lastFailed(lastResults) -> Autonomy.VERIFY_NUDGE
@@ -996,7 +1095,7 @@ When you finish, say what you did in one short sentence.
                             .put(JSONObject().put("type", "text").put("text", SHOT_NOTE))
                             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", url)))))
                     }
-                    if (step == MAX_STEPS - 1) add(Role.BLAZE, "I've taken a lot of steps on this one, so I'm pausing here. Tell me if you want me to keep going.")
+                    if (step == maxSteps - 1) add(Role.BLAZE, "I've taken a lot of steps on this one, so I'm pausing here. Tell me if you want me to keep going.")
                 }
             } catch (e: CancellationException) {
                 add(Role.STEP, "Stopped.")
@@ -1017,6 +1116,7 @@ When you finish, say what you did in one short sentence.
                 persist()
                 announce()
                 learnAfterTurn()
+                if (wakes.isNotEmpty()) scope.launch { job?.join(); wakes.poll()?.let { wake(it) } }
             }
         }
 
@@ -1088,6 +1188,9 @@ When you finish, say what you did in one short sentence.
 
         /** Every tool call goes through here: a crash or an empty result becomes a plain error with a fix. */
         suspend fun runTool(name: String, args: JSONObject, shots: MutableList<String>): String {
+            // Plan mode is enforced here, at dispatch, not only in the prompt.
+            Modes.block(name, args, agentPlan).takeIf { it.isNotEmpty() }?.let { add(Role.STEP, "Plan mode: skipped ${name.replace('_', ' ')}"); return it }
+            if (agentId != null && name in BgAgents.leadOnly) return "Error: background agents can't start or steer other agents. Do the work yourself."
             val r = try { runToolRaw(name, args, shots) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
@@ -1236,6 +1339,49 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, "Looking at a screenshot")
                     val shot = PhoneTools.screenshot()
                     if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
+                }
+                "start_agent" -> {
+                    val bg = BgAgents.start(args.optString("task"), args.optString("title"), id)
+                    val mid = add(Role.BLAZE, "Background agent ${bg.id}: ${bg.title}")
+                    msgs = msgs.map { if (it.id == mid) it.copy(meta = BgAgents.CARD + bg.id) else it }
+                    persist()
+                    val queued = BgAgents.get(bg.id)?.status == BgAgents.QUEUED
+                    "Started ${bg.id} \u00ab${bg.title}\u00bb${if (queued) " (queued: ${BgAgents.runningCount()} already running)" else ""}. Its card is in the chat; its result reaches you automatically. Tell the user in one short line and carry on."
+                }
+                in BgAgents.toolNames -> BgAgents.run(name, args, id)
+                "call_control" -> {
+                    add(Role.STEP, when (args.optString("action")) { "speaker" -> if (args.optBoolean("on", true)) "Loudspeaker on" else "Loudspeaker off"; "mute" -> if (args.optBoolean("on", true)) "Muting" else "Unmuting"
+                        "end" -> "Hanging up"; "answer" -> "Answering"; "decline" -> "Declining"; "start_blaze_call" -> "Starting a call"; "keypad" -> "Pressing ${args.optString("digits")}"; else -> "Call controls" })
+                    com.blaze.assistant.phone.CallControl.run(app, args)
+                }
+                "clipboard" -> {
+                    val C = com.blaze.assistant.phone.ClipAccess
+                    when (args.optString("action")) {
+                        "set" -> { add(Role.STEP, "Copying to your clipboard"); kotlinx.coroutines.withContext(Dispatchers.Main) { C.setText(app, args.optString("text")) }; "Copied to the clipboard." }
+                        "set_image" -> {
+                            val p = args.optString("path")
+                            val f = com.blaze.assistant.media.Media.find(p) ?: com.blaze.assistant.terminal.DevTools.resolve(p)
+                            if (!f.isFile) "No such file: $p" else { add(Role.STEP, "Copying ${f.name} to your clipboard"); kotlinx.coroutines.withContext(Dispatchers.Main) { C.setFile(app, f) } }
+                        }
+                        "clear" -> { kotlinx.coroutines.withContext(Dispatchers.Main) { C.clear(app) }; "Clipboard cleared." }
+                        "history" -> C.history().take(15).mapIndexed { i, t -> "${i + 1}. ${t.take(300)}" }.joinToString("\n").ifBlank { "No clipboard history yet." }
+                        "get_image" -> {
+                            add(Role.STEP, "Looking at your clipboard")
+                            val clip = C.read(app)
+                            val u = clip?.uris?.firstOrNull()
+                            if (u == null) (if (clip == null) "Couldn't read the clipboard." else "There's no image on the clipboard" + (if (clip.text.isNotEmpty()) ", only text: ${clip.text.take(500)}" else "."))
+                            else Attachments.imageUrl(app, u.first)?.let { shots += it; "The copied image is attached in the next message." } ?: "There's a file on the clipboard (${u.second.ifBlank { "unknown type" }}) but it isn't a picture I can open."
+                        }
+                        else -> {
+                            add(Role.STEP, "Reading your clipboard")
+                            val clip = C.read(app)
+                            when {
+                                clip == null -> "Couldn't read the clipboard. Turn on Blaze's accessibility service or 'draw over apps' so it can read it in the background."
+                                clip.text.isEmpty() && clip.uris.isEmpty() -> "The clipboard is empty."
+                                else -> clip.text.take(4000) + (if (clip.uris.isNotEmpty()) "\n[Also ${clip.uris.size} file(s) on the clipboard (${clip.uris.first().second.ifBlank { "file" }}). Use clipboard get_image to look at a picture.]" else "")
+                            }
+                        }
+                    }
                 }
                 in com.blaze.assistant.phone.AndroidControl.names -> {
                     add(Role.STEP, name.replace('_', ' ').replaceFirstChar { it.uppercase() })

@@ -36,7 +36,7 @@ object Processes {
     )
 
     private val prefix = mapOf("alarm" to "A", "timer" to "T", "routine" to "R", "trigger" to "G",
-        "event" to "E", "gevent" to "C", "job" to "J", "watcher" to "W", "goal" to "N", "skill" to "K")
+        "event" to "E", "gevent" to "C", "job" to "J", "watcher" to "W", "goal" to "N", "skill" to "K", "agent" to "B")
     val kinds get() = prefix.keys
 
     private lateinit var app: Context
