@@ -36,6 +36,7 @@ import com.blaze.assistant.agent.ScreenMemory
 import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.connect.Connectors
 import com.blaze.assistant.connect.Mcp
+import com.blaze.assistant.connect.McpConfig
 import com.blaze.assistant.notify.NotificationBrain
 import kotlinx.coroutines.launch
 
@@ -182,38 +183,88 @@ fun ConnectionsPage() {
 @Composable
 private fun McpSection() {
     val c = LocalBlaze.current
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val servers by Mcp.servers.collectAsState()
     val status by Mcp.status.collectAsState()
+    val toolLists by Mcp.toolLists.collectAsState()
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
     var tok by remember { mutableStateOf("") }
+    var header by remember { mutableStateOf("") }
+    var transport by remember { mutableStateOf(McpConfig.AUTO) }
+    var open by remember { mutableStateOf("") }
+    var paste by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf("") }
     Section("MCP servers")
-    Note("Add any remote MCP server (Streamable HTTP). Its tools become Blaze tools. You can also point Custom provider at a self-hosted OmniRoute (http://<your-pc>:20128/v1) for even more free routing.")
+    Note("Remote MCP servers (Streamable HTTP or SSE). Their tools become Blaze tools named mcp__server__tool. Read-only tools run; others ask first (Action tools pass in Autopilot, destructive ones always ask). Tap a server to set each tool to Ask, Always or Off. The list uses the same mcp.json shape as Blaze CLI and Desktop and syncs with your Blaze account. Local (stdio) servers need a PC.")
     if (servers.isNotEmpty()) Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         servers.forEach { s ->
-            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { open = if (open == s.name) "" else s.name }
+                .padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(s.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = if (s.enabled) c.ink else c.weak))
-                    Text(status[s.id] ?: s.url, maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
+                    Text(status[s.name] ?: if (s.enabled) "Not checked yet" else "Off", maxLines = 1,
+                        style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = if (status[s.name]?.startsWith("Error") == true) c.accent else c.sub))
+                    Text(s.url.ifBlank { "stdio" } + when (s.transport) { McpConfig.SSE -> " \u00b7 SSE"; McpConfig.HTTP -> " \u00b7 HTTP"; else -> "" },
+                        maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 10.sp, color = c.weak))
                 }
-                Box(Modifier.clickable { scope.launch { Mcp.refresh(s) } }.padding(8.dp)) { Label("Test", size = 10.sp) }
-                Box(Modifier.clickable { Mcp.toggle(s.id) }.padding(8.dp)) { Label(if (s.enabled) "On" else "Off", color = if (s.enabled) c.accent else c.weak, size = 10.sp) }
-                Box(Modifier.clickable { Mcp.remove(s.id) }.padding(10.dp)) { Label("×", size = 13.sp) }
+                if (s.remote) Box(Modifier.clickable { scope.launch { Mcp.refresh(s) } }.padding(8.dp)) { Label("Test", size = 10.sp) }
+                Box(Modifier.clickable { Mcp.toggle(s.name) }.padding(8.dp)) { Label(if (s.enabled) "On" else "Off", color = if (s.enabled) c.accent else c.weak, size = 10.sp) }
+                Box(Modifier.clickable { Mcp.remove(s.name) }.padding(10.dp)) { Label("\u00d7", size = 13.sp) }
+            }
+            if (open == s.name) {
+                val tools = toolLists[s.name]
+                if (tools == null) Text(if (s.remote) "Tap Test to list its tools." else "Runs on Blaze Desktop or CLI only.", modifier = Modifier.padding(12.dp),
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
+                else tools.forEach { t ->
+                    val mode = McpConfig.mode(s.toolModes[t.name], t.risk)
+                    Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 24.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(t.name, style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, color = if (mode == McpConfig.OFF) c.weak else c.ink))
+                            Text(when (t.risk) { McpConfig.Risk.READ -> "reads only"; McpConfig.Risk.WRITE -> "can delete or change data"; else -> "acts" }, style = TextStyle(fontFamily = Type.Sans, fontSize = 10.sp, color = c.weak))
+                        }
+                        listOf(McpConfig.ASK to "Ask", McpConfig.ALWAYS to "Always", McpConfig.OFF to "Off").forEach { (m, label) ->
+                            Box(Modifier.clickable { Mcp.setToolMode(s.name, t.name, if (m == McpConfig.defaultMode(t.risk)) "" else m) }.padding(6.dp)) {
+                                Label(label, size = 10.sp, color = if (mode == m) c.accent else c.weak)
+                            }
+                        }
+                    }
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
     }
-    Field("Name", name, { name = it }, "e.g. Zapier")
-    Field("Server URL", url, { url = it }, "https://…/mcp")
-    Field("Bearer token (optional)", tok, { tok = it }, "Optional", secret = true)
+    Field("Name", name, { name = it }, "e.g. github")
+    Field("Server URL", url, { url = it }, "https://\u2026/mcp")
+    Field("Bearer token or OAuth access token (optional)", tok, { tok = it }, "Optional", secret = true)
+    Field("Extra header (optional)", header, { header = it }, "X-Api-Key: \u2026")
+    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Label("Transport", modifier = Modifier.weight(1f))
+        listOf(McpConfig.AUTO to "Auto", McpConfig.HTTP to "HTTP", McpConfig.SSE to "SSE").forEach { (t, label) ->
+            Box(Modifier.clickable { transport = t }.padding(8.dp)) { Label(label, size = 11.sp, color = if (transport == t) c.accent else c.weak) }
+        }
+    }
     Button("Add server") {
-        if (name.isNotBlank() && url.isNotBlank()) {
-            Mcp.add(name, url, tok)
-            val s = Mcp.servers.value.lastOrNull(); name = ""; url = ""; tok = ""
+        val err = Mcp.add(name, url, tok, header, transport)
+        if (err.isNotEmpty()) msg = err else {
+            val s = Mcp.servers.value.firstOrNull { it.name == name.trim() }
+            name = ""; url = ""; tok = ""; header = ""; transport = McpConfig.AUTO; msg = ""
             if (s != null) scope.launch { Mcp.refresh(s) }
         }
     }
+    Spacer(Modifier.height(16.dp))
+    Field("Paste an mcp.json", paste, { paste = it }, "{\"mcpServers\": {\u2026}}")
+    Row(Modifier.fillMaxWidth()) {
+        Box(Modifier.weight(1f)) { Button("Import") { if (paste.isNotBlank()) { msg = Mcp.importJson(paste); paste = "" ; scope.launch { Mcp.servers.value.filter { it.enabled && it.remote }.forEach { Mcp.refresh(it) } } } } }
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.weight(1f)) { Button("Copy mcp.json", primary = false) {
+            val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("mcp.json", Mcp.exportJson()))
+            msg = "Copied. It includes tokens: paste it only somewhere private."
+        } }
+    }
+    if (msg.isNotEmpty()) Note(msg, top = 8)
 }
 
 // ---------------- Learning ----------------

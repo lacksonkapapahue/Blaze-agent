@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 48
-        versionName = "0.8.0"
+        versionCode = 49
+        versionName = "0.9.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -49,6 +49,7 @@ android {
         }
     }
     lint { checkReleaseBuilds = false; abortOnError = false }
+    testOptions { unitTests.isReturnDefaultValues = true }
 }
 
 dependencies {
@@ -69,4 +70,6 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     implementation("com.alphacephei:vosk-android:0.3.47") { exclude(group = "net.java.dev.jna") }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")   // the real org.json (android.jar only has stubs)
 }
