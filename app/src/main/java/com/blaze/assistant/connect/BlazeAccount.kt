@@ -236,7 +236,7 @@ object BlazeAccount {
      * Listen on 127.0.0.1:<random>, open the Worker's start URL, wait up to 10 minutes for the
      * redirect back with our state, then redeem the one-time code with the PKCE verifier.
      */
-    private suspend fun authorize(ctx: Context, startPath: String, scopes: String = ""): JSONObject {
+    internal suspend fun authorize(ctx: Context, startPath: String, scopes: String = ""): JSONObject {
         val verifier = b64(rand(32))
         val challenge = b64(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))
         val state = b64(rand(24))
@@ -327,6 +327,25 @@ object BlazeAccount {
         setSession(null, null)
         ""
     }
+
+    // ---------------- one-click connectors (the Worker holds the client secrets) ----------------
+
+    /** True when the Worker can connect [id] with one click. */
+    fun oneClick(id: String) = _view.value.connectors[id] == true
+
+    /** Runs the browser Connect for [id]; returns the provider tokens (access_token, refresh_token, expires_in…). */
+    suspend fun connectTokens(ctx: Context, id: String, scopes: String): JSONObject = withContext(Dispatchers.IO) {
+        val r = authorize(ctx, "/oauth/${Uri.encode(id)}/start", scopes)
+        val t = r.optJSONObject("tokens")
+        if (r.optString("kind") != "tokens" || t == null || t.optString("access_token").isBlank()) throw ApiError(502, "no_token")
+        t
+    }
+
+    /** Swaps a refresh token for new tokens through the Worker, or null when it refuses. */
+    fun refreshTokens(id: String, refreshToken: String): JSONObject? = try {
+        call("POST", "/oauth/${Uri.encode(id)}/refresh", body = JSONObject().put("refresh_token", refreshToken))
+            .optJSONObject("tokens")?.takeIf { it.optString("access_token").isNotBlank() }
+    } catch (_: Exception) { null }
 
     fun clearMessage() { _view.value = _view.value.copy(message = "") }
 
