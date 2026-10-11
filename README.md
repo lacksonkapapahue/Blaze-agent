@@ -9,132 +9,32 @@ Chat, voice ("Hey Blaze"), floating orb, and phone control through an Accessibil
 3. Release APK: `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
    Debug APK: `./gradlew assembleDebug`
 
-The release build is signed with `keystore/blaze.keystore` (config in `app/build.gradle.kts`).
-**Always use this keystore**, otherwise updates won't install over the existing app.
-Keep this repository private because it holds the signing key.
+Local builds are signed with `keystore/blaze.keystore`. That key is public (it was committed while the repo was
+private), so it is only good for local testing. Official builds are re-signed in CI with a rotated key held in GitHub
+Actions secrets (`BLAZE_SIGNING_P12`, `BLAZE_SIGNING_PASS`); see v1.14.2 in [CHANGELOG.md](CHANGELOG.md).
+Phones already on a rotated build won't accept an APK signed only with the local key.
 
 ## Layout
 - `agent/` – Agent loop, LlmClient (OpenAI-compatible), Providers, Settings, Memory, ChatStore, Secrets (Keystore encryption)
 - `phone/` – BlazeAccessibilityService (read/tap/type), PhoneTools, Skills (SMS, calls, calendar, contacts)
 - `ui/` – Compose screens (ChatScreen, SettingsSheet, Overlay orb, Theme)
-- `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
+- `connect/` – Blaze account, OAuth connectors, key sync, MCP client
+- `browser/` – built-in browser and its agent tools
+- `terminal/` – shell, Alpine Linux (proot), git, background jobs
+- `link/` – Blaze Desktop pairing
+- `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
 v0.9.0 (versionCode 49) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
-before it were numbered 1.0–1.17.0 (the history below keeps those numbers); `versionCode` keeps counting up, so phones
+before it were numbered 1.0–1.17.0 (CHANGELOG.md keeps those numbers); `versionCode` keeps counting up, so phones
 update normally. Because the name went down, CI also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
 1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
 
-## v0.9.0: MCP servers, the CLI/Desktop way
-- **Same config as Blaze CLI and Desktop.** MCP servers are kept in the `~/.blaze/mcp.json` shape, `{"mcpServers": {"name": {"url": …, "headers": {…}}}}` (optional `"type": "http" | "sse"`, `"disabled": true`), stored encrypted on the phone. Paste an mcp.json in Settings › MCP servers to import it, or copy the phone's list out. Entries the phone can't run (local `command` / stdio servers) are kept and shown as needing a PC, so a list from your PC survives the round trip.
-- **Synced through the Blaze account**: the list rides in the same encrypted `/v1/keys` blob as the model keys, as entry `mcp` (k = [mcp.json text], newest list wins). Older clients pass unknown entries through untouched.
-- **Transports**: Streamable HTTP (sessions, SSE or JSON replies, batches, session-expiry retry) and the older HTTP+SSE transport (endpoint event, replies on the stream, server pings answered). Auto tries Streamable HTTP and falls back to SSE; URLs ending in `/sse` go straight to SSE. Headers carry bearer/OAuth access tokens or API keys. Tool lists are paged (`nextCursor`).
-- **Tools named `mcp__<server>__<tool>`** (≤ 64 chars; a hash keeps long names unique). Legacy `mcp_…` names are still recognised.
-- **Desktop's approval rules**: tools that declare `readOnlyHint` run without asking (and are the only MCP tools allowed in Plan mode); other tools show the confirm card; on their default they pass in Autopilot; `destructiveHint` tools always ask. Each tool can be set to Ask, Always or Off in Settings (tap a server).
-- Servers saved by older builds (name + URL + bearer token) move into the new config automatically.
-- **Unit tests** now run in CI (`testReleaseUnitTest`): config parsing and round trip, naming, approval, SSE parsing, JSON-RPC reply matching, result flattening and the sync merge.
+## Tests
+`./gradlew testReleaseUnitTest` runs the JVM unit tests (`app/src/test`). CI runs them on every push and pull request.
 
-## v0.8.0: Learns like Desktop, chats named by topic, heads-ups you can reply to
-- **Proactive memory, the Desktop v0.7 way** (`agent/Learn.kt`, a port of Desktop's `internal/learn`). The prompt now carries the MEMORY & SKILLS rules: save lasting facts silently with their context, keep the user's certainty, replace a changed fact (`remember(fact, replaces=…)`) instead of piling up duplicates, forget every match on request, and write a skill when a method is taught or a workflow repeats.
-- **Cheaper learning.** The background review used to run after nearly every answer. A local check with no model call (`Learn.decide`) now runs first: small talk, turns that already saved, and turns with nothing durable are skipped; a skill is only proposed when the user taught a method or a 5+ step workflow repeats (workflow signatures, last 40 kept). Only related memories go into the review prompt.
-- **Safer memories.** Every auto-saved fact passes Desktop's filter (`Learn.accept`): no keys, passwords, PINs, codes or card/account numbers, nothing "only true today", no task logs. `remember` refuses secrets even when asked. Auto-written skills need a kebab name, a real description and at least 3 steps.
-- **Chats named by topic** (`agent/Titles.kt`, port of Desktop `titles.go`). After the first exchange and every 4 turns after that, one small background call titles the chat by its dominant theme (≤ 6 words) and writes the one-line summary `search_past_chats` uses. Chats you rename are never retitled. Settings › Memory & learning › *Name chats by topic*.
-- **Heads-ups you can reply to.** Tips, morning/evening briefs, routine and job alerts now land in one **Heads-ups** chat as they're posted. Replying from the notification (or tapping its suggestion) continues that chat, and the model is told every heads-up it sent since you last wrote plus the one you're answering, so "yes", "later" or "who's that?" make sense. Before, each reply opened a blank chat and the suggestion button ran in a separate hidden one. Notification replies skip the offline fast lane, which can't see that context.
-- **5 more Desktop skills**: landing-page-builder, slide-deck, web-design-blaze-classic, web-design-teamofkeys and image-assets (adapted to the phone's Alpine Linux). They make HTML you can open with `preview_server`. Bundled skills can now ship extra files (templates, starters, design tokens) listed under `files` in `assets/skills/index.json`; read them with `skill_file`. shell-sysadmin stays desktop-only.
-- **Version numbers match Desktop and CLI** (0.x); the updater compares build numbers (see Status).
-
-## v1.17.0: Catching up with Blaze Desktop and CLI
-- **Connectors are OAuth only** (like Desktop v0.5.0 / CLI v0.4.0): Google, GitHub, Spotify and Notion connect with one tap through blaze-auth. The browser signs in, the Worker swaps the code with its own client secret, and the tokens come back to a random 127.0.0.1 port through a one-time code bound to Blaze's PKCE verifier. Refreshes go through the Worker too (`/oauth/<id>/refresh`). The old manual setup (your own client ID, pasted tokens) is gone from the app; connections made that way keep working until you disconnect them. Providers the Worker hasn't switched on (Slack for now) show "coming soon".
-- **Bundled skill library** (Desktop v0.7.0, CLI v0.5.0): 13 of Desktop's skills that fit a phone ship in the app (`assets/skills`) and are seeded into `~/skills`: deep research, email drafting, planning, documents, data analysis, API integrations, skill creator, code review, debugging, git/PR, tests, refactoring and web audits. Seeding is version-aware (`~/skills/.bundled.json`): upgrades only skills you haven't edited, never brings back one you deleted.
-- **Settings › Skill library**: switch any skill off, delete it, or restore a bundled one. Switched-off skills leave the prompt and `use_skill` refuses them.
-- **Leaner skill prompt** (like Desktop/CLI): with more than 12 skills, only the ones that match the request go in with their descriptions; the rest are listed by name.
-
-## v1.16.0: Model keys follow your Blaze account
-- API keys for the model providers (Gemini, Groq, Cerebras, OpenRouter, Mistral, NVIDIA, DeepSeek, Kimi, OpenAI, Claude, Grok), extra keys included, now sync with Blaze Desktop and Blaze CLI through the Blaze account: add a key on the PC and it works here, and the other way round.
-- When: right after signing in, a few seconds after a key is added, changed or removed, and at start (at most hourly). Settings › Blaze account › **Sync keys now** shows the outcome.
-- The keys are encrypted on the phone (AES-256-GCM, AAD `blaze-keys-v1`) before upload; blaze-auth (`GET/POST /v1/keys`, Worker 0.6.0) stores only the blob. Per provider the newest change wins; keys saved before syncing existed are merged with the account's, never dropped. Not end-to-end: the service hands the blob key to signed-in sessions.
-- Connector tokens, the session and PC pairing never sync. Until the Worker with `/v1/keys` is deployed the app reports that sync isn't switched on yet and keeps keys local.
-- Code: `connect/KeySync.kt` (same format and merge rules as `internal/keystore/sync.go` in Blaze-dekstop and Blaze-cli); change stamps `keysync_t_<provider>` in settings.
-
-## v1.15.0: Blaze account (shared with Blaze Desktop)
-- New Settings › Blaze account: sign in or create an account with email + password, or Continue with Google / GitHub, using the same blaze-auth service as Blaze Desktop (`https://blaze-auth.blaze-app.workers.dev`), so one account works on both.
-- Google/GitHub sign-in runs in the browser with PKCE; the redirect comes back to a random `127.0.0.1` port and the one-time code is redeemed with the verifier. No client secret lives in the app.
-- The session token is Keystore-encrypted (`conn_tok_blaze_session`); the user's name and email are cached for the screen. The session is re-checked at start and cleared if it was signed out or deleted elsewhere.
-- Sign out (ends the session at the service too) and Delete account. Connected accounts, keys and chats on the phone stay.
-- Code: `connect/BlazeAccount.kt`, `ui/AccountPage.kt`. Set `blaze_cloud_url` to point at a local Worker for testing.
-
-## v1.14.4: Notification replies keep the conversation
-- Replying from a Blaze notification now continues the chat that sent it, even if a different chat is open, instead of landing in whichever chat was on screen.
-- Replying to a heads-up (proactive, routine or job alert) opens a new chat that starts with Blaze's message, and the model is told what it said, so the answer makes sense.
-- If that chat is still working, the reply waits for it instead of being dropped.
-
-## v1.14.3: First build on the rotated key
-- The first build signed with the new key (v3 lineage from the old key). Install it once and from then on the phone only accepts Blaze builds signed with the new key.
-
-## v1.14.2: Signing key rotation
-- The original signing key is public (it was committed when the repo was private), so CI now signs with a new key kept only in GitHub Actions secrets (`BLAZE_SIGNING_P12`, `BLAZE_SIGNING_PASS`), using APK Signature Scheme v3 key rotation.
-- Phones on older builds update normally. Once a phone is on a rotated build, Android refuses any APK signed only with the old key (the old key keeps installed-data but loses rollback, permission, shared-uid and auth).
-- Android 8 (API 26–27) can't rotate keys, so it still verifies the old key.
-- If the secrets are missing, CI stays on the old key and dry-runs the rotation with a throwaway key.
-
-## v1.14.1: Hardening for the public repo
-- Text and files shared into Blaze from other apps now wait in the message box for your Send instead of running on their own (any app can share, so it could carry instructions you didn't write).
-- `/update` works without a GitHub connection (public repo; connecting only raises GitHub's rate limit). Before installing, the download is checked: it must be Blaze, newer than the installed build, and signed by the key the installed Blaze trusts (or a newer key in its lineage).
-- CI: read-only token by default; publishing to the `apk` branch, releases and the failure issue only run on pushes to this repo's `main`, never on pull requests or forks; checkout doesn't keep the token.
-
-## v1.14.0: Modes and background agents
-- Composer modes (`agent/Modes.kt`, port of desktop modes.go). **Plan** = read and look only: the tool list is filtered and every other call is refused at dispatch (`Session.runTool`), the fast lane is skipped, and git is read-only (`planGit`). **Build** = full access (default). **Auto** = confirm cards (default). **Autopilot** = ordinary confirms pass, destructive ones (delete, wipe, uninstall, money, messages and calls in the user's name) keep the card; `ask_user` shows its card for 60 s, then Blaze decides itself; a reply that only asks a question gets "decide yourself" (max 8); runs capped at `autopilot_steps` (150) and `autopilot_minutes` (45). Prefs `work_mode`, `approval`. Switches: chips above the message box (`ModeBar`, pref `mode_bar`), `/plan [goal]`, `/build`, `/autopilot`, `/auto`.
-- Background agents (`agent/BgAgents.kt`, port of desktop internal/agents + bgagents.go). Tools `start_agent`, `list_agents`, `check_agent`, `message_agent`, `cancel_agent` (core) and `/agent <task>`, `/agents`. Each agent runs in its own chat (`⚙ B1 · title`, IDs from Processes kind `agent` = B), 1 at a time (2 with 6 GB+ RAM), the rest queue. Live card in the chat (`ui/AgentCard.kt`): current step, time, steps, Steer / Stop / Open, Follow up when done. Confirms and questions from an agent are labelled with its ID. The result wakes the chat that started it (queued behind a turn in progress). State in `filesDir/bg_agents.json`; running agents resume after a restart. Agents can't start agents; an agent started in Plan stays Plan. Pref `bg_agents`.
-- Also in this build (from the unmerged v1.12.1 branch): `call_control` (speaker, mute, end, answer, decline, hold, keypad, call volume for Blaze calls and phone calls), "let's get on a call" starts a Blaze call, clipboard image paste fix, background clipboard access (`phone/ClipAccess.kt`) with get_image / set_image / history.
-
-## v1.13.0: Calm chat
-- Plain steps: while working, one shimmering plain-English line ("Searching the web for …", `agent/Friendly.kt`); when done, "Worked for 12s · 5 steps", tap for each step and its exact call (`ui/CalmSteps.kt`). Setting "Show every step" (`show_steps`, off) brings back the full list.
-- Answer cards: long tables, lists, code and reports fold into a clipped card with a fade; tap to expand, Copy gives the Markdown. Tables now render as grids. Setting "Fold long answers" (`fold_answers`, on). `ui/AnswerCards.kt`.
-- Sun/moon button in the top bar: tap flips light/dark, long-press follows the phone again (`theme_mode`).
-- `/update` and the `update_blaze` tool: newest `Blaze-v*.apk` from the `apk` branch (GitHub connector token), Checking → Downloading N% → Installing card, PackageInstaller install, plain errors with Retry (`update/Updater.kt`, `ui/UpdateCard.kt`).
-
-## v1.12.0: Blaze Desktop pairing
-- Settings › Blaze Desktop › Scan QR code (from Blaze Desktop › Phone), or paste the pairing link. Code in `link/DesktopLink.kt`, screen in `ui/DesktopPage.kt`.
-- `ask_pc`: runs a Blaze turn on the paired computer (files, code, programs, installs); the PC's approval requests show as confirm cards here. Tool group `pc`.
-- The other way: while Blaze runs, it long-polls the PC; Blaze Desktop's `phone_ask` requests run in a "From <PC>" chat and the answer goes back. Toggle: `pc_inbox`.
-- Direct HTTPS to the PC (port 7377), pinned to the certificate fingerprint in the QR code; the token is stored encrypted (`conn_tok_pc`). Same Wi-Fi, or anywhere over Tailscale.
-
-## v1.9.15: Batch 1, dev toolkit hardening
-- `self_test` tool + Settings → Device & diagnostics → Run self-check: API key, internet, AI, terminal, Linux, git/GitHub, phone control, notifications, permissions, exact alarms, storage, voice, browser.
-- `schedule_command`: cron for shell commands (time + days, or every N min ≥ 15), no AI involved, survives reboots, notifies always / on failure / never. Listed with routines.
-- Terminal screen: session tabs (+ / ×), a read-only **Blaze** tab showing every command Blaze runs live, extra-keys row (ESC, CTRL, TAB completion, ↑↓ history, ←→, | ~ / - > & ; $ * "), Ctrl-C/D/L/Z/U.
-- `preview_server`: opens http://127.0.0.1:PORT in the built-in browser; background jobs that print a port suggest it.
-- In-app permission prompts (`device/Perms.kt` + transparent `PermissionActivity`) for location, contacts, calendar, SMS, call log.
-- `add_contact`, `edit_contact`, `move_event`, `delete_event` (each asks for approval).
-- Cleanup: `job_log` merged into `terminal_jobs id=N`; `agent/ToolGuide.kt` appends a "not for X, use Y" line to confusable tools; every tool call is guarded (crash → "Error in tool + Fix:", empty → explicit note).
-
-## Tool map (v1.9.12–1.9.14)
-- Terminal: `run_shell` (keeps cwd, `~/.blaze_env`, hints), `run_code` (python/node/sh, auto-installs), `file_read/write/edit/list/search/delete`, `job_input`, `terminal_jobs`, `terminal_stop`, `http_request`, `download_file`, `export_file`, `terminal_status`, `git` (connected GitHub), `termux_run`.
-- Phone: `get_location`, Quick Settings tile toggles for Wi-Fi/Bluetooth/airplane/mobile data/DND.
-
-## v1.9.6 (versionCode 17): process registry + steadier offline commands
-- Process registry (`Processes.kt`): every alarm, timer, routine, trigger, calendar event (phone + Google) and background job gets a short ID (A3, R4, G2, E1, C1, J1). Tools: `processes` (one line per item) and `process(id, delete|pause|resume|rename|reschedule|details)`. Details are only read when asked. Alarms carry "(Blaze A3)" in their label so they can be found and deleted.
-- Offline commands: politeness is stripped ("torch on thanks bro"), a looser one-setting rule catches "can u put the torch on" / "kill the wifi", and the fast lane's Needle 3 tools were redesigned per Cactus's guide (one tool per setting, on/off enum defaulting to on, regex triggers).
-- "speed stats" and "what's running" work instantly and offline.
-
-## v1.9.5 (versionCode 16): speed batch 1
-- Tool diet: core tools + only the tool groups a request needs (`load_tools` pulls in more). Toggle: `tool_diet`.
-- Cache-friendly system prompt: fixed text first, clock/memory/device last.
-- Sliding history window (24 msgs, moves in blocks so the cached prefix stays stable). Setting: `history_window`.
-- Free router: fastest healthy model first, Groq first on short turns, 8 s connect / 20 s first-chunk timeout.
-- Connection pre-warm when a message is sent or the panel opens.
-- Parallel lookups: several read-only tools in one step (search, fetch, mail, calendar…) run at once.
-- Streaming voice: spoken replies start on the first sentence instead of after the whole answer. Toggle: `speak_streaming`.
-- Speed readout: route chip shows "first word X s"; `blaze_self speed_stats` gives the median of the last 20 turns.
-
-## v1.7 (versionCode 8)
-- Auto (free routing): ordered chain of free models with cooldowns/health, keyless Pollinations chat fallback
-- Fast lane: on-device Cactus Needle 3 (runner bundled as libneedle.so, weights downloaded to filesDir/needle) for direct commands, works offline
-- Faster phone control: screen auto-returned after each action, settle-wait on accessibility events, do_actions batching, old screens pruned, optional steps model
-- Connections: Google (Gmail/Calendar/Drive/Contacts, PKCE loopback), GitHub (device flow), Spotify (PKCE), Notion & Slack (token), remote MCP servers, share_to_app
-- Learning: chat summaries + search_past_chats, auto memory, learned skills with task replay, approval mode, weekly curator
-- Notification brain (read/reply via notification actions, memory-only) and opt-in screen memory
-- Secrets encrypted with Android Keystore (AES-GCM)
+## Changelog
+What changed in each build: [CHANGELOG.md](CHANGELOG.md).
