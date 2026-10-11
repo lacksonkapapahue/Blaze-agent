@@ -67,7 +67,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.profileinstaller:profileinstaller:1.3.1")
-    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
     implementation("com.alphacephei:vosk-android:0.3.47") { exclude(group = "net.java.dev.jna") }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     testImplementation("junit:junit:4.13.2")
