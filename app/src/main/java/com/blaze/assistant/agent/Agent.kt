@@ -97,6 +97,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** The model's reasoning so far in the current turn (shown live under the brain). */
     private val _thinking = MutableStateFlow("")
     val thinking: StateFlow<String> = _thinking
+    /** What Blaze is doing right now, in plain words ("Searching the web for …"); "" when idle. Never a command. */
+    private val _status = MutableStateFlow("")
+    val status: StateFlow<String> = _status
 
     /** Ids of chats that are working right now (shown as a live dot in the chat list). */
     private val _busy = MutableStateFlow<Set<String>>(emptySet())
@@ -183,6 +186,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         _messages.value = s.msgs
         _mood.value = s.mood
         _thinking.value = s.thinking
+        _status.value = s.status
         Settings.lastChatId = s.id
         // Forget idle chats in the background; working ones stay until they finish.
         sessions.values.removeAll { it !== s && !it.busy }
@@ -411,7 +415,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Messages of any chat (for the dashboard). */
     fun messagesOf(id: String): List<ChatMessage>? = load(id)?.msgs
 
-    fun lastStep(): String = cur.msgs.lastOrNull { it.role == Role.STEP }?.text ?: "Thinking"
+    fun lastStep(): String = cur.status.ifBlank { cur.msgs.lastOrNull { it.role == Role.STEP }?.text ?: Friendly.between(null) }
 
     // ---------- Background agents ----------
 
@@ -641,7 +645,15 @@ When you finish, say what you did in one short sentence.
         private var _mood = Mood.IDLE
         var mood: Mood
             get() = _mood
-            set(v) { _mood = v; if (this === cur) Agent._mood.value = v; refreshBusy() }
+            set(v) {
+                _mood = v; if (this === cur) Agent._mood.value = v; refreshBusy()
+                if (v == Mood.IDLE) status = "" else if (status.isBlank()) status = Friendly.between(null)
+            }
+        private var _status = ""
+        /** The plain-words status line for this chat (see [Agent.status]). */
+        var status: String
+            get() = _status
+            set(v) { _status = v; if (this === cur) Agent._status.value = v }
         private var _thinking = ""
         var thinking: String
             get() = _thinking
@@ -666,11 +678,13 @@ When you finish, say what you did in one short sentence.
             if (role == Role.STEP && autoStepId >= 0 && msgs.lastOrNull()?.id == autoStepId) {
                 val sid = autoStepId; autoStepId = -1L
                 msgs = msgs.map { if (it.id == sid) it.copy(text = text) else it }
+                if (mood != Mood.IDLE) status = text
                 return sid
             }
             autoStepId = -1L
             val id = ids.getAndIncrement()
             msgs = msgs + ChatMessage(id, role, if (role == Role.ERROR) PlainError.of(text) else text, files)
+            if (role == Role.STEP && mood != Mood.IDLE) status = text
             if (role == Role.STEP && !inForeground && mood != Mood.IDLE) Notifier.working(if (currentStep > 0) "Step $currentStep · $text" else text)
             return id
         }
@@ -998,6 +1012,7 @@ When you finish, say what you did in one short sentence.
                         break
                     }
                     mood = Mood.THINKING
+                    status = Friendly.between(turnTools.lastOrNull())
                     var liveId = -1L
                     spokenPrefix = ""
                     val before = turnThink.toString()
@@ -1007,8 +1022,9 @@ When you finish, say what you did in one short sentence.
                         if (!(liteNow && partial.trimStart().let { it.startsWith("[") || it.startsWith("TOOLS", true) })) scope.launch {
                             val p = ReplyParts.split(partial)
                             if (p.thinking.isNotEmpty()) thinking = listOf(before, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
-                            if (p.text.isNotEmpty()) {
-                                if (liveId < 0) liveId = add(Role.BLAZE, p.text) else replace(liveId, Role.BLAZE, p.text)
+                            // A tool call the model is writing as text never flashes up as a reply.
+                            if (p.text.isNotEmpty() && !(liveId < 0 && FakeCall.callish(p.text))) {
+                                if (liveId < 0) { liveId = add(Role.BLAZE, p.text); status = "Writing the reply" } else replace(liveId, Role.BLAZE, p.text)
                                 speakAsItStreams(p.text)
                             }
                         }
@@ -1090,6 +1106,7 @@ When you finish, say what you did in one short sentence.
                     }
                     if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && !routine) {
                         val nudge = when {
+                            FakeCall.looksFake(ReplyParts.split(textOut, final = true).text, ToolCalls.names(allTools), actedThisTurn, lastUserText()) -> FakeCall.NUDGE
                             Autonomy.looksLikeRefusal(textOut) -> Autonomy.REFUSAL_NUDGE
                             actedThisTurn && Autonomy.lastFailed(lastResults) -> Autonomy.VERIFY_NUDGE
                             else -> null
@@ -1097,7 +1114,7 @@ When you finish, say what you did in one short sentence.
                         if (nudge != null) {
                             gateLeft--
                             if (liveId >= 0) msgs = msgs.filterNot { it.id == liveId }
-                            add(Role.STEP, "Trying another way")
+                            add(Role.STEP, if (nudge == FakeCall.NUDGE) "Doing it properly this time" else "Trying another way")
                             history.put(JSONObject().put("role", "user").put("content", nudge))
                             lastResults.clear()
                             continue
@@ -1118,7 +1135,7 @@ When you finish, say what you did in one short sentence.
                         break
                     }
                     // Text that came with tool calls is narration, shown as a step; its reasoning joins the turn's.
-                    val narr = ReplyParts.split(textOut)
+                    val narr = ReplyParts.split(textOut).let { it.copy(text = Friendly.plain(it.text)) }
                     if (narr.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(narr.thinking) }
                     thinking = turnThink.toString()
                     if (liveId >= 0) {

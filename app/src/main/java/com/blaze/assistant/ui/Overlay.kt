@@ -467,6 +467,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
     val mood by Agent.mood.collectAsState()
     val voice by Voice.state.collectAsState()
     val partial by Voice.partial.collectAsState()
+    val agentStatus by Agent.status.collectAsState()
     var text by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var compact by remember { mutableStateOf(Settings.bool("compact_panel", true)) }
@@ -522,8 +523,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                     Label(when {
                         voice == Voice.State.LISTENING -> "Listening"
                         voice == Voice.State.SPEAKING -> "Speaking"
-                        mood == Mood.ACTING -> "Working"
-                        mood == Mood.THINKING -> "Thinking"
+                        mood != Mood.IDLE -> agentStatus.ifBlank { com.blaze.assistant.agent.Friendly.between(null) }
                         else -> "Ready"
                     }, color = if (mood != Mood.IDLE || voice != Voice.State.IDLE) c.accent else c.sub, size = 9.sp)
                 }
