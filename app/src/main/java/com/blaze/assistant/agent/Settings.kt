@@ -48,7 +48,17 @@ object Settings {
     val provider: Provider get() = Providers.byId(providerId)
 
     fun keyFor(pid: String) = Secrets.decrypt(prefs.getString("key_$pid", "") ?: "")
-    fun setKeyFor(pid: String, v: String) = prefs.edit().putString("key_$pid", Secrets.encrypt(v.trim())).apply()
+    fun setKeyFor(pid: String, v: String) {
+        val t = v.trim()
+        if (t == keyFor(pid)) return
+        prefs.edit().putString("key_$pid", Secrets.encrypt(t)).apply()
+        com.blaze.assistant.connect.KeySync.localChange(pid)   // follows the Blaze account to the PC
+    }
+    /** Writes a key that came from the Blaze account (no new change stamp, no sync back). */
+    fun setKeyForSynced(pid: String, v: String) {
+        val t = v.trim()
+        if (t.isEmpty()) prefs.edit().remove("key_$pid").apply() else prefs.edit().putString("key_$pid", Secrets.encrypt(t)).apply()
+    }
 
     /** Any secret pref (connector tokens etc.), stored encrypted. */
     fun secret(name: String) = Secrets.decrypt(prefs.getString(name, "") ?: "")

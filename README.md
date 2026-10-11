@@ -20,14 +20,21 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.16.0 (versionCode 46) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.17.0 (versionCode 47) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
-## v1.16.0: Catching up with Blaze Desktop and CLI
+## v1.17.0: Catching up with Blaze Desktop and CLI
 - **Connectors are OAuth only** (like Desktop v0.5.0 / CLI v0.4.0): Google, GitHub, Spotify and Notion connect with one tap through blaze-auth. The browser signs in, the Worker swaps the code with its own client secret, and the tokens come back to a random 127.0.0.1 port through a one-time code bound to Blaze's PKCE verifier. Refreshes go through the Worker too (`/oauth/<id>/refresh`). The old manual setup (your own client ID, pasted tokens) is gone from the app; connections made that way keep working until you disconnect them. Providers the Worker hasn't switched on (Slack for now) show "coming soon".
 - **Bundled skill library** (Desktop v0.7.0, CLI v0.5.0): 13 of Desktop's skills that fit a phone ship in the app (`assets/skills`) and are seeded into `~/skills`: deep research, email drafting, planning, documents, data analysis, API integrations, skill creator, code review, debugging, git/PR, tests, refactoring and web audits. Seeding is version-aware (`~/skills/.bundled.json`): upgrades only skills you haven't edited, never brings back one you deleted.
 - **Settings › Skill library**: switch any skill off, delete it, or restore a bundled one. Switched-off skills leave the prompt and `use_skill` refuses them.
 - **Leaner skill prompt** (like Desktop/CLI): with more than 12 skills, only the ones that match the request go in with their descriptions; the rest are listed by name.
+
+## v1.16.0: Model keys follow your Blaze account
+- API keys for the model providers (Gemini, Groq, Cerebras, OpenRouter, Mistral, NVIDIA, DeepSeek, Kimi, OpenAI, Claude, Grok), extra keys included, now sync with Blaze Desktop and Blaze CLI through the Blaze account: add a key on the PC and it works here, and the other way round.
+- When: right after signing in, a few seconds after a key is added, changed or removed, and at start (at most hourly). Settings › Blaze account › **Sync keys now** shows the outcome.
+- The keys are encrypted on the phone (AES-256-GCM, AAD `blaze-keys-v1`) before upload; blaze-auth (`GET/POST /v1/keys`, Worker 0.6.0) stores only the blob. Per provider the newest change wins; keys saved before syncing existed are merged with the account's, never dropped. Not end-to-end: the service hands the blob key to signed-in sessions.
+- Connector tokens, the session and PC pairing never sync. Until the Worker with `/v1/keys` is deployed the app reports that sync isn't switched on yet and keeps keys local.
+- Code: `connect/KeySync.kt` (same format and merge rules as `internal/keystore/sync.go` in Blaze-dekstop and Blaze-cli); change stamps `keysync_t_<provider>` in settings.
 
 ## v1.15.0: Blaze account (shared with Blaze Desktop)
 - New Settings › Blaze account: sign in or create an account with email + password, or Continue with Google / GitHub, using the same blaze-auth service as Blaze Desktop (`https://blaze-auth.blaze-app.workers.dev`), so one account works on both.
