@@ -20,13 +20,22 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v0.8.0 (versionCode 48) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.9.0 (versionCode 49) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
 before it were numbered 1.0–1.17.0 (the history below keeps those numbers); `versionCode` keeps counting up, so phones
 update normally. Because the name went down, CI also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
 1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
+
+## v0.9.0: MCP servers, the CLI/Desktop way
+- **Same config as Blaze CLI and Desktop.** MCP servers are kept in the `~/.blaze/mcp.json` shape, `{"mcpServers": {"name": {"url": …, "headers": {…}}}}` (optional `"type": "http" | "sse"`, `"disabled": true`), stored encrypted on the phone. Paste an mcp.json in Settings › MCP servers to import it, or copy the phone's list out. Entries the phone can't run (local `command` / stdio servers) are kept and shown as needing a PC, so a list from your PC survives the round trip.
+- **Synced through the Blaze account**: the list rides in the same encrypted `/v1/keys` blob as the model keys, as entry `mcp` (k = [mcp.json text], newest list wins). Older clients pass unknown entries through untouched.
+- **Transports**: Streamable HTTP (sessions, SSE or JSON replies, batches, session-expiry retry) and the older HTTP+SSE transport (endpoint event, replies on the stream, server pings answered). Auto tries Streamable HTTP and falls back to SSE; URLs ending in `/sse` go straight to SSE. Headers carry bearer/OAuth access tokens or API keys. Tool lists are paged (`nextCursor`).
+- **Tools named `mcp__<server>__<tool>`** (≤ 64 chars; a hash keeps long names unique). Legacy `mcp_…` names are still recognised.
+- **Desktop's approval rules**: tools that declare `readOnlyHint` run without asking (and are the only MCP tools allowed in Plan mode); other tools show the confirm card; on their default they pass in Autopilot; `destructiveHint` tools always ask. Each tool can be set to Ask, Always or Off in Settings (tap a server).
+- Servers saved by older builds (name + URL + bearer token) move into the new config automatically.
+- **Unit tests** now run in CI (`testReleaseUnitTest`): config parsing and round trip, naming, approval, SSE parsing, JSON-RPC reply matching, result flattening and the sync merge.
 
 ## v0.8.0: Learns like Desktop, chats named by topic, heads-ups you can reply to
 - **Proactive memory, the Desktop v0.7 way** (`agent/Learn.kt`, a port of Desktop's `internal/learn`). The prompt now carries the MEMORY & SKILLS rules: save lasting facts silently with their context, keep the user's certainty, replace a changed fact (`remember(fact, replaces=…)`) instead of piling up duplicates, forget every match on request, and write a skill when a method is taught or a workflow repeats.

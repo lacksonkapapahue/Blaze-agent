@@ -31,6 +31,10 @@ import javax.crypto.spec.SecretKeySpec
  *  blob      = base64(nonce[12] || AES-256-GCM(plaintext, aad "blaze-keys-v1"))
  *  plaintext = {"v":1,"keys":{"gemini":{"k":["main","extra"],"t":<unix ms>}, ...}}
  *
+ * Entry "mcp" (since Android v0.9.0) carries the MCP server list instead of keys: k = [the mcp.json text,
+ * {"mcpServers": {name: {url, headers}}}], t = when it last changed here. The newer list wins as a whole.
+ * Older clients keep entries they don't know, so it passes through them untouched.
+ *
  * Per provider the newer "t" wins; an empty "k" is a deletion; keys whose age is unknown here
  * (saved before syncing existed) are merged with the account's instead of replaced. Only model
  * keys sync: connector tokens, the session and the PC pairing never leave the phone.
@@ -39,6 +43,9 @@ import javax.crypto.spec.SecretKeySpec
  */
 object KeySync {
     val SYNCED = listOf("gemini", "groq", "cerebras", "openrouter", "mistral", "nvidia", "deepseek", "moonshot", "openai", "anthropic", "xai")
+    /** Pseudo-provider for the MCP server list (see the header). */
+    const val MCP = "mcp"
+    private fun applies(p: String) = p in SYNCED || p == MCP
     private const val AAD = "blaze-keys-v1"
     private const val LAST = "keysync_last"   // unix ms of the last good sync
     private const val DEBOUNCE_MS = 8_000L    // the key field saves on every keystroke
@@ -59,7 +66,7 @@ object KeySync {
 
     /** A key was added, changed or removed on this phone: remember when, and sync shortly. */
     fun localChange(pid: String) {
-        if (pid !in SYNCED) return
+        if (!applies(pid)) return
         Settings.setStr(stampKey(pid), System.currentTimeMillis().toString())
         if (!BlazeAccount.signedIn()) return
         pending?.cancel()
@@ -87,6 +94,11 @@ object KeySync {
             val k = KeyRing.all(p); val t = stamp(p)
             if (k.isNotEmpty() || t > 0) out[p] = Entry(k, t)
         }
+        if (Mcp.hasConfig() || stamp(MCP) > 0) {
+            // A list from before syncing existed gets an age now, so it is never merged line by line.
+            if (stamp(MCP) == 0L) Settings.setStr(stampKey(MCP), System.currentTimeMillis().toString())
+            out[MCP] = Entry(listOf(Mcp.syncedText()), stamp(MCP))
+        }
         return out
     }
 
@@ -99,18 +111,18 @@ object KeySync {
             when {
                 r == null && l != null -> {
                     var e: Entry = l
-                    if (l.t == 0L) { e = Entry(l.k, now); if (p in SYNCED) apply[p] = e }
+                    if (l.t == 0L) { e = Entry(l.k, now); if (applies(p)) apply[p] = e }
                     merged[p] = e; push = true
                 }
-                l == null && r != null -> { merged[p] = r; if (r.k.isNotEmpty() && p in SYNCED) apply[p] = r }
+                l == null && r != null -> { merged[p] = r; if (r.k.isNotEmpty() && applies(p)) apply[p] = r }
                 l != null && r != null && l.t == 0L -> {
                     val u = clean(r.k + l.k)
                     val e = if (u == r.k) r else { push = true; Entry(u, now) }
-                    merged[p] = e; if (p in SYNCED) apply[p] = e
+                    merged[p] = e; if (applies(p)) apply[p] = e
                 }
                 l != null && r != null && l.t > r.t -> { merged[p] = l; push = true }
-                l != null && r != null && r.t > l.t -> { merged[p] = r; if (p in SYNCED) apply[p] = r }
-                l != null && r != null -> { merged[p] = r; if (l.k != r.k && p in SYNCED) apply[p] = r }
+                l != null && r != null && r.t > l.t -> { merged[p] = r; if (applies(p)) apply[p] = r }
+                l != null && r != null -> { merged[p] = r; if (l.k != r.k && applies(p)) apply[p] = r }
             }
         }
         return Triple(merged, apply, push)
@@ -166,6 +178,11 @@ object KeySync {
     }
 
     private fun applyEntry(pid: String, e: Entry) {
+        if (pid == MCP) {
+            Mcp.applySynced(e.k.firstOrNull { it.isNotBlank() } ?: "")
+            Settings.setStr(stampKey(pid), e.t.toString())
+            return
+        }
         val k = clean(e.k)
         Settings.setKeyForSynced(pid, k.firstOrNull() ?: "")
         KeyRing.setExtrasSynced(pid, k.drop(1))
@@ -207,7 +224,7 @@ object KeySync {
                 remote = parse(p.optJSONObject("keys"))
             }
             val (merged, toApply, push) = merge(local(), remote, System.currentTimeMillis())
-            val pulled = toApply.filter { (pid, e) -> KeyRing.all(pid) != clean(e.k) }.keys.sorted()
+            val pulled = toApply.filter { (pid, e) -> if (pid == MCP) clean(e.k).firstOrNull() != Mcp.syncedText() else KeyRing.all(pid) != clean(e.k) }.keys.sorted()
             for ((pid, e) in toApply) applyEntry(pid, e)
             if (!push) {
                 Settings.setStr(LAST, System.currentTimeMillis().toString())
@@ -228,5 +245,5 @@ object KeySync {
         return "Other devices kept changing keys; try again."
     }
 
-    private fun names(ids: List<String>) = ids.joinToString(", ") { com.blaze.assistant.agent.Providers.byId(it).name.substringBefore(" (") }
+    private fun names(ids: List<String>) = ids.joinToString(", ") { if (it == MCP) "MCP servers" else com.blaze.assistant.agent.Providers.byId(it).name.substringBefore(" (") }
 }

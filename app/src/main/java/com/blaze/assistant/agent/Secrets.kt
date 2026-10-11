@@ -55,5 +55,5 @@ object Secrets {
     }
 
     /** Pref names that hold secrets. */
-    fun isSecretPref(k: String) = k.startsWith("key_") || k.startsWith("conn_tok_") || k.startsWith("mcp_tok_")
+    fun isSecretPref(k: String) = k.startsWith("key_") || k.startsWith("conn_tok_") || k.startsWith("mcp_tok_") || k == "mcp_config"
 }

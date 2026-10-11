@@ -1307,6 +1307,26 @@ When you finish, say what you did in one short sentence.
             return out + "\n[Shown to the user in the chat and saved in their Gallery: ${names.joinToString()}. No need to export or link them.]"
         }
 
+        /**
+         * An MCP tool (mcp__<server>__<tool>) with Desktop's approval rules: read-only tools run, tools the
+         * user switched off are refused, others show the confirm card (Action tools on their default pass in
+         * Autopilot; destructive ones always ask, see McpConfig.needsApproval).
+         */
+        private suspend fun mcpCall(name: String, args: JSONObject): String {
+            val m = com.blaze.assistant.connect.Mcp
+            val t = m.find(name) ?: return "That MCP tool isn't available any more (its server is off, removed or unreachable). Use find_tool or another way."
+            val label = "${t.server.name} \u00b7 ${t.tool.name}"
+            if (t.mode == com.blaze.assistant.connect.McpConfig.OFF) return "Refused: the user turned ${t.tool.name} off in Settings \u203a MCP servers."
+            if (com.blaze.assistant.connect.McpConfig.needsApproval(t.override, t.tool.risk, Modes.autopilot)) {
+                val shown = args.toString(2).let { if (it.length > 900) it.take(900) + "\n\u2026" else it }
+                val warn = if (t.tool.risk == com.blaze.assistant.connect.McpConfig.Risk.WRITE) "This tool can delete or change data on ${t.server.name}.\n" else ""
+                if (!confirm("Allow $label?", warn + shown, "Allow"))
+                    return "The user did NOT approve ${t.tool.name}. Don't retry it; say what you were about to do and ask how they'd like to proceed."
+            }
+            add(Role.STEP, "Using $label")
+            return m.call(t, args)
+        }
+
         suspend fun runToolRaw(name: String, args: JSONObject, shots: MutableList<String>): String {
             turnTools.add(name)
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
@@ -1537,7 +1557,7 @@ When you finish, say what you did in one short sentence.
                     else PhoneTools.run(app, name, args)
                 }
                 else -> when {
-                    com.blaze.assistant.connect.Mcp.handles(name) -> { add(Role.STEP, "Using ${name.removePrefix("mcp_").substringBefore('_')}"); com.blaze.assistant.connect.Mcp.call(name, args) }
+                    com.blaze.assistant.connect.Mcp.handles(name) -> mcpCall(name, args)
                     com.blaze.assistant.connect.Connectors.handles(name) -> { add(Role.STEP, com.blaze.assistant.connect.Connectors.describe(name)); com.blaze.assistant.connect.Connectors.run(app, name, args) }
                     else -> { add(Role.STEP, PhoneTools.describe(name, args)); PhoneTools.run(app, name, args) }
                 }
