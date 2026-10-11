@@ -25,7 +25,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.9.0 (versionCode 49) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.9.1 (versionCode 50) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
