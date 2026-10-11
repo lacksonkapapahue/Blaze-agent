@@ -652,7 +652,7 @@ fun BrainGlyph(color: Color) {
 private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, followups: List<String>, onFollowup: (String) -> Unit) {
     val c = LocalBlaze.current
     when (m.role) {
-        Role.USER -> Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        Role.USER -> SwipeToQuote(true, onQuote = { onQuote(splitQuote(m.text).second) }) { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
             Label("You", color = c.weak, size = 10.sp)
             Spacer(Modifier.height(6.dp))
             val (quoted, body) = splitQuote(m.text)
@@ -670,10 +670,10 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             val unpictured = if (m.media.isNotEmpty()) m.files.drop(m.media.size) else m.files
             if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             Actions(m, canAct, onQuote, allowQuote = false)
-        }
+        } }
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
         else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
-        else Column(Modifier.fillMaxWidth()) {
+        else SwipeToQuote(true, onQuote = { onQuote(m.text) }) { Column(Modifier.fillMaxWidth()) {
             Label("Blaze", color = c.accent, size = 10.sp)
             if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
             Spacer(Modifier.height(6.dp))
@@ -683,7 +683,7 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             Actions(m, canAct, onQuote, allowQuote = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)
-        }
+        } }
         Role.ERROR -> Column(Modifier.fillMaxWidth()) {
             Label("Error", color = c.accent, size = 10.sp)
             Spacer(Modifier.height(6.dp))

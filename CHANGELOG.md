@@ -2,11 +2,12 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
-## v0.9.2: Plain words while working, no fake tool calls
+## v0.9.2: Plain words while working, no fake tool calls, swipe to reply
 - **The status says what Blaze is doing.** "Thinking" and "Working" are gone from the chat, the top bar, the floating panel and calls. In their place is one plain line: "Reading your message", "Searching the web for …", "Going through the search results", "Writing the reply". New `Agent.status` flow, set from each step and between steps (`Friendly.between`).
 - **Never a command on screen.** The model's narration is cleaned before it becomes a step (`Friendly.plain`): code blocks, `$ …` lines, inline code, tool names and links are removed, and a sentence that is mostly a command is dropped. Unknown tools read "Working on it" instead of their snake_case name. The folded steps view no longer shows the exact call under each step; that stays only with Settings › *Show every step*.
 - **Fake tool calls are sent back.** A final reply that writes a tool call or shell command as text, uses agent syntax ("Action: …"), or claims "I ran / installed / sent …" when no tool ran this turn is returned to the model once with a nudge to call the tool for real or answer in plain language (`agent/FakeCall.kt`). Shell blocks stay allowed when the user asked for code or a command.
 - **No flash of raw calls.** A reply that starts streaming as a tool call (`{"name": …`, `run_shell(`, `$ …`) is no longer shown live.
+- **Swipe right to reply, like WhatsApp.** Grab any message (yours or Blaze's) and slide it right: a reply arrow fades in, the phone ticks past the threshold, and on release the message is quoted in the composer. Works while Blaze is busy too, so you can quote something to steer it. Tables and code blocks still scroll sideways first (`ui/SwipeToQuote.kt`).
 - **Tests:** `NaturalStatusTest`.
 
 ## v0.9.1: Keys survive a phone move safely
