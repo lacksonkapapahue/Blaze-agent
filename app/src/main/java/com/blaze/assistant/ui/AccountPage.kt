@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blaze.assistant.connect.BlazeAccount
+import com.blaze.assistant.connect.KeySync
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -62,8 +63,17 @@ fun AccountPage() {
                 if (how.isNotEmpty()) Label("Signs in with " + how.joinToString(", "), color = c.weak, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
-        Note("The same account works in Blaze Desktop. Your connected accounts and API keys stay on this phone.", top = 12)
+        Note("The same account works in Blaze Desktop and Blaze CLI. Your model API keys follow it, encrypted, so a key added on your PC works here and the other way round. Connected accounts stay on this phone.", top = 12)
         if (v.message.isNotEmpty()) Note(v.message)
+        val keyStatus by KeySync.status.collectAsState()
+        var syncing by remember { mutableStateOf(false) }
+        AccountButton(if (syncing) "Syncing keys…" else "Sync keys now", primary = false) {
+            if (syncing) return@AccountButton
+            syncing = true
+            scope.launch { KeySync.sync(); syncing = false }
+        }
+        if (keyStatus.isNotEmpty()) Note(keyStatus, top = 8)
+        Spacer(Modifier.height(8.dp))
         AccountButton("Sign out", primary = false) { scope.launch { BlazeAccount.signOut() } }
         Spacer(Modifier.height(24.dp))
         var confirm by remember { mutableStateOf(false) }

@@ -70,13 +70,15 @@ object BlazeAccount {
         .takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: DEFAULT_BASE
 
     fun signedIn() = _view.value.user != null
+    /** The session token (Keystore-encrypted at rest), "" when signed out. */
+    internal fun sessionToken(): String = Settings.secret(SESSION)
     fun user() = _view.value.user
 
     /** Call once at app start: shows the cached user straight away, then checks the session and providers. */
     fun start() {
         val cached = Settings.str(USER).takeIf { it.isNotBlank() }?.let { runCatching { User.from(JSONObject(it)) }.getOrNull() }
         _view.value = _view.value.copy(user = cached)
-        scope.launch { refreshProviders(true); checkSession() }
+        scope.launch { refreshProviders(true); checkSession(); KeySync.syncIfStale() }
     }
 
     // ---------------- errors ----------------
@@ -164,8 +166,10 @@ object BlazeAccount {
             _view.value = _view.value.copy(user = null)
             return
         }
+        val fresh = Settings.secret(SESSION) != token
         Settings.setSecret(SESSION, token); Settings.setStr(USER, user.json().toString())
         _view.value = _view.value.copy(user = user)
+        if (fresh) KeySync.syncSoon()   // just signed in: bring this account's model keys here, and ours there
     }
 
     private fun takeSession(o: JSONObject) {
