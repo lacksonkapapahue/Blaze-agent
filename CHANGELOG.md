@@ -2,6 +2,13 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.9.1: Keys survive a phone move safely
+- **Restored keys no longer fail silently.** API keys and sign-ins are encrypted with a Keystore key that never leaves the phone, so after an Android backup restore or device transfer they decrypted to nothing. At start Blaze now spots secrets from another phone, drops them along with their key-sync stamps (so the Blaze account's copy wins instead of being overwritten with nothing), and posts one heads-up: sign in to the Blaze account to sync model keys back, then reconnect accounts.
+- **Encryption fallbacks are visible.** If the Keystore fails, `Secrets.encrypt` still keeps the key, but now logs it, and the self-check reports it under *Saved keys*.
+- **Unencrypted links flagged.** Plain HTTP stays allowed for the on-device runner, OAuth loopback and gateways or MCP servers on your own network. The new self-check item *Unencrypted links* (`connect/UrlSafety.kt`) flags a custom model URL or MCP server on `http://` with a public host.
+- **Fixes:** `key_rest` (resting marks) was treated as a secret and encrypted at every start, so the marks were lost on restart. `keys_extra_<pid>` (extra keys) wasn't treated as a secret, so Backup › Export wrote them as blobs no other phone could read.
+- **Tests:** `UrlSafetyTest`, `SecretsPrefTest`.
+
 ## v0.9.0: MCP servers, the CLI/Desktop way
 - **Same config as Blaze CLI and Desktop.** MCP servers are kept in the `~/.blaze/mcp.json` shape, `{"mcpServers": {"name": {"url": …, "headers": {…}}}}` (optional `"type": "http" | "sse"`, `"disabled": true`), stored encrypted on the phone. Paste an mcp.json in Settings › MCP servers to import it, or copy the phone's list out. Entries the phone can't run (local `command` / stdio servers) are kept and shown as needing a PC, so a list from your PC survives the round trip.
 - **Synced through the Blaze account**: the list rides in the same encrypted `/v1/keys` blob as the model keys, as entry `mcp` (k = [mcp.json text], newest list wins). Older clients pass unknown entries through untouched.
