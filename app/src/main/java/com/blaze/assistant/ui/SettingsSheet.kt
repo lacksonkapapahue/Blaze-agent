@@ -73,6 +73,7 @@ val settingsPages = listOf(
     SettingsPage("persona", "Personality", "How Blaze talks"),
     SettingsPage("control", "Phone control", "Accessibility, skills, permissions"),
     SettingsPage("commands", "Slash commands", "Your own /commands and prompt skills"),
+    SettingsPage("skills", "Skill library", "Research, email, plans, docs, code: on, off, restore"),
     SettingsPage("voice", "Voice & wake word", "Hey Blaze, spoken replies, default assistant"),
     SettingsPage("orb", "Floating orb", "Keep Blaze over other apps"),
     SettingsPage("routines", "Routines", "Things Blaze does on a schedule"),
@@ -143,6 +144,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "persona" -> PersonaSection()
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)
                 "commands" -> CommandsSection()
+                "skills" -> SkillLibraryPage()
                 "voice" -> { VoiceSection(); VoiceTuning(); VoiceExtras() }
                 "orb" -> OrbSection()
                 "routines" -> RoutinesSection()
