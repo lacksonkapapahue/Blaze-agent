@@ -1,0 +1,59 @@
+name: Backfill releases
+
+# One-off: rebuilds each past version from its own commit (same keystore) and publishes it as a
+# GitHub release with its APK. Run from the Actions tab or the API; existing releases are skipped.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        sha: ["50abf947446ba10063dc99e0a1d7611f28ec6207","d82ae06da38123f72fb8ad015be9c0f7ff3daabf","a534947814bf654cbc7fbce92b3c21cfe3985f27","9d4beb2b2cca139a07cec3ca031d7f90d3525a57","13e08fa0db25c1fd9f1ef6bcab4cc11fedd2f6fc","1861807dda3491502ffb4e75ca32b4c822784587","30d08c058fca3b41c685139be46ad7b2fa693e40","7194692022ae096636d1de24f3e876acd0860db2","bae51a10258b2e44a8162a724b80a3b81e2772e7","9583e569fe1c9d656a9bf66b3e4806f1ebb52828","ae5dd0bf7cdf22e36d110eb0586e408497b29cbb","49588533ece487eb28c9f7bb3bd487b03afae935","c3ac3d09dbf08cc5eeb5480c9426e1f32688d0a3","809668508f7e2cc7fad336708246e1107cdfd7f8","d8132e82fd638cda5c6ccbb7d15342a01321989c","2cbc845cb875666af0cb710745432091bcc6c149","88e4044e51191f2128e34abc35c483c60cc8b223","61750b3c09bfcf0c6b41bb3e83e86fa0d11c7e15","55e42da8170b65348b0adb10adb2261481e08a7b","3f7908483c85b3aa45f60e9d96dd36a544fd61d3","d6426cdb0b58670e8231bcd0b09e7626dbdb0c09","42aab61901393ac14a7f3ee7b10bdba9c15865e2","b780d77454d8cb5c8751cba02fed5d2776a091ac","d2b2608fff1167db064daad775a633e6c9f69923","7731da1e28263257c3055a014d943509343eced2","d569b4a535e6c4ec674bcf653d1a1f7c9d4d7184","945cd44844648e712e6eb85d71af77da15631cfe"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          fetch-depth: 1
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Version
+        id: v
+        run: echo "ver=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)" >> $GITHUB_OUTPUT
+
+      - name: Skip if released
+        id: have
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.v.outputs.ver }}" --repo ${{ github.repository }} >/dev/null 2>&1; then echo "skip=1" >> $GITHUB_OUTPUT; fi
+
+      - name: Build release APK
+        if: steps.have.outputs.skip != '1'
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Publish release
+        if: steps.have.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=${{ steps.v.outputs.ver }}
+          cp "$(ls app/build/outputs/apk/release/*.apk | head -1)" "Blaze-v$VER.apk"
+          gh release create "v$VER" "Blaze-v$VER.apk" --repo ${{ github.repository }} --target ${{ matrix.sha }} \
+            --title "Blaze v$VER" --notes "$(git log -1 --format=%s)" --latest=false

@@ -63,6 +63,20 @@ jobs:
           echo "$VER ${{ github.sha }}" > LATEST
           git add -A && git commit -qm "Blaze v$VER (${{ github.sha }})" && git push -q origin apk --force
 
+      - name: Publish GitHub release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          F="/tmp/out/Blaze-v$VER.apk"
+          NOTES=$(git log -1 --format=%s ${{ github.sha }})
+          if gh release view "v$VER" --repo ${{ github.repository }} >/dev/null 2>&1; then
+            gh release upload "v$VER" "$F" --clobber --repo ${{ github.repository }}
+          else
+            gh release create "v$VER" "$F" --repo ${{ github.repository }} --target ${{ github.sha }} --title "Blaze v$VER" --notes "$NOTES" --latest
+          fi
+
       - name: Post failure log
         if: failure()
         env:
