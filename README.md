@@ -20,8 +20,22 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.17.0 (versionCode 47) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.8.0 (versionCode 48) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+**Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
+before it were numbered 1.0–1.17.0 (the history below keeps those numbers); `versionCode` keeps counting up, so phones
+update normally. Because the name went down, CI also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
+1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
+
+## v0.8.0: Learns like Desktop, chats named by topic, heads-ups you can reply to
+- **Proactive memory, the Desktop v0.7 way** (`agent/Learn.kt`, a port of Desktop's `internal/learn`). The prompt now carries the MEMORY & SKILLS rules: save lasting facts silently with their context, keep the user's certainty, replace a changed fact (`remember(fact, replaces=…)`) instead of piling up duplicates, forget every match on request, and write a skill when a method is taught or a workflow repeats.
+- **Cheaper learning.** The background review used to run after nearly every answer. A local check with no model call (`Learn.decide`) now runs first: small talk, turns that already saved, and turns with nothing durable are skipped; a skill is only proposed when the user taught a method or a 5+ step workflow repeats (workflow signatures, last 40 kept). Only related memories go into the review prompt.
+- **Safer memories.** Every auto-saved fact passes Desktop's filter (`Learn.accept`): no keys, passwords, PINs, codes or card/account numbers, nothing "only true today", no task logs. `remember` refuses secrets even when asked. Auto-written skills need a kebab name, a real description and at least 3 steps.
+- **Chats named by topic** (`agent/Titles.kt`, port of Desktop `titles.go`). After the first exchange and every 4 turns after that, one small background call titles the chat by its dominant theme (≤ 6 words) and writes the one-line summary `search_past_chats` uses. Chats you rename are never retitled. Settings › Memory & learning › *Name chats by topic*.
+- **Heads-ups you can reply to.** Tips, morning/evening briefs, routine and job alerts now land in one **Heads-ups** chat as they're posted. Replying from the notification (or tapping its suggestion) continues that chat, and the model is told every heads-up it sent since you last wrote plus the one you're answering, so "yes", "later" or "who's that?" make sense. Before, each reply opened a blank chat and the suggestion button ran in a separate hidden one. Notification replies skip the offline fast lane, which can't see that context.
+- **5 more Desktop skills**: landing-page-builder, slide-deck, web-design-blaze-classic, web-design-teamofkeys and image-assets (adapted to the phone's Alpine Linux). They make HTML you can open with `preview_server`. Bundled skills can now ship extra files (templates, starters, design tokens) listed under `files` in `assets/skills/index.json`; read them with `skill_file`. shell-sysadmin stays desktop-only.
+- **Version numbers match Desktop and CLI** (0.x); the updater compares build numbers (see Status).
 
 ## v1.17.0: Catching up with Blaze Desktop and CLI
 - **Connectors are OAuth only** (like Desktop v0.5.0 / CLI v0.4.0): Google, GitHub, Spotify and Notion connect with one tap through blaze-auth. The browser signs in, the Worker swaps the code with its own client secret, and the tokens come back to a random 127.0.0.1 port through a one-time code bound to Blaze's PKCE verifier. Refreshes go through the Worker too (`/oauth/<id>/refresh`). The old manual setup (your own client ID, pasted tokens) is gone from the app; connections made that way keep working until you disconnect them. Providers the Worker hasn't switched on (Slack for now) show "coming soon".

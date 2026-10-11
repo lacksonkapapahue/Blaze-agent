@@ -169,35 +169,47 @@ object Learning {
      * Reviews one finished exchange. [trace] holds the phone actions taken (tool, args, label) so a
      * successful task can become a replayable skill. Returns a short chip like "Memory updated".
      */
-    suspend fun review(chatId: String, exchange: String, trace: JSONArray, hasSummary: Boolean, setSummary: (String, String) -> Unit): String? {
-        if (!Settings.autoLearn || exchange.length < 40) return null
-        val known = Memory.facts.value.joinToString("\n") { "- $it" }.ifEmpty { "(none)" }
+    suspend fun review(exchange: String, trace: JSONArray, d: Learn.Decision, tools: List<String>): String? {
+        if (!Settings.autoLearn || exchange.length < 40 || !d.reflect) return null
+        // Only the saved facts that look related go in (like Desktop's store.Related), so the prompt stays small.
+        val q = words(exchange)
+        val related = Memory.facts.value.map { it to (words(it) intersect q).size }.filter { it.second > 0 }
+            .sortedByDescending { it.second }.take(12).map { it.first }
+        val known = related.joinToString("\n") { "- $it" }.ifEmpty { "(none related)" }
         val skillNames = _skills.value.joinToString(", ") { it.name }.ifEmpty { "(none)" }
-        val sys = """You review one exchange between a user and Blaze, their phone assistant, and decide what to remember.
+        val skillRule = if (d.skill) "Skill: only if the user taught a method or this is a repeated multi-step task likely to be asked again. use_trace=true only if the recorded phone actions completed that task. Steps are numbered, with checks and pitfalls. Don't duplicate an existing skill."
+            else "Do not propose a skill this time (skill: null)."
+        val memRule = if (d.memory) "Memory: durable facts or preferences about the user (people, places, routines, work, goals, likes and dislikes, apps and accounts they use, how they want Blaze to behave), one short sentence each with its context. Keep the user's certainty; never turn one occurrence into a habit. If a known fact changed, use replace. Never secrets, codes, passwords, card or ID numbers, one-off task details, or things only true today. Skip anything already known. At most 2."
+            else "Do not propose memories this time (memory: [])."
+        val sys = """You maintain the long-term memory of Blaze, the user's phone assistant. Read the last exchange and decide what is worth keeping. Most turns have nothing: then return empty lists.
 Return ONLY a JSON object:
 {"memory":[{"op":"add|replace|remove","fact":"short fact","old":"text of the fact to replace/remove"}],
- "skill":null or {"name":"kebab-name","description":"one line","when":"when to use","steps":"1. … 2. …","use_trace":true|false},
- "summary":"one line, max 14 words, what this chat is about"}
-Memory: durable facts or preferences about the user (people and relationships, places, routines, work, goals, likes and dislikes, devices, accounts and apps they use, how they want Blaze to behave). If a known fact changed, use replace. Never secrets, codes, passwords, card numbers, or one-off details. Skip anything already known.
-Skill: only when a multi-step task clearly succeeded and is likely to be asked again. use_trace=true only if the recorded phone actions completed that task. Skip trivial one-step things.
-Be strict: most exchanges produce no memory and no skill."""
-        val user = "Known facts:\n$known\n\nExisting skills: $skillNames\n\nRecorded phone actions: ${if (trace.length() == 0) "(none)" else trace.toString().take(2500)}\n\nExchange:\n${exchange.takeLast(6000)}"
+ "skill":null or {"name":"kebab-name","description":"one line: when to use it","when":"when to use","steps":"1. … 2. … 3. …","use_trace":true|false}}
+$memRule
+$skillRule"""
+        val user = "Saved facts that may be related:\n$known\n\nExisting skills: $skillNames\n\nTools used: ${tools.joinToString().ifEmpty { "(none)" }}\n\nRecorded phone actions: ${if (trace.length() == 0) "(none)" else trace.toString().take(2500)}\n\nExchange:\n${exchange.takeLast(6000)}"
         val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys)).put(JSONObject().put("role", "user").put("content", user))
         val raw = try { LlmClient.complete(msgs, null, null, null, LlmClient.Lane.BACKGROUND).optString("content") } catch (_: Exception) { return null }
         val o = try { JSONObject(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) } catch (_: Exception) { return null }
-        o.optString("summary").takeIf { it.isNotBlank() && !hasSummary }?.let { setSummary(chatId, it.take(120)) }
         val ops = mutableListOf<Pending>()
         var id = System.currentTimeMillis()
-        o.optJSONArray("memory")?.let { a -> for (i in 0 until minOf(a.length(), 4)) {
-            val m = a.getJSONObject(i); val fact = m.optString("fact").trim()
-            if (fact.isEmpty() && m.optString("op") != "remove") continue
-            if (Regex("\\b(password|pin|otp|cvv|card number)\\b", RegexOption.IGNORE_CASE).containsMatchIn(fact)) continue
-            ops += Pending(id++, "memory", when (m.optString("op")) { "remove" -> "Forget: ${m.optString("old")}"; "replace" -> "Update: $fact"; else -> "Remember: $fact" }, m)
+        if (d.memory) o.optJSONArray("memory")?.let { a -> for (i in 0 until minOf(a.length(), 2)) {
+            val m = a.getJSONObject(i)
+            val opName = m.optString("op")
+            if (opName == "remove") {
+                if (m.optString("old").isBlank()) continue
+                ops += Pending(id++, "memory", "Forget: ${m.optString("old")}", m); continue
+            }
+            // Every auto-saved fact passes Desktop's filter: no secrets, account numbers, task logs or "today" facts.
+            val fact = Learn.accept(m.optString("fact")) ?: continue
+            m.put("fact", fact)
+            ops += Pending(id++, "memory", if (opName == "replace") "Update: $fact" else "Remember: $fact", m)
         } }
-        o.optJSONObject("skill")?.let { s ->
-            if (s.optString("name").isNotBlank() && s.optString("steps").isNotBlank()) {
+        if (d.skill) o.optJSONObject("skill")?.let { s ->
+            val name = s.optString("name").trim().lowercase()
+            if (Learn.goodSkill(name, s.optString("description"), s.optString("steps"))) {
                 if (s.optBoolean("use_trace") && trace.length() in 2..25) s.put("replay", trace)
-                ops += Pending(id++, "skill", "Skill: ${s.optString("name")} — ${s.optString("description")}", s)
+                ops += Pending(id++, "skill", "Skill: $name — ${s.optString("description")}", s)
             }
         }
         if (ops.isEmpty()) return null
@@ -212,7 +224,7 @@ Be strict: most exchanges produce no memory and no skill."""
         when (p.kind) {
             "memory" -> when (o.optString("op")) {
                 "remove" -> Memory.forget(o.optString("old"))
-                "replace" -> { if (o.optString("old").isNotBlank()) Memory.forget(o.optString("old")); Memory.add(o.optString("fact")) }
+                "replace" -> Memory.add(o.optString("fact"), o.optString("old"))
                 else -> if (Memory.facts.value.size < 250) Memory.add(o.optString("fact"))
             }
             "skill" -> upsertSkill(o.optString("name"), o.optString("description"), o.optString("when"), o.optString("steps"), o.optJSONArray("replay"))

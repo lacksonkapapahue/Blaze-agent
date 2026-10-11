@@ -26,16 +26,22 @@ object Memory {
         prefs.edit().putString("memory", JSONArray(list).toString()).apply()
     }
 
-    fun add(fact: String): String {
+    /** Saves [fact]. [replaces] (words from an older fact) removes the fact it supersedes first. */
+    fun add(fact: String, replaces: String = ""): String {
         val f = fact.trim().removeSuffix(".")
         if (f.isEmpty()) return "Nothing to remember."
+        // Keys, passwords, codes and card/account numbers are never kept, even when asked (Desktop v0.7 rule).
+        if (Learn.secret(f)) return "Not saved: that looks like a password, code or account number, which Blaze never keeps in memory."
+        val gone = replaces.trim().takeIf { it.length >= 3 }?.let { r ->
+            val q = r.lowercase(); val keep = _facts.value.filterNot { it.lowercase().contains(q) || q.contains(it.lowercase()) }
+            (_facts.value.size - keep.size).also { if (it > 0) persist(keep) } } ?: 0
         if (_facts.value.any { it.equals(f, true) }) return "Already remembered."
         // A newer version of the same fact replaces the old one ("lives in Ndola" -> "lives in Lusaka").
         val w = words(f)
         val old = _facts.value.firstOrNull { o -> val ow = words(o)
             w.size >= 3 && ow.size >= 3 && (w intersect ow).size.toDouble() / (w union ow).size >= 0.6 }
         if (old != null) { persist(_facts.value.map { if (it == old) f else it }); return "Updated: $f" }
-        persist(_facts.value + f); return "Remembered: $f"
+        persist(_facts.value + f); return if (gone > 0) "Updated: $f" else "Remembered: $f"
     }
 
     fun forget(query: String): String {
@@ -81,7 +87,8 @@ object Memory {
             .put("name", "remember")
             .put("description", "Save a lasting fact or preference about the user (name, family, likes, routines, contacts) so you know it in future chats. Use when they tell you something worth keeping or say 'remember'.")
             .put("parameters", JSONObject().put("type", "object")
-                .put("properties", JSONObject().put("fact", JSONObject().put("type", "string").put("description", "Short fact, e.g. 'Sister is Mary, lives in Ndola'")))
+                .put("properties", JSONObject().put("fact", JSONObject().put("type", "string").put("description", "Short fact, e.g. 'Sister is Mary, lives in Ndola'"))
+                    .put("replaces", JSONObject().put("type", "string").put("description", "Optional: words from an older saved fact this one replaces (it is removed)")))
                 .put("required", JSONArray(listOf("fact"))))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "recall_memory")

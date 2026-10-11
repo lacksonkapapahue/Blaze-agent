@@ -275,6 +275,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         val o = ChatStore.load(id) ?: return null
         val s = Session(id)
         s.title = o.optString("title"); s.pinned = o.optBoolean("pinned"); s.summary = o.optString("summary")
+        s.titleSource = o.optString("title_source"); s.titleTurns = o.optInt("title_turns"); s.keep = o.optBoolean("keep")
+        o.optJSONArray("tips_pending")?.let { a -> for (i in 0 until a.length()) s.unseenTips += a.getString(i) }
         val h = o.optJSONArray("history") ?: JSONArray()
         for (i in 0 until h.length()) s.history.put(h.get(i))
         val list = mutableListOf<ChatMessage>()
@@ -323,31 +325,68 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         refreshChats()
     }
 
-    fun renameChat(id: String, t: String) { ChatStore.rename(id, t); sessions[id]?.title = t; refreshChats() }
+    fun renameChat(id: String, t: String) {
+        ChatStore.rename(id, t)
+        sessions[id]?.let { it.title = t.trim().ifEmpty { "Chat" }; it.titleSource = Titles.MANUAL }
+        refreshChats()
+    }
     fun pinChat(id: String, p: Boolean) { ChatStore.setPinned(id, p); sessions[id]?.pinned = p; refreshChats() }
 
     /**
      * A reply typed into a notification's Reply box. It goes back to the conversation that notification
-     * came from, so Blaze knows what it said: the chat that posted it ([chatId]), or, for a heads-up that
-     * wasn't part of a chat, a new chat that opens with Blaze's [context] message.
+     * came from, so Blaze knows what it said: the chat that posted it ([chatId]; heads-ups live in the
+     * Heads-ups chat since v0.8.0), or, for an old heads-up with no chat, a new chat that opens with
+     * Blaze's [context] message. The model is always told which message is being answered.
      */
     fun replyFromNotification(chatId: String?, context: String?, text: String) {
         val t = text.trim(); if (t.isEmpty()) return
-        if (!chatId.isNullOrBlank() && chatId == cur.id) { send(t); return }
-        val s = chatId?.takeIf { it.isNotBlank() }?.let { load(it) } ?: run {
-            if (context.isNullOrBlank()) { send(t); return }
-            Session(newId()).also { n ->
-                n.title = "Heads-up · " + context.lineSequence().first().take(30)
-                n.add(Role.BLAZE, context)
-            }
-        }
-        sessions[s.id] = s
-        if (!inForeground) show(s)
+        val ctx = context?.takeIf { it.isNotBlank() }
         scope.launch {
+            val s = chatId?.takeIf { it.isNotBlank() }?.let { load(it) } ?: run {
+                if (ctx == null) { send(t); return@launch }
+                Session(newId()).also { n ->
+                    n.title = "Heads-up \u00b7 " + ctx.lineSequence().first().take(30)
+                    n.add(Role.BLAZE, ctx)
+                }
+            }
+            sessions[s.id] = s
+            if (!inForeground && s !== cur) show(s)
             if (s.busy) s.job?.join()
-            s.send(t, notificationContext = context?.takeIf { s.history.length() == 0 })
+            s.send(t, notificationContext = ctx)
         }
     }
+
+    /** The one chat every heads-up (tips, briefs, routine and job alerts) is kept in, so replies have context. */
+    private fun headsUpChatId(): String {
+        val saved = Settings.str("headsup_chat")
+        if (saved.isNotBlank() && (sessions.containsKey(saved) || ChatStore.load(saved) != null)) return saved
+        return newId().also { Settings.setStr("headsup_chat", it) }
+    }
+
+    /**
+     * Records a heads-up Blaze posted as a notification (v0.8.0): it shows in the Heads-ups chat and the
+     * model is told about it with the next message there, so replying from the notification (or later in
+     * the app) continues that conversation instead of starting a blank one. Returns the chat's id.
+     */
+    fun recordHeadsUp(text: String): String {
+        val id = headsUpChatId()
+        val stamp = java.text.SimpleDateFormat("EEE HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+        scope.launch {
+            val s = load(id) ?: Session(id).also { it.title = "Heads-ups"; it.titleSource = Titles.MANUAL }
+            s.keep = true
+            sessions[s.id] = s
+            val mid = s.add(Role.BLAZE, text)
+            s.addMeta(mid, "Heads-up \u00b7 $stamp")
+            s.unseenTips += "$stamp: $text"
+            while (s.unseenTips.size > 20) s.unseenTips.removeAt(0)
+            s.persist()
+            refreshChats()
+        }
+        return id
+    }
+
+    /** The one-tap suggestion on a heads-up: runs in the Heads-ups chat, with the heads-up as context. */
+    fun doFromHeadsUp(chatId: String?, context: String?, prompt: String) = replyFromNotification(chatId ?: headsUpChatId(), context, prompt)
 
     /** A scheduled routine: runs in its own background chat and reports by notification. */
     fun runRoutine(name: String, prompt: String) {
@@ -455,6 +494,7 @@ When you finish, say what you did in one short sentence.
             append("\n\n")
             append("CURRENT LOCAL TIME: $now (${java.util.TimeZone.getDefault().id}). This is exact: answer any time, date or day question straight from it, never say you can't see the time. ")
             append(Memory.promptBlock(userText))
+            append(Learn.rules(Settings.autoLearn))
             append(com.blaze.assistant.device.DeviceStatus.promptLine(app))
             append("\nKNOW BEFORE YOU ASK: never ask the user something you can find out yourself. Their phone make, model, Android version and skin are in the line above; " +
                 "check installed apps with list_apps (e.g. whether Secure Folder, Termux or a bank app is there), where they are with get_location, settings and screen state with your phone tools, time and battery from 'Phone now', " +
@@ -575,9 +615,19 @@ When you finish, say what you did in one short sentence.
         var spokenPrefix = ""
         var streamedVoice = false
         var title = ""
+        /** "" (first prompt), "auto" (named by Titles) or "manual" (renamed by you: never retitled). */
+        var titleSource = ""
+        /** User turns when the title was last evaluated. */
+        var titleTurns = 0
         var pinned = false
-        /** One-line summary written by the learning review (used by search_past_chats). */
+        /** One-line summary written with the title (used by search_past_chats). */
         var summary = ""
+        /** Heads-ups posted into this chat as notifications that the model hasn't been told about yet. */
+        val unseenTips = java.util.Collections.synchronizedList(mutableListOf<String>())
+        /** Saved even before the user writes in it (the Heads-ups chat). */
+        var keep = false
+        /** Tool names called this turn, in order (for Learn.decide). */
+        val turnTools = java.util.Collections.synchronizedList(mutableListOf<String>())
         val history = JSONArray()
         val historyMark = HashMap<Long, Int>()
         val trace = JSONArray()
@@ -660,7 +710,7 @@ When you finish, say what you did in one short sentence.
 
         /** Save the current chat to disk (screenshots are dropped to keep files small). */
         fun persist() {
-            if (msgs.none { it.role == Role.USER }) return
+            if (msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
             val arr = JSONArray()
             for (m in msgs) {
                 arr.put(JSONObject().put("id", m.id).put("role", m.role.name).put("text", m.text)
@@ -675,12 +725,14 @@ When you finish, say what you did in one short sentence.
             }
             val hist = JSONArray()
             for (i in 0 until history.length()) hist.put(stripImages(history.getJSONObject(i)))
-            val firstUser = msgs.first { it.role == Role.USER }.text
+            val firstUser = msgs.firstOrNull { it.role == Role.USER }?.text ?: msgs.first().text
             if (title.isEmpty()) title = firstUser.lineSequence().first().take(48)
             val preview = msgs.lastOrNull { it.role == Role.BLAZE }?.text ?: firstUser
             val doc = JSONObject().put("id", id).put("title", title).put("pinned", pinned)
                 .put("updated", System.currentTimeMillis()).put("preview", preview.take(90))
                 .put("messages", arr).put("history", hist).put("summary", summary)
+                .put("title_source", titleSource).put("title_turns", titleTurns).put("keep", keep)
+                .put("tips_pending", JSONArray(synchronized(unseenTips) { unseenTips.toList() }))
             if (this === cur) Settings.lastChatId = id
             io.launch { ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list() }
         }
@@ -721,9 +773,16 @@ When you finish, say what you did in one short sentence.
             val id = add(Role.USER, shown, attachments.map { it.name })
             attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
             historyMark[id] = history.length()
-            // A reply to a heads-up notification: the model sees what Blaze had said.
-            val said = if (notificationContext.isNullOrBlank()) shown
-                else "[The user is replying to this notification you sent them earlier: \"${notificationContext.take(1500)}\"]\n\n$shown"
+            // Heads-ups Blaze posted into this chat as notifications, and the one being replied to: the model
+            // sees what Blaze had said, so "yes", "remind me later" or "who's that?" make sense (v0.8.0).
+            val tips = synchronized(unseenTips) { unseenTips.toList().also { unseenTips.clear() } }
+            val said = buildString {
+                if (tips.isNotEmpty()) append("[Heads-ups you sent the user as phone notifications since their last message here (they also show in this chat):\n" +
+                    tips.takeLast(12).joinToString("\n") { "- ${it.take(600)}" } + "]\n")
+                if (!notificationContext.isNullOrBlank()) append("[The user is replying from the notification of this message you sent them: \"${notificationContext.take(1500)}\"]\n")
+                if (isNotEmpty()) append("\n")
+                append(shown)
+            }
             val content: Any = if (attachments.isEmpty()) said else JSONArray().apply {
                 put(JSONObject().put("type", "text").put("text", said))
                 attachments.forEach { a -> a.parts.forEach { put(it) } }
@@ -753,7 +812,7 @@ When you finish, say what you did in one short sentence.
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
-                if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null) {
+                if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
                     mood = Mood.THINKING
                     val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
@@ -915,6 +974,7 @@ When you finish, say what you did in one short sentence.
                 var firstMs = -1L
                 streamedVoice = false
                 while (trace.length() > 0) trace.remove(0)
+                turnTools.clear()
                 val turnThink = StringBuilder()
                 val turnStart = System.currentTimeMillis()
                 thinking = ""
@@ -1248,6 +1308,7 @@ When you finish, say what you did in one short sentence.
         }
 
         suspend fun runToolRaw(name: String, args: JSONObject, shots: MutableList<String>): String {
+            turnTools.add(name)
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
             // Record phone actions (with the element's label, since numbers change) for task replay.
             if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "run_plan", "do_actions", "search_in_app", "read_screen")) com.blaze.assistant.phone.Watchers.taskTick()
@@ -1257,7 +1318,7 @@ When you finish, say what you did in one short sentence.
                 trace.put(JSONObject().put("tool", name).put("args", JSONObject(args.toString()).apply { remove("element") }).put("label", label))
             }
             return when (name) {
-                "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact")) }
+                "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact"), args.optString("replaces")) }
                 "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
                 "generate_image" -> if (Regex("(?i)\\b(pie|bar|line)\\s*chart|\\bgraph\\b|\\bplot\\b|\\bdiagram\\b|\\btable\\b|\\bpdf\\b|\\binfographic|\\bspreadsheet").containsMatchIn(args.optString("prompt"))) {
                     "Refused: the AI picture tool can't draw exact charts, tables or documents (it makes a random look-alike). Make it with run_code (Python matplotlib / reportlab) and save under /root/phone/. " +
@@ -1581,21 +1642,49 @@ When you finish, say what you did in one short sentence.
             return "All $n steps done in ${"%.1f".format((System.currentTimeMillis() - started) / 1000.0)} s. Now in ${svc.currentApp() ?: "?"}. On screen: ${words.joinToString(" · ")}\n(Call read_screen only if you need to act further on this screen.)"
         }
 
-        /** After a turn: summary, memories and skills in the background (see Learning). */
+        /**
+         * After a turn: the chat's title and summary (Titles), then memories and skills (Learning), both in
+         * the background. Since v0.8.0 a cheap local check (Learn.decide, no model call) decides whether the
+         * learning review is worth a call at all, like Blaze Desktop v0.7: small talk, turns that already
+         * saved, and turns with nothing durable no longer cost a request.
+         */
         fun learnAfterTurn() {
-            if (!Settings.autoLearn) return
             val reply = msgs.lastOrNull { it.role == Role.BLAZE } ?: return
-            if (reply.meta.startsWith("⚡")) return
-            val all = msgs
+            if (reply.meta.startsWith("\u26a1")) return
             val lastUser = msgs.indexOfLast { it.role == Role.USER }; if (lastUser < 0) return
+            val failed = msgs.drop(lastUser).any { it.role == Role.ERROR }
+            val cid = id
+            // Titles
+            val userTurns = msgs.count { it.role == Role.USER }
+            val endsWithAnswer = !failed && msgs.lastOrNull()?.role == Role.BLAZE && reply.text.isNotBlank()
+            if (agentId == null && Titles.needs(titleSource, titleTurns, userTurns, msgs[lastUser].text, endsWithAnswer)) {
+                val lines = msgs.filter { it.role == Role.USER || it.role == Role.BLAZE }.map { (it.role == Role.USER) to it.text }
+                val current = title.ifBlank { msgs[lastUser].text.lineSequence().first().take(48) }
+                io.launch {
+                    val r = Titles.ask(cid, current, lines) ?: return@launch
+                    scope.launch {
+                        if (titleSource == Titles.MANUAL) return@launch   // renamed by hand meanwhile
+                        title = r.title; titleSource = Titles.AUTO; titleTurns = userTurns
+                        if (r.summary.isNotBlank()) summary = r.summary
+                        persist()
+                    }
+                }
+            }
+            // Learning
+            if (!Settings.autoLearn || failed) return
+            val tools = synchronized(turnTools) { turnTools.toList() }
+            val userText = msgs[lastUser].text
+            val (n, distinct) = Learn.steps(tools)
+            val repeat = Learn.repeatsAndRecord(Learn.signature(userText, tools), n >= 5 && distinct >= 2)
+            val d = Learn.decide(Learn.Turn(userText, reply.text, tools,
+                savedMemory = tools.any { it == "remember" || it == "forget" },
+                savedSkill = tools.any { it == "write_skill" || it == "skill_manage" }), repeat)
+            if (!d.reflect) return
             val exchange = msgs.drop(maxOf(0, lastUser - 4)).joinToString("\n") { m ->
                 when (m.role) { Role.USER -> "User: "; Role.BLAZE -> "Blaze: "; Role.STEP -> "  (step) "; Role.ERROR -> "  (error) " } + m.text.take(1500) }
-            if (msgs.drop(lastUser).any { it.role == Role.ERROR }) return
             val t = JSONArray(trace.toString())
-            val cid = id
-            val hasSummary = summary.isNotBlank()
             io.launch {
-                val chip = Learning.review(cid, exchange, t, hasSummary) { _, s -> scope.launch { summary = s; persist() } }
+                val chip = Learning.review(exchange, t, d, tools)
                 if (chip != null) scope.launch { addMeta(reply.id, chip); persist() }
             }
         }
