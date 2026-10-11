@@ -229,7 +229,9 @@ fun LearningSection() {
     var screen by remember { mutableStateOf(Settings.screenMemory) }
     var shown by remember { mutableStateOf("") }
     Section("Learning")
-    ToggleRow("Learn from chats", "After each answer Blaze notes lasting facts, writes a one-line chat summary, and saves tasks it worked out as skills", auto) { auto = !auto; Settings.autoLearn = auto }
+    var titles by remember { mutableStateOf(Settings.autoTitles) }
+    ToggleRow("Learn from chats", "Blaze saves lasting facts and preferences as you go, replaces ones that changed, and saves tasks you teach it or repeat as skills. Small talk costs nothing: it only checks when something worth keeping was said", auto) { auto = !auto; Settings.autoLearn = auto }
+    ToggleRow("Name chats by topic", "Chats are titled by what most of the conversation is about, not the first message. Chats you rename stay as you named them", titles) { titles = !titles; Settings.autoTitles = titles }
     ToggleRow("Ask before saving", "Changes wait here for your OK instead of saving straight away", ask) { ask = !ask; Settings.learnApproval = ask }
     if (pending.isNotEmpty()) {
         Section("Waiting for your OK")

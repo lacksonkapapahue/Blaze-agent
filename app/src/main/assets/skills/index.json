@@ -65,6 +65,52 @@
    "name": "web-audit",
    "version": 1,
    "sha256": "15c79e21a7786c25660b98443534cf118a6dc70bc871ac35c31bb8cbce8a20f3"
+  },
+  {
+   "name": "landing-page-builder",
+   "version": 1,
+   "sha256": "be549b58047c72e84e8473908adb0a85a5f990a52a32f800a9e6bcca8f5519b0",
+   "files": [
+    "SKILL.md",
+    "assets/template.html"
+   ]
+  },
+  {
+   "name": "slide-deck",
+   "version": 1,
+   "sha256": "fa798a752428edfe54d5e7eb671a933711e78091699bab862ed1484d62c086a1",
+   "files": [
+    "SKILL.md",
+    "assets/deck.html"
+   ]
+  },
+  {
+   "name": "web-design-blaze-classic",
+   "version": 1,
+   "sha256": "44a556c2ef45c15cc1b451ff03c01c80a2ab62dd36ec04674ad09fd98dec40ca",
+   "files": [
+    "SKILL.md",
+    "assets/starter.html",
+    "assets/tokens.css"
+   ]
+  },
+  {
+   "name": "web-design-teamofkeys",
+   "version": 1,
+   "sha256": "c829bb557cc9fb7adf56076d5fca52ba5ea23cc273bf35693e516540f3b4e6f2",
+   "files": [
+    "SKILL.md",
+    "assets/starter.html",
+    "assets/tokens.css"
+   ]
+  },
+  {
+   "name": "image-assets",
+   "version": 1,
+   "sha256": "b0875c97b485e2f5e5ddcde214442effb79c17fc6016b643f47a15dda2adc43e",
+   "files": [
+    "SKILL.md"
+   ]
   }
  ]
 }

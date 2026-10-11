@@ -16,7 +16,7 @@ import java.security.MessageDigest
  * The manifest is ~/skills/.bundled.json. Skills can be switched off without deleting them.
  */
 object SkillLibrary {
-    data class Bundled(val name: String, val version: Int, val sha: String)
+    data class Bundled(val name: String, val version: Int, val sha: String, val files: List<String> = listOf("SKILL.md"))
     data class Row(val name: String, val description: String, val bundled: Boolean, val on: Boolean,
                    val edited: Boolean, val installed: Boolean, val update: Boolean)
 
@@ -29,7 +29,8 @@ object SkillLibrary {
 
     fun bundled(): List<Bundled> = try {
         val a = JSONObject(app.assets.open("skills/index.json").bufferedReader().use { it.readText() }).getJSONArray("skills")
-        (0 until a.length()).map { a.getJSONObject(it) }.map { Bundled(it.getString("name"), it.optInt("version", 1), it.optString("sha256")) }
+        (0 until a.length()).map { a.getJSONObject(it) }.map { o -> Bundled(o.getString("name"), o.optInt("version", 1), o.optString("sha256"),
+            o.optJSONArray("files")?.let { f -> (0 until f.length()).map { f.getString(it) } }?.filter { it.isNotBlank() && ".." !in it }?.ifEmpty { null } ?: listOf("SKILL.md")) }
     } catch (_: Exception) { emptyList() }
 
     private fun asset(name: String) = app.assets.open("skills/$name/SKILL.md").bufferedReader().use { it.readText() }
@@ -40,7 +41,13 @@ object SkillLibrary {
 
     private fun install(b: Bundled, m: JSONObject) {
         val text = asset(b.name)
-        File(root(), b.name).apply { mkdirs() }.let { File(it, "SKILL.md").writeText(text) }
+        val dir = File(root(), b.name).apply { mkdirs() }
+        File(dir, "SKILL.md").writeText(text)
+        // Extra files (templates, starters, tokens) ship next to SKILL.md since v0.8.0; read them with skill_file.
+        for (rel in b.files) if (rel != "SKILL.md") runCatching {
+            val out = File(dir, rel); out.parentFile?.mkdirs()
+            app.assets.open("skills/${b.name}/$rel").use { inp -> out.outputStream().use { inp.copyTo(it) } }
+        }
         m.put(b.name, JSONObject().put("version", b.version).put("sha", sha(text)))
     }
 

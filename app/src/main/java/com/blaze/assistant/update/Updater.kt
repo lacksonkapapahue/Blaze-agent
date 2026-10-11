@@ -70,6 +70,20 @@ object Updater {
         ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "0"
     } catch (_: Exception) { "0" }
 
+    @Suppress("DEPRECATION")
+    fun installedCode(ctx: Context): Long = try {
+        val i = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        if (Build.VERSION.SDK_INT >= 28) i.longVersionCode else i.versionCode.toLong()
+    } catch (_: Exception) { 0L }
+
+    /**
+     * v0.8.0 renumbered Blaze for Android to 0.x to match Blaze Desktop and CLI (it was 1.17.0), so the
+     * build name no longer grows. CI therefore also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
+     * older Blazes (which compare names) see it as newer and update, and this Blaze reads the build number
+     * from it and compares that instead. The real name (`Blaze-v0.8.0.apk`) is what the user sees.
+     */
+    private val bridgeRe = Regex("^Blaze-v1\\.999\\.(\\d+)\\.apk$")
+
     private fun ver(s: String): List<Int> = s.split('.', '-').mapNotNull { it.toIntOrNull() }
     private fun newer(a: String, b: String): Boolean {
         val x = ver(a); val y = ver(b)
@@ -88,6 +102,8 @@ object Updater {
 
     private fun fail(msg: String): String { _state.value = State.Failed(msg); return msg }
 
+    @Volatile private var newestCode = -1L
+
     /** Checks and (optionally) installs. Returns a plain sentence for the model. */
     suspend fun run(ctx: Context, install: Boolean): String {
         val s = _state.value
@@ -105,14 +121,19 @@ object Updater {
                 }
                 if (c.responseCode !in 200..299) throw UpdateError("GitHub answered with an error (${c.responseCode}). Try again in a minute.")
                 val arr = JSONArray(c.inputStream.bufferedReader().readText())
+                val files = (0 until arr.length()).map { arr.getJSONObject(it) }
                 val re = Regex("^Blaze-v(\\d+(?:\\.\\d+)*)\\.apk$")
-                val best = (0 until arr.length()).map { arr.getJSONObject(it) }
+                val bridge = files.mapNotNull { o -> bridgeRe.find(o.optString("name"))?.let { it.groupValues[1].toLong() to o } }.maxByOrNull { it.first }
+                val named = files.filter { bridgeRe.find(it.optString("name")) == null }
                     .mapNotNull { o -> re.find(o.optString("name"))?.let { Triple(o.optString("name"), it.groupValues[1], o.optLong("size")) } }
                     .maxWithOrNull { a, b -> if (newer(a.second, b.second)) 1 else if (newer(b.second, a.second)) -1 else 0 }
+                newestCode = bridge?.first ?: -1L
+                named ?: bridge?.let { b -> Triple(b.second.optString("name"), "build ${b.first}", b.second.optLong("size")) }
                     ?: throw UpdateError("No Blaze builds are published yet.")
-                best
             }
-            if (!newer(version, have)) { _state.value = State.UpToDate(have); return "Blaze is up to date (v$have)." }
+            // Build numbers decide when CI published one (names went from 1.x to 0.x in v0.8.0); names otherwise.
+            val isNewer = if (newestCode >= 0) newestCode > installedCode(ctx) else newer(version, have)
+            if (!isNewer) { _state.value = State.UpToDate(have); return "Blaze is up to date (v$have)." }
             if (!install) { _state.value = State.Ready(version); return "Blaze v$version is available (installed: v$have). Say update to install it." }
             if (Build.VERSION.SDK_INT >= 26 && !ctx.packageManager.canRequestPackageInstalls()) {
                 _state.value = State.NeedsPermission(version)

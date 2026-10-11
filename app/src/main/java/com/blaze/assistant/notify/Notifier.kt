@@ -143,6 +143,8 @@ object Notifier {
 
     /** Blaze speaking up on its own, with a one-tap suggestion and an inline reply. */
     fun proactive(text: String, suggest: String, urgent: Boolean) {
+        // Kept in the Heads-ups chat (even when notifications are off) so a reply has the context (v0.8.0).
+        val chatId = try { Agent.recordHeadsUp(text) } catch (_: Exception) { null }
         if (!allowed()) return
         if (Build.VERSION.SDK_INT >= 26) app.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CH_PROACTIVE, "Blaze heads-ups", NotificationManager.IMPORTANCE_HIGH).apply { description = "When Blaze notices something worth telling you" })
@@ -151,10 +153,11 @@ object Notifier {
             .setContentTitle(if (urgent) "Blaze · important" else "Blaze").setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(openApp())
             .setPriority(if (urgent) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .addAction(NotificationCompat.Action.Builder(0, "Reply", replyIntent(7108, null, text)).addRemoteInput(input).build())
+            .addAction(NotificationCompat.Action.Builder(0, "Reply", replyIntent(7108, chatId, text)).addRemoteInput(input).build())
         if (suggest.isNotBlank()) {
             val pi = PendingIntent.getBroadcast(app, ("do" + suggest).hashCode(), Intent(app, ActionReceiver::class.java).setAction(ActionReceiver.DO)
-                .putExtra("prompt", suggest), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+                .putExtra("prompt", suggest).putExtra(ActionReceiver.EXTRA_CHAT, chatId).putExtra(ActionReceiver.EXTRA_CONTEXT, text),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             b.addAction(0, suggest.take(28), pi)
         }
         try { NotificationManagerCompat.from(app).notify(ID_PROACTIVE, b.build()) } catch (_: SecurityException) { }
@@ -207,7 +210,7 @@ class ActionReceiver : BroadcastReceiver() {
             STOP -> { Agent.stopAll(); Notifier.doneWorking() }
             DO -> intent.getStringExtra("prompt")?.let { p ->
                 androidx.core.app.NotificationManagerCompat.from(ctx).cancel(8)
-                Agent.runRoutine("Heads-up", p)
+                Agent.doFromHeadsUp(intent.getStringExtra(EXTRA_CHAT), intent.getStringExtra(EXTRA_CONTEXT), p)
                 Notifier.working("Working on: " + p.take(60))
             }
             ALLOW -> { Agent.answerConfirm(true); Notifier.clearConfirm() }

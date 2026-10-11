@@ -100,6 +100,10 @@ object Settings {
     var autoLearn: Boolean
         get() = prefs.getBoolean("auto_learn", true)
         set(v) = prefs.edit().putBoolean("auto_learn", v).apply()
+    /** v0.8.0: AI chat titles from the conversation's main theme (Desktop titles.go). */
+    var autoTitles: Boolean
+        get() = prefs.getBoolean("auto_titles", true)
+        set(v) = prefs.edit().putBoolean("auto_titles", v).apply()
     var learnApproval: Boolean
         get() = prefs.getBoolean("learn_approval", false)
         set(v) = prefs.edit().putBoolean("learn_approval", v).apply()
