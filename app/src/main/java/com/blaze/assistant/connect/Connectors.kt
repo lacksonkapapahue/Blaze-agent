@@ -30,6 +30,7 @@ import java.util.TimeZone
  * One-click (v1.16): when blaze-auth has the provider switched on, Connect needs no developer app:
  * the Worker holds the client secret and hands tokens back through a PKCE-bound one-time code
  * (BlazeAccount.connectTokens), like Blaze Desktop. Your own client id still works and wins when set.
+ * Manual setup (own client id / pasted token) was removed from the app; old connections still refresh.
  * Tokens are stored Keystore-encrypted.
  */
 object Connectors {
@@ -95,12 +96,25 @@ object Connectors {
     private fun rand(n: Int) = ByteArray(n).also { SecureRandom().nextBytes(it) }
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
 
-    /** One-click through blaze-auth (like Blaze Desktop) unless you set up your own developer app. */
-    fun usesOneClick(id: String) = BlazeAccount.oneClick(id) && clientId(id).isBlank()
+    /**
+     * Connect is OAuth through blaze-auth only, like Blaze Desktop (v1.16): no developer apps or
+     * pasted tokens. Accounts connected the old way keep working until you disconnect them.
+     */
+    fun available(id: String) = BlazeAccount.oneClick(id)
 
     suspend fun connect(ctx: Context, id: String): String {
         val c = byId(id)
-        if (usesOneClick(id)) return oneClick(ctx, c).also { status(id, it) }
+        if (available(id)) return oneClick(ctx, c).also { status(id, it) }
+        withContext(Dispatchers.IO) { BlazeAccount.refreshProviders(true) }
+        if (available(id)) return oneClick(ctx, c).also { status(id, it) }
+        return (if (!BlazeAccount.view.value.online) "Couldn't reach Blaze's sign-in service. Check your internet connection."
+                else "One-tap Connect for ${c.name} is coming soon.").also { status(id, it) }
+    }
+
+    /** The pre-1.16 developer-app flows, kept only so old connections can still refresh. */
+    @Suppress("unused")
+    private suspend fun legacyConnect(ctx: Context, id: String): String {
+        val c = byId(id)
         if (clientId(id).isBlank()) return "Paste your client ID first.".also { status(id, it) }
         return try {
             when (c.kind) {
