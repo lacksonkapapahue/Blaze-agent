@@ -27,7 +27,11 @@ import java.util.TimeZone
  *  LOOPBACK – OAuth 2.0 + PKCE in the browser, redirect caught on http://127.0.0.1:43117/callback (Google, Spotify)
  *  DEVICE   – GitHub device flow: type a short code on github.com
  *  TOKEN    – paste an access token (Notion internal integration, Slack app token)
- * You bring your own client id (free to create); tokens are stored Keystore-encrypted.
+ * One-click (v1.16): when blaze-auth has the provider switched on, Connect needs no developer app:
+ * the Worker holds the client secret and hands tokens back through a PKCE-bound one-time code
+ * (BlazeAccount.connectTokens), like Blaze Desktop. Your own client id still works and wins when set.
+ * Manual setup (own client id / pasted token) was removed from the app; old connections still refresh.
+ * Tokens are stored Keystore-encrypted.
  */
 object Connectors {
     enum class Kind { LOOPBACK, DEVICE, TOKEN }
@@ -92,7 +96,24 @@ object Connectors {
     private fun rand(n: Int) = ByteArray(n).also { SecureRandom().nextBytes(it) }
     private fun b64(b: ByteArray) = Base64.encodeToString(b, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
 
+    /**
+     * Connect is OAuth through blaze-auth only, like Blaze Desktop (v1.16): no developer apps or
+     * pasted tokens. Accounts connected the old way keep working until you disconnect them.
+     */
+    fun available(id: String) = BlazeAccount.oneClick(id)
+
     suspend fun connect(ctx: Context, id: String): String {
+        val c = byId(id)
+        if (available(id)) return oneClick(ctx, c).also { status(id, it) }
+        withContext(Dispatchers.IO) { BlazeAccount.refreshProviders(true) }
+        if (available(id)) return oneClick(ctx, c).also { status(id, it) }
+        return (if (!BlazeAccount.view.value.online) "Couldn't reach Blaze's sign-in service. Check your internet connection."
+                else "One-tap Connect for ${c.name} is coming soon.").also { status(id, it) }
+    }
+
+    /** The pre-1.16 developer-app flows, kept only so old connections can still refresh. */
+    @Suppress("unused")
+    private suspend fun legacyConnect(ctx: Context, id: String): String {
         val c = byId(id)
         if (clientId(id).isBlank()) return "Paste your client ID first.".also { status(id, it) }
         return try {
@@ -103,6 +124,18 @@ object Connectors {
             }.also { status(id, it) }
         } catch (e: Exception) { ("Couldn't connect: " + (e.message ?: e.javaClass.simpleName)).also { status(id, it) } }
     }
+
+    private suspend fun oneClick(ctx: Context, c: Connector): String = try {
+        status(c.id, "Waiting for you to sign in in the browser…")
+        val t = BlazeAccount.connectTokens(ctx, c.id, if (c.kind == Kind.TOKEN) "" else c.scopes)
+        val exp = t.optLong("expires_in", 0)
+        if (exp > 0) t.put("expires_at", System.currentTimeMillis() + exp * 1000)
+        saveTokens(c.id, t.put("via", "blaze"))
+        withContext(Dispatchers.Main) {
+            ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)?.let { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }
+        }
+        "Connected" + (t.optString("account").takeIf { it.isNotBlank() }?.let { " as $it" } ?: "")
+    } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { BlazeAccount.message(e) }
 
     private suspend fun loopback(ctx: Context, c: Connector): String = withContext(Dispatchers.IO) {
         val verifier = b64(rand(48))
@@ -174,6 +207,13 @@ object Connectors {
     fun access(id: String): String? {
         val t = tokens(id) ?: return null
         val exp = t.optLong("expires_at", 0)
+        if (exp > 0 && exp < System.currentTimeMillis() + 60_000 && t.optString("refresh_token").isNotBlank() && t.optString("via") == "blaze") {
+            val n = BlazeAccount.refreshTokens(id, t.getString("refresh_token")) ?: return null
+            for (k in n.keys()) t.put(k, n.get(k))
+            t.put("expires_at", System.currentTimeMillis() + n.optLong("expires_in", 3600) * 1000)
+            saveTokens(id, t)
+            return t.optString("access_token")
+        }
         if (exp > 0 && exp < System.currentTimeMillis() + 60_000 && t.optString("refresh_token").isNotBlank()) {
             val c = byId(id)
             val form = mutableListOf("grant_type" to "refresh_token", "refresh_token" to t.getString("refresh_token"), "client_id" to clientId(id))

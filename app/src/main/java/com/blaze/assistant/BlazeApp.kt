@@ -35,7 +35,8 @@ class BlazeApp : Application() {
         // Wake word starts from the screen (MainActivity/assistant) and at boot: starting a
         // microphone service while Blaze is in the background makes Android 12+ kill the app.
         com.blaze.assistant.terminal.Terminal.init(this)
-        Thread { com.blaze.assistant.agent.SkillPacks.ensureStarters() }.start()
+        com.blaze.assistant.agent.SkillLibrary.init(this)
+        Thread { com.blaze.assistant.agent.SkillPacks.ensureStarters(); com.blaze.assistant.agent.SkillLibrary.seed(this) }.start()
         com.blaze.assistant.proactive.Triggers.init(this)
         com.blaze.assistant.proactive.Proactive.start(this)
         com.blaze.assistant.ui.Overlay.watchTasks(this)

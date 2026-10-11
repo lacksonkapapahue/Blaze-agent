@@ -1,0 +1,70 @@
+{
+ "format": 1,
+ "skills": [
+  {
+   "name": "deep-research",
+   "version": 1,
+   "sha256": "971702c8de39058dd31f9856b7912e0460e2ac85056a5e167e6a08d5e19e5c3e"
+  },
+  {
+   "name": "email-drafting",
+   "version": 1,
+   "sha256": "c5dc92ece85074e76ef53e3fa5bc030aa00f4c4e1be2aa8c7bd7b3c363dc1a44"
+  },
+  {
+   "name": "planning-task-breakdown",
+   "version": 1,
+   "sha256": "a9bede6fd297dd0456c5ae610f7402eb732921ecdc64385540c2a18536402fb3"
+  },
+  {
+   "name": "document-writing",
+   "version": 1,
+   "sha256": "1bf0efa77203bb7c18bba72b42790e3cbffb3ec1e3f57e2da372aea765bb7639"
+  },
+  {
+   "name": "data-analysis",
+   "version": 1,
+   "sha256": "082e1f3699a53a7c4bfa80895e23916fd8e53a17766051b9a2b9f9e520894112"
+  },
+  {
+   "name": "api-integration",
+   "version": 1,
+   "sha256": "8cb0a2aa3574f4fa5dab33596e78a769da8ed81cc1a50c7c5c7513cf70a218e1"
+  },
+  {
+   "name": "skill-creator",
+   "version": 1,
+   "sha256": "8678f0b26b19051dec5722259a8315777e899e9929610d2778cb8ff24c43a834"
+  },
+  {
+   "name": "code-review",
+   "version": 1,
+   "sha256": "3e37831937cc73e6b08d6db1ed0ed0a98b58d1e4b4c6032679731807be4f858b"
+  },
+  {
+   "name": "debugging",
+   "version": 1,
+   "sha256": "329da5e64d9e5a04df55d274ffee02a47faaf263b7595aed4d87bb2608ff9214"
+  },
+  {
+   "name": "git-pr-workflow",
+   "version": 1,
+   "sha256": "c29734355540e3c1036081280cfbb2b7ac988b93c0696124681d5d2d44c810a1"
+  },
+  {
+   "name": "writing-tests",
+   "version": 1,
+   "sha256": "f019f6117afe04b1e6e4cd433d5472fcb571a9a7979a57b3b125467755333610"
+  },
+  {
+   "name": "refactoring",
+   "version": 1,
+   "sha256": "e0f8b9b1a433e3961834d6c54e98f0479667aa965a400c47a57a21fd6a195c20"
+  },
+  {
+   "name": "web-audit",
+   "version": 1,
+   "sha256": "15c79e21a7786c25660b98443534cf118a6dc70bc871ac35c31bb8cbce8a20f3"
+  }
+ ]
+}

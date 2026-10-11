@@ -479,7 +479,7 @@ When you finish, say what you did in one short sentence.
             append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
                 "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
             if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
-            append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillPacks.promptBlock())
+            append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillPacks.promptBlock(userText))
         }
     }
 
