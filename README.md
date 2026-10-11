@@ -20,8 +20,15 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.14.4 (versionCode 44) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.15.0 (versionCode 45) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.15.0: Blaze account (shared with Blaze Desktop)
+- New Settings › Blaze account: sign in or create an account with email + password, or Continue with Google / GitHub, using the same blaze-auth service as Blaze Desktop (`https://blaze-auth.blaze-app.workers.dev`), so one account works on both.
+- Google/GitHub sign-in runs in the browser with PKCE; the redirect comes back to a random `127.0.0.1` port and the one-time code is redeemed with the verifier. No client secret lives in the app.
+- The session token is Keystore-encrypted (`conn_tok_blaze_session`); the user's name and email are cached for the screen. The session is re-checked at start and cleared if it was signed out or deleted elsewhere.
+- Sign out (ends the session at the service too) and Delete account. Connected accounts, keys and chats on the phone stay.
+- Code: `connect/BlazeAccount.kt`, `ui/AccountPage.kt`. Set `blaze_cloud_url` to point at a local Worker for testing.
 
 ## v1.14.4: Notification replies keep the conversation
 - Replying from a Blaze notification now continues the chat that sent it, even if a different chat is open, instead of landing in whichever chat was on screen.
