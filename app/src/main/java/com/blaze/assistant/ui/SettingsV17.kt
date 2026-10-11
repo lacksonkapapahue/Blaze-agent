@@ -148,7 +148,10 @@ fun ConnectionsPage() {
     var open by remember { mutableStateOf("") }
     var tick by remember { mutableStateOf(0) }
     Spacer(Modifier.height(10.dp))
-    Note("Let Blaze use your accounts. You create a free app key with each service once (steps inside); sign-in tokens stay encrypted on this phone. Sending or posting always asks you first.")
+    val acct by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
+    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.blaze.assistant.connect.BlazeAccount.refreshProviders(true) } }
+    Note(if (acct.connectors.values.any { it }) "Let Blaze use your accounts. Most connect in one tap: sign in in the browser and you're done. Tokens stay encrypted on this phone. Sending or posting always asks you first."
+         else "Let Blaze use your accounts. You create a free app key with each service once (steps inside); sign-in tokens stay encrypted on this phone. Sending or posting always asks you first.")
     Connectors.all.forEach { conn ->
         val on = remember(tick, st) { Connectors.connected(conn.id) }
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { open = if (open == conn.id) "" else conn.id }.padding(vertical = 14.dp),
@@ -161,10 +164,18 @@ fun ConnectionsPage() {
             Label(if (on) "On" else "Set up", color = if (on) c.accent else c.sub, size = 10.sp)
         }
         if (open == conn.id) Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+            val one = acct.connectors[conn.id] == true
+            var manual by remember(conn.id) { mutableStateOf(Connectors.clientId(conn.id).isNotBlank()) }
+            if (on) Button("Disconnect", primary = false) { Connectors.disconnect(conn.id); tick++ }
+            else if (one && !manual) {
+                Note("Connect in one tap: Blaze opens ${conn.name} in your browser, you approve, and you're back here.")
+                Button("Connect ${conn.name}") { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
+                Label("Use your own key instead  ↓", color = c.accent, size = 10.sp, modifier = Modifier.padding(top = 12.dp).clickable { manual = true })
+            }
+            if (!on && (!one || manual)) {
             Note(conn.help)
             Label("Open setup page →", color = c.accent, size = 10.sp, modifier = Modifier.padding(bottom = 12.dp).clickable { uri.openUri(conn.setupUrl) })
-            if (on) Button("Disconnect", primary = false) { Connectors.disconnect(conn.id); tick++ }
-            else if (conn.kind == Connectors.Kind.TOKEN) {
+            if (conn.kind == Connectors.Kind.TOKEN) {
                 var tok by remember { mutableStateOf("") }
                 Field("Token", tok, { tok = it }, if (conn.id == "slack") "xoxp-…" else "ntn_…", secret = true)
                 Button("Save") { Connectors.saveToken(conn.id, tok); tok = ""; tick++ }
@@ -174,6 +185,7 @@ fun ConnectionsPage() {
                 Field("Client ID", cid, { cid = it; Connectors.setClientId(conn.id, it) }, "Paste client ID")
                 if (conn.needsSecret) Field("Client secret", sec, { sec = it; Connectors.setClientSecret(conn.id, it) }, "Paste client secret", secret = true)
                 Button("Connect") { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
+            }
             }
         }
     }
