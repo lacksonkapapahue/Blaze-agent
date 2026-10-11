@@ -68,6 +68,7 @@ object CommandRunner {
             "chats", "history" -> openChats()
             "settings" -> openSettings("")
             "retry" -> Agent.retryLast()
+            "update", "upgrade" -> com.blaze.assistant.update.Updater.start(ctx)
             "stop" -> Agent.stop()
             "remember" -> if (arg.isNotEmpty()) { Memory.add(arg); Agent.note("Remembered: $arg") } else openSettings("memory")
             "forget" -> if (arg.isNotEmpty()) Agent.note(Memory.forget(arg)) else openSettings("memory")

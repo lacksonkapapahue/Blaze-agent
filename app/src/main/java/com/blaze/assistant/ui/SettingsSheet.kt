@@ -167,6 +167,8 @@ private fun AiPage() {
     var model by remember { mutableStateOf(Settings.model) }
     var base by remember { mutableStateOf(Settings.customBase) }
     var think by remember { mutableStateOf(Settings.showReasoning) }
+    var showSteps by remember { mutableStateOf(Settings.showSteps) }
+    var fold by remember { mutableStateOf(Settings.foldAnswers) }
     var fu by remember { mutableStateOf(Settings.followups) }
     val c = LocalBlaze.current
 
@@ -213,6 +215,8 @@ private fun AiPage() {
     }
     Spacer(Modifier.height(10.dp))
     ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
+    ToggleRow("Show every step", "List each tool call as it happens, instead of one plain line and \"Worked for 12s\"", showSteps) { showSteps = !showSteps; Settings.showSteps = showSteps }
+    ToggleRow("Fold long answers", "Long tables, lists, code and reports open as cards you tap to expand", fold) { fold = !fold; Settings.foldAnswers = fold }
     ToggleRow("Suggested follow-ups", "Three tap-to-send ideas under each answer", fu) { fu = !fu; Settings.followups = fu }
     FastLaneSection()
     StepsModelSection()

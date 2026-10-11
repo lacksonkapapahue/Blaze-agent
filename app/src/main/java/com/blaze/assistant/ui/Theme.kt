@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -96,10 +97,47 @@ object Type {
     val Mono = FontFamily.Monospace
 }
 
+/** Light/dark override; "system" follows the phone. Backed by Settings.themeMode. */
+object ThemeMode {
+    val mode = androidx.compose.runtime.mutableStateOf(try { com.blaze.assistant.agent.Settings.themeMode } catch (_: Exception) { "system" })
+    fun set(m: String) { mode.value = m; com.blaze.assistant.agent.Settings.themeMode = m }
+}
+
 @Composable
 fun BlazeTheme(content: @Composable () -> Unit) {
-    val c = if (isSystemInDarkTheme()) DarkColors else LightColors
+    val sys = isSystemInDarkTheme()
+    val dark = when (ThemeMode.mode.value) { "dark" -> true; "light" -> false; else -> sys }
+    val c = if (dark) DarkColors else LightColors
     CompositionLocalProvider(LocalBlaze provides c, content = content)
+}
+
+/** Sun/moon: tap flips light and dark, long-press goes back to following the phone. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun ThemeButton(modifier: Modifier = Modifier) {
+    val c = LocalBlaze.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Box(modifier.size(38.dp).hairline(c.hair).combinedClickable(
+        onClick = { ThemeMode.set(if (c.dark) "light" else "dark") },
+        onLongClick = { ThemeMode.set("system"); android.widget.Toast.makeText(ctx, "Following your phone's theme", android.widget.Toast.LENGTH_SHORT).show() }
+    ), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(16.dp)) {
+            val r = size.minDimension / 2
+            if (c.dark) {
+                // Sun: disc and eight rays (tap for light).
+                drawCircle(c.ink, r * 0.42f, center)
+                for (k in 0 until 8) {
+                    val a = Math.toRadians(k * 45.0)
+                    val dx = kotlin.math.cos(a).toFloat(); val dy = kotlin.math.sin(a).toFloat()
+                    drawLine(c.ink, Offset(center.x + dx * r * 0.62f, center.y + dy * r * 0.62f), Offset(center.x + dx * r * 0.95f, center.y + dy * r * 0.95f), 1.6.dp.toPx())
+                }
+            } else {
+                // Moon: a disc with a bite taken out (tap for dark).
+                drawCircle(c.ink, r * 0.8f, center)
+                drawCircle(c.paper, r * 0.66f, Offset(center.x + r * 0.42f, center.y - r * 0.3f))
+            }
+        }
+    }
 }
 
 /** Uppercase mono label, like the site's eyebrows and nav. */

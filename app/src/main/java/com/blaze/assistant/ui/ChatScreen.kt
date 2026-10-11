@@ -119,15 +119,15 @@ import java.util.Calendar
 /** What the message list draws: a message, or a folded run of steps. */
 private sealed class Item(val key: String) {
     class Msg(val m: ChatMessage) : Item("m${m.id}")
-    class Steps(val steps: List<ChatMessage>, val live: Boolean) : Item("s${steps.first().id}")
+    class Steps(val steps: List<ChatMessage>, val live: Boolean, val endAt: Long) : Item("s${steps.first().id}")
 }
 
 private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item> {
     val out = mutableListOf<Item>()
     var run = mutableListOf<ChatMessage>()
-    fun flush(live: Boolean) { if (run.isNotEmpty()) { out += Item.Steps(run, live); run = mutableListOf() } }
-    messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false); out += Item.Msg(m) } }
-    flush(working)
+    fun flush(live: Boolean, endAt: Long) { if (run.isNotEmpty()) { out += Item.Steps(run, live, endAt); run = mutableListOf() } }
+    messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false, m.at); out += Item.Msg(m) } }
+    flush(working, 0L)
     return out
 }
 
@@ -387,6 +387,7 @@ private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: ()
             Spacer(Modifier.width(10.dp))
             Text("Blaze", modifier = Modifier.weight(1f),
                 style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, letterSpacing = (-0.015).em, color = c.ink))
+            ThemeButton(Modifier.padding(end = 8.dp))
             Box(Modifier.padding(end = 8.dp).size(38.dp).hairline(c.hair).clickable(onClick = onCall), contentAlignment = Alignment.Center) {
                 PhoneGlyph(c.ink, 16.dp)
             }
@@ -516,7 +517,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(items, key = { it.key }) { item ->
                 when (item) {
-                    is Item.Steps -> StepsGroup(item.steps, item.live)
+                    is Item.Steps -> if (Settings.showSteps) StepsGroup(item.steps, item.live) else CalmSteps(item.steps, item.live, item.endAt)
                     is Item.Msg -> Entry(item.m, canAct = mood == Mood.IDLE, onQuote = onQuote,
                         followups = if (item.m.id == lastBlazeId && mood == Mood.IDLE && Settings.followups) item.m.followups else emptyList(),
                         onFollowup = onFollowup)
@@ -653,15 +654,12 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
             if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             Actions(m, canAct, onQuote, allowQuote = false)
         }
-        Role.BLAZE -> Column(Modifier.fillMaxWidth()) {
+        Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard() else Column(Modifier.fillMaxWidth()) {
             Label("Blaze", color = c.accent, size = 10.sp)
             if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
             Spacer(Modifier.height(6.dp))
             Box(Modifier.widthIn(max = 330.dp).background(c.paper).hairline(c.hair).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                SelectionContainer {
-                    val shownText = remember(m.text, c.accent) { Md.render(m.text, c.accent, c.hair.copy(alpha = 0.35f)) }
-                    Text(shownText, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 23.sp, color = c.body))
-                }
+                AnswerBody(m.id, m.text)
             }
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             Actions(m, canAct, onQuote, allowQuote = true)

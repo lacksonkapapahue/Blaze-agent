@@ -34,6 +34,7 @@
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
@@ -169,6 +170,7 @@
         </service>
 
         <receiver android:name=".notify.ActionReceiver" android:exported="false" />
+        <receiver android:name=".update.InstallReceiver" android:exported="false" />
         <receiver android:name=".proactive.ProactiveReceiver" android:exported="false" />
 
         <provider android:name="androidx.core.content.FileProvider"

@@ -28,7 +28,9 @@ enum class Role { USER, BLAZE, STEP, ERROR }
 data class ChatMessage(val id: Long, val role: Role, val text: String, val files: List<String> = emptyList(),
                        val thinking: String = "", val followups: List<String> = emptyList(), val meta: String = "",
                        /** Pictures, beats and other media Blaze made for this reply (absolute paths). */
-                       val media: List<String> = emptyList())
+                       val media: List<String> = emptyList(),
+                       /** When it was added (ms); 0 for chats saved before v1.13. */
+                       val at: Long = System.currentTimeMillis())
 
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
 object ReplyParts {
@@ -187,6 +189,13 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Reads chat files in the background so the UI never waits on disk. */
     fun refreshChats() { io.launch { val l = ChatStore.list(); _chats.value = l } }
 
+    /** A card drawn by the app (e.g. the update card), marked by its meta. Not sent to the model. */
+    fun card(text: String, meta: String) {
+        val s = cur
+        val id = s.add(Role.BLAZE, text)
+        s.msgs = s.msgs.map { if (it.id == id) it.copy(meta = meta) else it }
+    }
+
     /** A line from the app itself (command results, help). Shown, not sent to the model. */
     fun note(text: String, asReply: Boolean = false) { cur.note(text, asReply) }
 
@@ -260,7 +269,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             val files = m.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { java.io.File(it).exists() } ?: emptyList()
-            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media)
+            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"))
             if (m.has("mark")) s.historyMark[mid] = m.getInt("mark")
         }
         ids.set(maxOf(ids.get(), maxId + 1))
@@ -428,6 +437,7 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.phone.Location.tool())
         if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.update.Updater.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
         if (com.blaze.assistant.link.DesktopLink.paired) t.put(com.blaze.assistant.link.DesktopLink.tool())
@@ -513,10 +523,27 @@ When you finish, say what you did in one short sentence.
             job = null
             mood = Mood.IDLE
         }
+        /** The generic step just added for the running tool; a tool's own step line replaces its text. */
+        var autoStepId = -1L
+
         fun add(role: Role, text: String, files: List<String> = emptyList()): Long {
+            if (role == Role.STEP && autoStepId >= 0 && msgs.lastOrNull()?.id == autoStepId) {
+                val sid = autoStepId; autoStepId = -1L
+                msgs = msgs.map { if (it.id == sid) it.copy(text = text) else it }
+                return sid
+            }
+            autoStepId = -1L
             val id = ids.getAndIncrement()
             msgs = msgs + ChatMessage(id, role, if (role == Role.ERROR) PlainError.of(text) else text, files)
             if (role == Role.STEP && !inForeground && mood != Mood.IDLE) Notifier.working(if (currentStep > 0) "Step $currentStep · $text" else text)
+            return id
+        }
+
+        /** A step with its exact call kept for the expanded view. */
+        fun addStep(text: String, exact: String): Long {
+            val id = add(Role.STEP, text)
+            msgs = msgs.map { if (it.id == id) it.copy(meta = exact) else it }
+            autoStepId = id
             return id
         }
 
@@ -556,6 +583,7 @@ When you finish, say what you did in one short sentence.
                         if (m.thinking.isNotEmpty()) put("thinking", m.thinking.take(20000))
                         if (m.followups.isNotEmpty()) put("followups", JSONArray(m.followups))
                         if (m.meta.isNotEmpty()) put("meta", m.meta)
+                        if (m.at > 0) put("at", m.at)
                         if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
                     })
             }
@@ -925,6 +953,8 @@ When you finish, say what you did in one short sentence.
                         val name = fn.getString("name")
                         val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) }
                             catch (_: Exception) { JSONObject() }
+                        if (name !in Friendly.selfNarrating && name !in unknownCalls) addStep(Friendly.say(name, args), Friendly.exact(name, args))
+                        if (pre.containsKey(i)) autoStepId = -1L
                         var result = if (pre.containsKey(i)) pre.getValue(i) else if (name in unknownCalls) {
                             val close = ToolCalls.names(allTools).sortedBy { n -> levGuess(n, name) }.take(4)
                             "Error: there is no tool called \"$name\". Closest real tools: ${close.joinToString(", ")}. Call one of those (exact name), or find_tool to search."
@@ -1229,6 +1259,10 @@ When you finish, say what you did in one short sentence.
                 in com.blaze.assistant.phone.Skills.names -> {
                     add(Role.STEP, com.blaze.assistant.phone.Skills.describe(name, args))
                     com.blaze.assistant.phone.Skills.run(app, name, args)
+                }
+                com.blaze.assistant.update.Updater.TOOL -> {
+                    if (this === cur) com.blaze.assistant.update.Updater.showCard()
+                    com.blaze.assistant.update.Updater.run(app, args.optBoolean("install", true))
                 }
                 in Learning.toolNames -> {
                     add(Role.STEP, when (name) { "run_skill" -> "Replaying skill \"${args.optString("name")}\""; "skill_manage" -> "Saving a skill"; else -> "Searching past chats" })

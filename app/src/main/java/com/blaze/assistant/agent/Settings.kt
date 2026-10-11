@@ -212,6 +212,21 @@ object Settings {
         get() = prefs.getBoolean("show_reasoning", true)
         set(v) = prefs.edit().putBoolean("show_reasoning", v).apply()
 
+    /** Show every step as it happens (the old list) instead of one calm plain-English line. */
+    var showSteps: Boolean
+        get() = prefs.getBoolean("show_steps", false)
+        set(v) = prefs.edit().putBoolean("show_steps", v).apply()
+
+    /** Fold long tables, lists, code and reports into cards you tap to open. */
+    var foldAnswers: Boolean
+        get() = prefs.getBoolean("fold_answers", true)
+        set(v) = prefs.edit().putBoolean("fold_answers", v).apply()
+
+    /** system, light or dark (the sun/moon button in the top bar). */
+    var themeMode: String
+        get() = prefs.getString("theme_mode", "system") ?: "system"
+        set(v) = prefs.edit().putString("theme_mode", v).apply()
+
     /** Three tap-to-send suggestions under replies. */
     var followups: Boolean
         get() = prefs.getBoolean("followups", true)

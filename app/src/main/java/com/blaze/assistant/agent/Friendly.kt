@@ -1,0 +1,108 @@
+package com.blaze.assistant.agent
+
+import org.json.JSONObject
+
+/**
+ * Plain-English line for a tool call ("Searching the web for “cheap flights”"), shown instead of
+ * tool names while Blaze works. Same phrases as Blaze Desktop's friendly.go, plus phone tools.
+ */
+object Friendly {
+    private val plainRe = Regex("^[A-Za-z][A-Za-z0-9 ,.'()]*$")
+    private val installRe = Regex("""(?i)\b(npm|pnpm|yarn|bun) (i|install|add)\b|\bpip3? install\b|\b(apt|apt-get|apk|pkg|pacman|cargo|go) (install|add|-S|get)\b""")
+
+    /** Tools that write their own step line, so no second one is added. */
+    val selfNarrating = setOf("find_tool", "load_tools", "remember", "forget", "generate_image", "ask_user")
+
+    fun say(name: String, a: JSONObject): String {
+        fun v(k: String) = a.optString(k).lineSequence().firstOrNull().orEmpty().trim()
+        fun q(s: String) = "\u201c" + s.take(40) + "\u201d"
+        fun file() = v("path").substringAfterLast('/').ifBlank { "a file" }
+        fun host(s: String) = try { java.net.URI(s).host?.removePrefix("www.") ?: s } catch (_: Exception) { s }.ifBlank { "a page" }
+        fun or(vararg s: String) = s.firstOrNull { it.isNotBlank() }.orEmpty()
+        val s = when (name) {
+            "web_search" -> "Searching the web for " + q(v("query"))
+            "fetch_page", "browser_read" -> "Reading " + host(or(v("url"), "a web page"))
+            "browser_open", "open_url" -> "Opening " + host(or(v("url"), v("target")))
+            "browser_click", "browser_type", "browser_scroll", "browser_back", "browser_tabs", "browser_show" -> "Using the browser"
+            "http_request" -> "Calling " + host(v("url"))
+            "download_file" -> "Downloading " + host(v("url"))
+            "file_read" -> "Reading " + file()
+            "file_write" -> "Writing " + file()
+            "file_edit" -> "Editing " + file()
+            "file_delete" -> "Deleting " + file()
+            "file_list" -> "Looking through your files"
+            "file_search" -> "Searching your files for " + q(or(v("pattern"), v("query")))
+            "export_file" -> "Saving " + file() + " to your phone"
+            "run_shell", "termux_run" -> {
+                val cmd = v("command"); val sum = v("summary")
+                when {
+                    installRe.containsMatchIn(cmd) -> "Installing packages"
+                    sum.isNotBlank() && sum.length <= 60 && plainRe.matches(sum) -> sum.replaceFirstChar { it.uppercase() }
+                    else -> "Running a command"
+                }
+            }
+            "run_code" -> "Running " + or(v("language"), "some") + " code"
+            "git" -> "Checking the project history"
+            "linux_install" -> "Setting up the Linux terminal"
+            "terminal_jobs", "terminal_status", "job_input", "job_log" -> "Checking a background job"
+            "terminal_stop" -> "Stopping a background job"
+            "preview_server" -> "Opening the preview"
+            "read_screen", "look_at_screen" -> "Looking at your screen"
+            "open_app" -> "Opening " + or(v("app"), v("name"), v("package"), "an app")
+            "tap" -> "Tapping " + or(v("text"), "the screen")
+            "type_text" -> "Typing"
+            "scroll" -> "Scrolling"
+            "press_button", "system_action" -> "Pressing " + or(v("button"), v("action"), "a button")
+            "search_in_app" -> "Searching " + or(v("app"), "the app") + " for " + q(v("query"))
+            "wait" -> "Waiting for the screen"
+            "list_apps" -> "Checking your apps"
+            "send_sms", "compose_sms", "send_text" -> "Writing a message to " + or(v("to"), v("name"), v("contact"), "your contact")
+            "read_messages" -> "Reading your messages"
+            "call_contact", "call_number", "dial" -> "Calling " + or(v("name"), v("number"), "someone")
+            "recent_calls" -> "Checking your calls"
+            "find_contact", "gcontacts_search" -> "Looking up " + or(v("name"), v("query"), "a contact")
+            "add_contact", "edit_contact" -> "Updating your contacts"
+            "calendar_events", "gcal_events" -> "Checking your calendar"
+            "add_calendar_event", "gcal_create", "move_event", "delete_event" -> "Updating your calendar"
+            "set_alarm" -> "Setting an alarm"
+            "set_timer" -> "Setting a timer"
+            "set_volume" -> "Changing the volume"
+            "device_setting", "open_settings_page", "phone_mode" -> "Changing a setting"
+            "battery_level" -> "Checking your battery"
+            "app_usage" -> "Checking your screen time"
+            "navigate_to" -> "Getting directions to " + or(v("destination"), v("place"), "there")
+            "media_control", "spotify_control", "spotify_play" -> "Controlling your music"
+            "spotify_now_playing" -> "Checking what's playing"
+            "open_camera" -> "Opening the camera"
+            "clipboard" -> "Using the clipboard"
+            "share_text", "share_to_app" -> "Sharing"
+            "post_notification" -> "Sending a notification"
+            "gallery" -> "Looking in your Gallery"
+            "gmail_search", "gmail_read" -> "Checking your email"
+            "gmail_send" -> "Sending an email"
+            "drive_search" -> "Searching your Drive"
+            "github_my_repos", "github_issues", "github_my_prs", "github_notifications", "github_search_repos" -> "Checking GitHub"
+            "github_create_issue" -> "Opening a GitHub issue"
+            "notion_search", "notion_add_page" -> "Working in Notion"
+            "slack_channels", "slack_read", "slack_post" -> "Working in Slack"
+            "use_skill", "run_skill", "skill_file" -> "Following a saved skill"
+            "write_skill", "skill_manage", "install_skill" -> "Saving a skill"
+            "search_past_chats" -> "Looking through past chats"
+            "uninstall_app" -> "Uninstalling an app"
+            "update_blaze" -> "Checking for a Blaze update"
+            "ask_pc" -> "Asking your PC"
+            "processes", "goal" -> "Keeping track of the task"
+            "run_plan", "do_actions" -> "Working on your phone"
+            else -> name.replace('_', ' ').replaceFirstChar { it.uppercase() }
+        }
+        return if (s.length > 60) s.take(59) + "…" else s
+    }
+
+    /** The exact call, for the expanded view. */
+    fun exact(name: String, a: JSONObject): String {
+        val cmd = a.optString("command")
+        if (cmd.isNotBlank() && name in setOf("run_shell", "termux_run")) return "$ " + cmd.take(400)
+        val body = a.keys().asSequence().joinToString(", ") { k -> "$k=" + a.opt(k).toString().replace("\n", " ").take(120) }
+        return "$name($body)".take(500)
+    }
+}

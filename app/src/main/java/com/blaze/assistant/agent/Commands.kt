@@ -20,6 +20,7 @@ object Commands {
         Command("settings", "", "Open settings"),
         Command("retry", "", "Regenerate the last answer"),
         Command("stop", "", "Stop what Blaze is doing"),
+        Command("update", "", "Update Blaze to the newest build"),
         Command("remember", "<fact>", "Save something to memory"),
         Command("forget", "<fact>", "Remove something from memory"),
         Command("memory", "", "See what Blaze remembers"),

@@ -20,8 +20,14 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.9.15 (versionCode 26) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.13.0 (versionCode 39) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.13.0: Calm chat
+- Plain steps: while working, one shimmering plain-English line ("Searching the web for …", `agent/Friendly.kt`); when done, "Worked for 12s · 5 steps", tap for each step and its exact call (`ui/CalmSteps.kt`). Setting "Show every step" (`show_steps`, off) brings back the full list.
+- Answer cards: long tables, lists, code and reports fold into a clipped card with a fade; tap to expand, Copy gives the Markdown. Tables now render as grids. Setting "Fold long answers" (`fold_answers`, on). `ui/AnswerCards.kt`.
+- Sun/moon button in the top bar: tap flips light/dark, long-press follows the phone again (`theme_mode`).
+- `/update` and the `update_blaze` tool: newest `Blaze-v*.apk` from the `apk` branch (GitHub connector token), Checking → Downloading N% → Installing card, PackageInstaller install, plain errors with Retry (`update/Updater.kt`, `ui/UpdateCard.kt`).
 
 ## v1.12.0: Blaze Desktop pairing
 - Settings › Blaze Desktop › Scan QR code (from Blaze Desktop › Phone), or paste the pairing link. Code in `link/DesktopLink.kt`, screen in `ui/DesktopPage.kt`.
