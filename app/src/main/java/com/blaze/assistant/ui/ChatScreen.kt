@@ -221,6 +221,16 @@ fun ChatScreen() {
         }
     }
 
+    // Shared from another app: lands in the message box for the user to send, never runs by itself
+    // (any app can share text, so it could carry instructions the user never wrote).
+    val shared by Agent.sharedDraft.collectAsState()
+    LaunchedEffect(shared) {
+        val d = shared ?: return@LaunchedEffect
+        Agent.sharedDraft.value = null
+        if (d.text.isNotBlank()) input = TextFieldValue(d.text, androidx.compose.ui.text.TextRange(d.text.length))
+        d.attachment?.let { pending = pending + it }
+    }
+
     val voiceState by Voice.state.collectAsState()
     val listenReq by Voice.listenRequests.collectAsState()
     fun startVoice() {

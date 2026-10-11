@@ -67,14 +67,16 @@ class MainActivity : FragmentActivity() {
             @Suppress("DEPRECATION")
             val stream = i.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM)
             i.action = null
+            // Never sent on its own: another app could share instructions the user didn't write.
+            // It waits in the message box until the user taps Send.
             if (stream != null) {
                 lifecycleScope.launch {
                     val a = com.blaze.assistant.agent.Attachments.load(this@MainActivity, stream)
-                    if (a != null) Agent.send(shared.ifEmpty { "What's in this? Help me with it." }, attachments = listOf(a))
+                    Agent.sharedDraft.value = Agent.SharedDraft(shared, a)
                 }
                 return
             }
-            if (shared.isNotEmpty()) Agent.send("Here's something I shared with you:\n\n$shared\n\nHelp me with it (summarise or explain if unclear).")
+            if (shared.isNotEmpty()) Agent.sharedDraft.value = Agent.SharedDraft(shared)
         }
     }
 

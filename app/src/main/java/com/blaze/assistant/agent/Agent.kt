@@ -83,6 +83,10 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private lateinit var app: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard)
 
+    /** Text or a file shared into Blaze from another app, waiting in the message box for the user's Send. */
+    data class SharedDraft(val text: String, val attachment: Attachment? = null)
+    val sharedDraft = MutableStateFlow<SharedDraft?>(null)
+
     /** Messages of the chat on screen. */
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages

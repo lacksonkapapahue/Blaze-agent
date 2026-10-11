@@ -20,8 +20,13 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.14.0 (versionCode 40) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.14.1 (versionCode 41) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.14.1: Hardening for the public repo
+- Text and files shared into Blaze from other apps now wait in the message box for your Send instead of running on their own (any app can share, so it could carry instructions you didn't write).
+- `/update` works without a GitHub connection (public repo; connecting only raises GitHub's rate limit). Before installing, the download is checked: it must be Blaze, newer than the installed build, and signed by the key the installed Blaze trusts (or a newer key in its lineage).
+- CI: read-only token by default; publishing to the `apk` branch, releases and the failure issue only run on pushes to this repo's `main`, never on pull requests or forks; checkout doesn't keep the token.
 
 ## v1.14.0: Modes and background agents
 - Composer modes (`agent/Modes.kt`, port of desktop modes.go). **Plan** = read and look only: the tool list is filtered and every other call is refused at dispatch (`Session.runTool`), the fast lane is skipped, and git is read-only (`planGit`). **Build** = full access (default). **Auto** = confirm cards (default). **Autopilot** = ordinary confirms pass, destructive ones (delete, wipe, uninstall, money, messages and calls in the user's name) keep the card; `ask_user` shows its card for 60 s, then Blaze decides itself; a reply that only asks a question gets "decide yourself" (max 8); runs capped at `autopilot_steps` (150) and `autopilot_minutes` (45). Prefs `work_mode`, `approval`. Switches: chips above the message box (`ModeBar`, pref `mode_bar`), `/plan [goal]`, `/build`, `/autopilot`, `/auto`.

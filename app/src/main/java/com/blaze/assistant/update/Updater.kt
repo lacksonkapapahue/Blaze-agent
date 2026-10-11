@@ -24,7 +24,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * In-chat self-update: finds the newest Blaze-v*.apk on the repo's apk branch (private repo, so it
+ * In-chat self-update: finds the newest Blaze-v*.apk on the repo's apk branch (public repo; a GitHub connection only raises the rate limit; it
  * uses the GitHub connector token), downloads it with progress and installs it through
  * PackageInstaller. Prefs, keys and models live in app storage, so an update keeps them all.
  */
@@ -77,10 +77,11 @@ object Updater {
         return false
     }
 
-    private fun conn(url: String, token: String, raw: Boolean): HttpURLConnection =
+    private fun conn(url: String, token: String?, raw: Boolean): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000; readTimeout = 60_000
-            setRequestProperty("Authorization", "Bearer $token")
+            // The repo is public: a GitHub connection only raises the rate limit, it isn't required.
+            if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", if (raw) "application/vnd.github.raw" else "application/vnd.github+json")
             setRequestProperty("User-Agent", "Blaze-Android")
         }
@@ -93,14 +94,14 @@ object Updater {
         if (s is State.Checking || s is State.Downloading || s is State.Installing) return "An update is already running."
         _state.value = State.Checking
         val token = withContext(Dispatchers.IO) { try { Connectors.access("github") } catch (_: Exception) { null } }
-            ?: return fail("Connect GitHub first (Settings › Connectors). The Blaze builds live in a private repo, so updates need it.")
         val have = installed(ctx)
         return try {
             val (name, version, size) = withContext(Dispatchers.IO) {
                 val c = conn("$API?ref=apk", token, false)
                 when (c.responseCode) {
-                    401, 403 -> throw UpdateError("GitHub refused the request. Reconnect GitHub in Settings › Connectors and try again.")
-                    404 -> throw UpdateError("Couldn't find the Blaze builds. The GitHub account you connected may not have access to the Blaze repo.")
+                    401 -> throw UpdateError("GitHub refused the saved GitHub login. Reconnect GitHub in Settings › Connectors, or disconnect it, and try again.")
+                    403, 429 -> throw UpdateError("GitHub is limiting update checks right now. Try again in an hour, or connect GitHub in Settings › Connectors.")
+                    404 -> throw UpdateError("Couldn't find the Blaze builds. Try again later.")
                 }
                 if (c.responseCode !in 200..299) throw UpdateError("GitHub answered with an error (${c.responseCode}). Try again in a minute.")
                 val arr = JSONArray(c.inputStream.bufferedReader().readText())
@@ -138,6 +139,8 @@ object Updater {
                 if (total > 0 && got < total) throw UpdateError("The download was cut off. Tap Retry.")
                 f
             }
+            // Check it before Android sees it: same app, newer build, signed by the key this Blaze trusts.
+            withContext(Dispatchers.IO) { verify(ctx, apk) }?.let { apk.delete(); return fail(it) }
             _state.value = State.Installing(version)
             withContext(Dispatchers.IO) { installApk(ctx, apk) }
             "Downloaded Blaze v$version. Android is asking the user to confirm the install; Blaze restarts after it."
@@ -149,6 +152,32 @@ object Updater {
     }
 
     private class UpdateError(msg: String) : Exception(msg)
+
+    /** Why a downloaded APK must not be installed (null = fine). */
+    @Suppress("DEPRECATION")
+    private fun verify(ctx: Context, apk: File): String? {
+        val pm = ctx.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= 28) android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES else android.content.pm.PackageManager.GET_SIGNATURES
+        val info = pm.getPackageArchiveInfo(apk.absolutePath, flags) ?: return "That download isn't a valid app file. Tap Retry."
+        if (info.packageName != ctx.packageName) return "That download isn't Blaze, so I didn't install it."
+        val mine = pm.getPackageInfo(ctx.packageName, flags)
+        val newCode = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+        val oldCode = if (Build.VERSION.SDK_INT >= 28) mine.longVersionCode else mine.versionCode.toLong()
+        if (newCode <= oldCode) return "That download isn't newer than the Blaze you have, so I didn't install it."
+        fun sha(b: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
+        val trusted: Set<String>; val offered: Set<String>
+        if (Build.VERSION.SDK_INT >= 28) {
+            val si = info.signingInfo ?: return "That download isn't signed, so I didn't install it."
+            trusted = mine.signingInfo.apkContentsSigners.map { sha(it.toByteArray()) }.toSet()
+            // A build signed with a newer key in Blaze's key lineage lists the old key in its history.
+            offered = (si.apkContentsSigners + (si.signingCertificateHistory ?: emptyArray())).map { sha(it.toByteArray()) }.toSet()
+        } else {
+            trusted = mine.signatures.map { sha(it.toByteArray()) }.toSet()
+            offered = (info.signatures ?: emptyArray()).map { sha(it.toByteArray()) }.toSet()
+        }
+        if (trusted.isEmpty() || !offered.containsAll(trusted)) return "That download isn't signed by Blaze's key, so I didn't install it."
+        return null
+    }
 
     private fun installApk(ctx: Context, apk: File) {
         val pi = ctx.packageManager.packageInstaller
