@@ -20,8 +20,11 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.14.2 (versionCode 42) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.14.3 (versionCode 43) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.14.3: First build on the rotated key
+- The first build signed with the new key (v3 lineage from the old key). Install it once and from then on the phone only accepts Blaze builds signed with the new key.
 
 ## v1.14.2: Signing key rotation
 - The original signing key is public (it was committed when the repo was private), so CI now signs with a new key kept only in GitHub Actions secrets (`BLAZE_SIGNING_P12`, `BLAZE_SIGNING_PASS`), using APK Signature Scheme v3 key rotation.
