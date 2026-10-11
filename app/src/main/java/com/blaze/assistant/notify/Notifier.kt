@@ -52,6 +52,13 @@ object Notifier {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
+    /** The Reply button: carries where the answer should go (the chat, or the heads-up text itself). */
+    private fun replyIntent(code: Int, chatId: String?, context: String?): PendingIntent = PendingIntent.getBroadcast(
+        app, code, Intent(app, ActionReceiver::class.java).setAction(ActionReceiver.REPLY)
+            .putExtra(ActionReceiver.EXTRA_CHAT, chatId.orEmpty()).putExtra(ActionReceiver.EXTRA_CONTEXT, context.orEmpty()),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+    )
+
     private fun broadcast(action: String, mutable: Boolean = false): PendingIntent = PendingIntent.getBroadcast(
         app, action.hashCode(), Intent(app, ActionReceiver::class.java).setAction(action),
         PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
@@ -78,11 +85,11 @@ object Notifier {
     fun doneWorking() = NotificationManagerCompat.from(app).cancel(ID_WORK)
 
     /** Blaze's reply, with an inline Reply box. */
-    fun reply(raw: String, isError: Boolean) {
+    fun reply(raw: String, isError: Boolean, chatId: String? = null) {
         val text = com.blaze.assistant.ui.Md.plain(raw)
         if (!allowed()) return
         val input = RemoteInput.Builder(KEY_REPLY).setLabel("Reply to Blaze").build()
-        val replyAction = NotificationCompat.Action.Builder(0, "Reply", broadcast(ActionReceiver.REPLY, mutable = true))
+        val replyAction = NotificationCompat.Action.Builder(0, "Reply", replyIntent(7101, chatId, if (chatId == null) text else null))
             .addRemoteInput(input).setAllowGeneratedReplies(true).build()
         val n = NotificationCompat.Builder(app, CH_REPLY)
             .setSmallIcon(R.drawable.ic_stat_blaze)
@@ -144,7 +151,7 @@ object Notifier {
             .setContentTitle(if (urgent) "Blaze · important" else "Blaze").setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text)).setAutoCancel(true).setContentIntent(openApp())
             .setPriority(if (urgent) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
-            .addAction(NotificationCompat.Action.Builder(0, "Reply", broadcast(ActionReceiver.REPLY, mutable = true)).addRemoteInput(input).build())
+            .addAction(NotificationCompat.Action.Builder(0, "Reply", replyIntent(7108, null, text)).addRemoteInput(input).build())
         if (suggest.isNotBlank()) {
             val pi = PendingIntent.getBroadcast(app, ("do" + suggest).hashCode(), Intent(app, ActionReceiver::class.java).setAction(ActionReceiver.DO)
                 .putExtra("prompt", suggest), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -191,6 +198,8 @@ class ActionReceiver : BroadcastReceiver() {
         const val ALLOW = "com.blaze.assistant.ALLOW"
         const val DENY = "com.blaze.assistant.DENY"
         const val DO = "com.blaze.assistant.DO"
+        const val EXTRA_CHAT = "reply_chat"
+        const val EXTRA_CONTEXT = "reply_context"
     }
 
     override fun onReceive(ctx: Context, intent: Intent) {
@@ -206,8 +215,9 @@ class ActionReceiver : BroadcastReceiver() {
             REPLY -> {
                 val text = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(Notifier.KEY_REPLY)?.toString()
                 Notifier.clearReplies()
+                androidx.core.app.NotificationManagerCompat.from(ctx).cancel(8)
                 if (!text.isNullOrBlank()) {
-                    Agent.send(text)
+                    Agent.replyFromNotification(intent.getStringExtra(EXTRA_CHAT), intent.getStringExtra(EXTRA_CONTEXT), text)
                     Notifier.working("Thinking about: " + text.take(60))
                 }
             }

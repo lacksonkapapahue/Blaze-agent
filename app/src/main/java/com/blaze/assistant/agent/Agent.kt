@@ -326,6 +326,29 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     fun renameChat(id: String, t: String) { ChatStore.rename(id, t); sessions[id]?.title = t; refreshChats() }
     fun pinChat(id: String, p: Boolean) { ChatStore.setPinned(id, p); sessions[id]?.pinned = p; refreshChats() }
 
+    /**
+     * A reply typed into a notification's Reply box. It goes back to the conversation that notification
+     * came from, so Blaze knows what it said: the chat that posted it ([chatId]), or, for a heads-up that
+     * wasn't part of a chat, a new chat that opens with Blaze's [context] message.
+     */
+    fun replyFromNotification(chatId: String?, context: String?, text: String) {
+        val t = text.trim(); if (t.isEmpty()) return
+        if (!chatId.isNullOrBlank() && chatId == cur.id) { send(t); return }
+        val s = chatId?.takeIf { it.isNotBlank() }?.let { load(it) } ?: run {
+            if (context.isNullOrBlank()) { send(t); return }
+            Session(newId()).also { n ->
+                n.title = "Heads-up · " + context.lineSequence().first().take(30)
+                n.add(Role.BLAZE, context)
+            }
+        }
+        sessions[s.id] = s
+        if (!inForeground) show(s)
+        scope.launch {
+            if (s.busy) s.job?.join()
+            s.send(t, notificationContext = context?.takeIf { s.history.length() == 0 })
+        }
+    }
+
     /** A scheduled routine: runs in its own background chat and reports by notification. */
     fun runRoutine(name: String, prompt: String) {
         val s = Session(newId())
@@ -690,7 +713,7 @@ When you finish, say what you did in one short sentence.
             persist()
         }
 
-        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
+        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), notificationContext: String? = null) {
             if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
             Voice.lastTurnByVoice = byVoice
             val shown = text.trim().ifEmpty { "Take a look at this." }
@@ -698,8 +721,11 @@ When you finish, say what you did in one short sentence.
             val id = add(Role.USER, shown, attachments.map { it.name })
             attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
             historyMark[id] = history.length()
-            val content: Any = if (attachments.isEmpty()) shown else JSONArray().apply {
-                put(JSONObject().put("type", "text").put("text", shown))
+            // A reply to a heads-up notification: the model sees what Blaze had said.
+            val said = if (notificationContext.isNullOrBlank()) shown
+                else "[The user is replying to this notification you sent them earlier: \"${notificationContext.take(1500)}\"]\n\n$shown"
+            val content: Any = if (attachments.isEmpty()) said else JSONArray().apply {
+                put(JSONObject().put("type", "text").put("text", said))
                 attachments.forEach { a -> a.parts.forEach { put(it) } }
             }
             history.put(JSONObject().put("role", "user").put("content", content))
@@ -1588,7 +1614,7 @@ When you finish, say what you did in one short sentence.
             try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
             if (this === cur && (inForeground || overlayOpen)) return
             // A chat you left kept working: say which one finished.
-            Notifier.reply(if (this === cur) last.text else "${title.ifBlank { "A chat" }}: ${last.text}", last.role == Role.ERROR)
+            Notifier.reply(if (this === cur) last.text else "${title.ifBlank { "A chat" }}: ${last.text}", last.role == Role.ERROR, id)
         }
     }
 }

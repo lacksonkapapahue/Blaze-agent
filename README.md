@@ -20,8 +20,13 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.14.3 (versionCode 43) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.14.4 (versionCode 44) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.14.4: Notification replies keep the conversation
+- Replying from a Blaze notification now continues the chat that sent it, even if a different chat is open, instead of landing in whichever chat was on screen.
+- Replying to a heads-up (proactive, routine or job alert) opens a new chat that starts with Blaze's message, and the model is told what it said, so the answer makes sense.
+- If that chat is still working, the reply waits for it instead of being dropped.
 
 ## v1.14.3: First build on the rotated key
 - The first build signed with the new key (v3 lineage from the old key). Install it once and from then on the phone only accepts Blaze builds signed with the new key.
