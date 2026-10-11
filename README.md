@@ -20,8 +20,15 @@ Keep this repository private because it holds the signing key.
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`
 
 ## Status
-v1.15.0 (versionCode 45) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v1.16.0 (versionCode 46) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
+
+## v1.16.0: Model keys follow your Blaze account
+- API keys for the model providers (Gemini, Groq, Cerebras, OpenRouter, Mistral, NVIDIA, DeepSeek, Kimi, OpenAI, Claude, Grok), extra keys included, now sync with Blaze Desktop and Blaze CLI through the Blaze account: add a key on the PC and it works here, and the other way round.
+- When: right after signing in, a few seconds after a key is added, changed or removed, and at start (at most hourly). Settings › Blaze account › **Sync keys now** shows the outcome.
+- The keys are encrypted on the phone (AES-256-GCM, AAD `blaze-keys-v1`) before upload; blaze-auth (`GET/POST /v1/keys`, Worker 0.6.0) stores only the blob. Per provider the newest change wins; keys saved before syncing existed are merged with the account's, never dropped. Not end-to-end: the service hands the blob key to signed-in sessions.
+- Connector tokens, the session and PC pairing never sync. Until the Worker with `/v1/keys` is deployed the app reports that sync isn't switched on yet and keeps keys local.
+- Code: `connect/KeySync.kt` (same format and merge rules as `internal/keystore/sync.go` in Blaze-dekstop and Blaze-cli); change stamps `keysync_t_<provider>` in settings.
 
 ## v1.15.0: Blaze account (shared with Blaze Desktop)
 - New Settings › Blaze account: sign in or create an account with email + password, or Continue with Google / GitHub, using the same blaze-auth service as Blaze Desktop (`https://blaze-auth.blaze-app.workers.dev`), so one account works on both.

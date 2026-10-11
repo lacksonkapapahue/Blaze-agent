@@ -17,7 +17,17 @@ object KeyRing {
         (0 until a.length()).map { a.getString(it) }.filter { it.isNotBlank() }
     } catch (_: Exception) { emptyList() }
 
-    private fun saveExtras(pid: String, l: List<String>) = Settings.setSecret("keys_extra_$pid", if (l.isEmpty()) "" else JSONArray(l.distinct()).toString())
+    private fun saveExtras(pid: String, l: List<String>) {
+        if (l.distinct() == extras(pid)) return
+        setExtrasSynced(pid, l)
+        com.blaze.assistant.connect.KeySync.localChange(pid)   // follows the Blaze account to the PC
+    }
+
+    /** Replaces the extras without a new change stamp (used by key sync). */
+    fun setExtrasSynced(pid: String, l: List<String>) {
+        val c = l.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        Settings.setSecret("keys_extra_$pid", if (c.isEmpty()) "" else JSONArray(c).toString())
+    }
 
     fun all(pid: String): List<String> = (listOf(Settings.keyFor(pid)) + extras(pid)).filter { it.isNotBlank() }.distinct()
 
