@@ -31,6 +31,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.agent.BgAgents.init(this)
         com.blaze.assistant.routine.Routines.init(this)
         com.blaze.assistant.notify.Notifier.init(this)
+        Settings.tellIfSecretsDropped()
         com.blaze.assistant.voice.Voice.init(this)
         // Wake word starts from the screen (MainActivity/assistant) and at boot: starting a
         // microphone service while Blaze is in the background makes Android 12+ kill the app.
