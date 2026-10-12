@@ -2,6 +2,13 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.14.0: BlazeRouter on the phone
+- **Blaze Desktop's router, on Android.** The same Go code (a port of OmniRoute, MIT; see THIRD_PARTY_NOTICES.md) is built by CI as `libblazerouter.so` and serves an OpenAI-compatible API plus its dashboard on 127.0.0.1:20128. It has every OmniRoute `auto/*` preset (auto/best-free, auto/fast, auto/best-chat…), category:tier ranking, chaos fan-out across providers, and last-known-good.
+- **Runs where you choose:** *Auto* starts it inside Blaze's Alpine Linux (proot job), then Termux, then straight from Blaze. Data lives in `~/.blaze` (same layout as Desktop/CLI); your phone's model keys are handed to it at start, so nothing needs re-entering. Outside Alpine it uses public DNS (Android has no resolv.conf).
+- **Settings › BlazeRouter** (also `/router`, the top-bar dot, avatar menu, + › Model): status, where to run it, Start/Stop, *Use as Blaze's brain* (auto/best-free), *Open dashboard* (in Blaze's browser, signed in), *Start with Blaze*, and a *Classic editor* link to the old Brain page (`/brain`), which is still there.
+- **Blaze can drive it:** `blazerouter` tool (status, start, stop, use, dashboard), and about_blaze reports it.
+- **CI:** vets and tests the router before building it.
+
 ## v0.13.0: Blaze knows itself
 - **ABOUT YOU in every prompt:** what Blaze is (Android, Desktop and CLI, one Blaze account), this app's version, the paired PC and whether you're signed in, plus a rule: questions about Blaze, its apps or connecting phone and PC are answered, never bounced back with "what are you building?".
 - **`about_blaze` tool:** a live report of every nook and cranny: the Blaze family and how to pair with Blaze Link, this app (mode, personality, projects), the phone, brains and which providers have keys (never the keys), Blaze account, connected apps, MCP servers, skills, memory and running things, files and folders, Alpine/Termux/dashboard, voice, every view and command, and the setup check. Ask for one section or everything. Allowed in Plan mode.

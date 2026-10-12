@@ -282,6 +282,7 @@ fun ChatScreen() {
     val question by Agent.pendingQuestion.collectAsState()
     val currentChat by Agent.chatId.collectAsState()
     val liveStatus by Agent.status.collectAsState()
+    val routerState by com.blaze.assistant.agent.BlazeRouter.state.collectAsState()
 
     fun exitView() { Views.showing.value = "" }
     fun openView(v: BlazeView, target: String = "") {
@@ -348,8 +349,8 @@ fun ChatScreen() {
                 onMode = { m -> if (m == "chat" && shellMode == "chat" && showing.isEmpty()) { Agent.refreshChats(); drawer = true } else { shellMode = m; if (m == "projects") projectOpen = "" } },
                 onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
                 onSearch = { Agent.refreshChats(); showSearch = true },
-                routerOk = com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
-                onRouter = { settingsPage = "ai" },
+                routerOk = if (Settings.providerId == com.blaze.assistant.agent.BlazeRouter.ID) routerState.running else com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
+                onRouter = { settingsPage = "router" },
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
                 onAvatar = { avatarMenu = true }, mood = mood,
                 viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
@@ -430,7 +431,7 @@ fun ChatScreen() {
                             "call" -> startCall()
                             "plan" -> com.blaze.assistant.agent.Modes.toggleWork()
                             "approval" -> com.blaze.assistant.agent.Modes.toggleApproval()
-                            "model" -> settingsPage = "ai"
+                            "model" -> settingsPage = "router"
                             "views" -> showViews = true
                             "new" -> newChat()
                         }
@@ -495,7 +496,7 @@ fun ChatScreen() {
                     when (id) {
                         "account" -> settingsPage = "account"
                         "settings" -> settingsPage = ""
-                        "router" -> settingsPage = "ai"
+                        "router" -> settingsPage = "router"
                         "views" -> showViews = true
                         "control" -> settingsPage = "control"
                         "theme" -> ThemeMode.set(if (dark) "light" else "dark")

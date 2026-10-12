@@ -62,7 +62,8 @@ val essentialPages = setOf("account", "ai", "persona", "voice", "control", "conn
 
 val settingsPages = listOf(
     SettingsPage("account", "Blaze account", "Sign in, shared with Blaze Desktop"),
-    SettingsPage("ai", "Brain", "Free sign-ins; models and keys for power users"),
+    SettingsPage("router", "BlazeRouter", "Model router with presets and a dashboard"),
+    SettingsPage("ai", "Brain (classic editor)", "Free sign-ins; models and keys for power users"),
     SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
     SettingsPage("connections", "Connected accounts", "Google, GitHub, Spotify, Notion, Slack"),
     SettingsPage("desktop", "Blaze Desktop", "Pair with Blaze on your computer"),
@@ -157,6 +158,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "terminal" -> TerminalPage()
                 "dashboard" -> DashboardPage()
                 "backup" -> BackupSection()
+                "router" -> RouterPage(onClassic = { page = "ai" })
             }
             Spacer(Modifier.height(30.dp))
         }

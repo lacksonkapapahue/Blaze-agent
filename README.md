@@ -25,7 +25,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.13.0 (versionCode 55) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.14.0 (versionCode 56) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -38,3 +38,6 @@ update normally. Because the name went down, CI also publishes the same APK as `
 
 ## Changelog
 What changed in each build: [CHANGELOG.md](CHANGELOG.md).
+
+## Credits
+BlazeRouter is a Go port of [OmniRoute](https://github.com/diegosouzapw/OmniRoute) (MIT); see THIRD_PARTY_NOTICES.md.
