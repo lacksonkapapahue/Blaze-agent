@@ -378,6 +378,28 @@ class ShotsTest {
         }
     }
 
+    @Test fun lifeLogs() = shot("26-life-logs") {
+        SettingsFrame("Life logs") {
+            LifeLogsPage(preview = com.blaze.assistant.life.LifeLogs.State(on = true, engine = "offline Vosk model", since = t0,
+                last = "so the lamp photos are due on friday"), previewToday = 83 * 60_000L, previewChunks = 14, previewModel = true)
+        }
+    }
+    @Test fun lifeLogsPaused() = shot("27-life-logs-paused", dark = true) {
+        SettingsFrame("Life logs") {
+            LifeLogsPage(preview = com.blaze.assistant.life.LifeLogs.State(on = true, paused = "phone call", brainstorm = true, engine = "offline Vosk model", since = t0),
+                previewToday = 12 * 60_000L, previewChunks = 3, previewModel = false)
+        }
+    }
+    @Test fun replies() {
+        val n = com.blaze.assistant.notify.Conversations
+        n.reset()
+        n.add("com.whatsapp", "WhatsApp", "Gloria", false, listOf(com.blaze.assistant.notify.Conversations.Msg(t0, "Gloria", "Can you send the CIT102 notes?")), null)
+        n.add("com.whatsapp", "WhatsApp", "CS Year 2", true, listOf(com.blaze.assistant.notify.Conversations.Msg(t0 - 60_000, "Mutale", "Lab moved to 14:00")), null)
+        n.add("com.google.android.apps.messaging", "Messages", "Mum", false, listOf(com.blaze.assistant.notify.Conversations.Msg(t0 - 120_000, "Mum", "Call me tonight")), null)
+        try { n.setAuto("wa:gloria", true) } catch (_: Throwable) { }
+        shot("28-replies") { SettingsFrame("Notification replies") { RepliesPage(previewAccess = true) } }
+    }
+
     // v0.21.0: the visible pointer over another app, paused by the user (bar), with a swipe path and a ripple.
     @Test fun pointer() = shot("34-pointer") {
         val c = LocalBlaze.current
