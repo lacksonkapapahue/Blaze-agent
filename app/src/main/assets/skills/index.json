@@ -221,6 +221,36 @@
    "name": "classroom-sync",
    "version": 1,
    "sha256": "d3d55933d903516abf50f75d0e21ecc10497182bc2452bc054c1a603e8bf62d6"
+  },
+  {
+   "name": "content-calendar",
+   "version": 1,
+   "sha256": "5975de2a84324cc7ede099aa07b7f6c468fd9c8d87f3cbc1e60976ba292519d4"
+  },
+  {
+   "name": "product-listing",
+   "version": 1,
+   "sha256": "2335e7d37716fe5433ccdf35a59a59100bc33eb29f244c9fab3283a07344fdbe"
+  },
+  {
+   "name": "ad-lab",
+   "version": 1,
+   "sha256": "e5a81a677bfa52ae3a8b113b35a2fe3a7ae578a164bbb46c1fe2f8f55819e2d7"
+  },
+  {
+   "name": "research-brief",
+   "version": 1,
+   "sha256": "1fdd97b7472943d2669236776a0433ea67825ceff1083c111f366e5ea5f07b01"
+  },
+  {
+   "name": "whatsapp-replies",
+   "version": 1,
+   "sha256": "c62cf98e8cbfb7acb9627726c8ec7e51c608d480632d55f3d08041e1bc3dd0ab"
+  },
+  {
+   "name": "weekly-digest",
+   "version": 1,
+   "sha256": "f8dc4f2fae09282dab6a2b275f35c5b9f7fd6356bb65de5eb161d7b1cf6b8e6f"
   }
  ]
 }

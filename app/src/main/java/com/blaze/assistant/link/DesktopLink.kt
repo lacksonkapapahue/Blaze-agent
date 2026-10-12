@@ -246,7 +246,8 @@ object DesktopLink {
                     val reqs = JSONObject(b).optJSONArray("requests") ?: JSONArray()
                     for (i in 0 until reqs.length()) {
                         val r = reqs.getJSONObject(i)
-                        io.launch { answer(r.optString("id"), r.optString("text")) }
+                        val send = PcMessages.parse(r)
+                        io.launch { if (send != null) sendFromPc(r.optString("id"), send) else answer(r.optString("id"), r.optString("text")) }
                     }
                 } catch (e: Exception) {
                     _connected.value = false
@@ -260,6 +261,16 @@ object DesktopLink {
     }
 
     fun stopInbox() { inbox?.cancel(); inbox = null; _connected.value = false }
+
+    /** A WhatsApp/Telegram reply drafted on the PC: the confirm card always shows, then Messaging sends it (v0.17.0). */
+    private suspend fun sendFromPc(id: String, s: PcMessages.Send) {
+        val reply = PcMessages.problem(s)?.let { "Not sent: $it" } ?: try {
+            PcMessages.outcome(withContext(Dispatchers.Main) {
+                com.blaze.assistant.phone.Messaging.run(com.blaze.assistant.agent.Agent.appContext(), JSONObject().put("to", s.to).put("text", s.text).put("app", s.app), always = true, from = pcName)
+            })
+        } catch (e: Exception) { "Not sent: the phone hit an error (${e.message})." }
+        runCatching { call("POST", "/v1/inbox/$id/reply", JSONObject().put("text", reply).toString(), 15_000) }
+    }
 
     private suspend fun answer(id: String, text: String) {
         val reply = try {

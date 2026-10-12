@@ -187,4 +187,15 @@ class ShotsTest {
             Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp)) { LearnPage(startDeck = "CIT102 loops", reveal = true, now = t0) }
         }
     } }
+    @Test fun seller() {
+        com.blaze.assistant.agent.Seller.brandFileOverride = File(System.getProperty("java.io.tmpdir"), "blaze-shots-brand-" + System.nanoTime() + ".json")
+        com.blaze.assistant.agent.Seller.saveBrand(com.blaze.assistant.agent.Brand(name = "HomeGlow", paper = "#fffaf2", ink = "#1d1a16",
+            accents = listOf("#e8743b", "#2f5d50"), fonts = listOf("Playfair Display", "Inter"), notes = "Warm, cosy home decor for young renters"))
+        shot("14-seller") {
+            Column(Modifier.fillMaxSize()) {
+                ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Seller")
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) { SellerPage(digest0 = true) }
+            }
+        }
+    }
 }

@@ -121,13 +121,14 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
      * Ask the user to approve something risky. Shows a card in the chat and the orb panel,
      * plus a notification with Allow / Don't when Blaze isn't on screen. Times out as "no".
      */
-    suspend fun confirm(title0: String, detail: String, action: String): Boolean {
+    suspend fun confirm(title0: String, detail: String, action: String, always: Boolean = false): Boolean {
         val tag = kotlin.coroutines.coroutineContext[BgAgents.Tag]
         val title = if (tag != null) "${tag.id} · $title0" else title0
-        if (Autonomy.preApproved(title0, detail)) { cur.note("Standing OK: $title", false); return true }
+        // [always] (v0.17.0, sends the PC asked for): the card is shown even with a standing OK or Autopilot.
+        if (!always && Autonomy.preApproved(title0, detail)) { cur.note("Standing OK: $title", false); return true }
         // Autopilot: the user is away, so ordinary confirms pass. Destructive ones (delete, money,
         // messages and calls in their name) still wait for their tap.
-        if (Modes.autopilot && !Modes.destructive(title0, detail)) { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
+        if (!always && Modes.autopilot && !Modes.destructive(title0, detail)) { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
         val d = kotlinx.coroutines.CompletableDeferred<Boolean>()
         tag?.let { BgAgents.setWaiting(it.id, true) }
         _confirm.value = PendingConfirm(title, detail, action, d)
@@ -213,6 +214,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     }
 
     private fun newId() = UUID.randomUUID().toString().take(12)
+
+    /** The application context (for code outside the agent that needs one, e.g. Blaze Link sends). */
+    fun appContext(): Context = app
 
     private val io = CoroutineScope(SupervisorJob() + Dispatchers.IO + com.blaze.assistant.device.CrashLog.guard)
     private val ioLock = kotlinx.coroutines.sync.Mutex()
@@ -611,6 +615,7 @@ When you finish, say what you did in one short sentence.
         t.put(BlazeRouter.tool())
         if (Settings.longChat) LongChat.tools().forEach { t.put(it) }
         t.put(Flashcards.tool())
+        t.put(Seller.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.CallControl.tool())
@@ -1722,6 +1727,8 @@ When you finish, say what you did in one short sentence.
                 }
                 else -> when {
                     name in LongChat.names -> longChatTool(name, args)
+                    name == Seller.TOOL -> { add(Role.STEP, if (args.optString("action") == "set") "Saving the brand kit" else "Reading the brand kit")
+                        kotlinx.coroutines.withContext(Dispatchers.IO) { Seller.run(args) } }
                     name == Flashcards.TOOL -> { add(Role.STEP, if (args.optString("action") == "add") "Making flashcards" else "Checking your flashcards")
                         kotlinx.coroutines.withContext(Dispatchers.IO) { Flashcards.run(args) } }
                     com.blaze.assistant.connect.Mcp.handles(name) -> mcpCall(name, args)

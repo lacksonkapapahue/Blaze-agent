@@ -95,6 +95,7 @@ object Friendly {
             "search_chat", "read_turn" -> "Looking back through this chat"
             "read_artifact" -> "Reading the saved output"
             "flashcards" -> "Working on your flashcards"
+            "brand_kit" -> "Checking your brand kit"
             "update_brief" -> "Updating the project brief"
             "uninstall_app" -> "Uninstalling an app"
             "update_blaze" -> "Checking for a Blaze update"

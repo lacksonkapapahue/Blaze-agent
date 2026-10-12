@@ -25,7 +25,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.16.0 (versionCode 58) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.17.0 (versionCode 59) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -35,6 +35,9 @@ update normally. Because the name went down, CI also publishes the same APK as `
 
 ## Student pack
 Settings › Learn (or `/learn`): flashcards with spaced repetition, Google Classroom (switch on, then reconnect Google once) and low-data mode. Skills: study-planner, tutor, lecture-notes, essay-coach, group-project, classroom-sync.
+
+## Marketer & seller pack
+Settings › Seller (or `/seller`): brand kit, the weekly store digest job, and WhatsApp replies drafted on Blaze Desktop and sent from the phone with your tap ([docs/blaze-link-messages.md](docs/blaze-link-messages.md)). Skills: content-calendar, product-listing, ad-lab, research-brief, whatsapp-replies, weekly-digest.
 
 ## Tests
 `./gradlew testReleaseUnitTest` runs the JVM unit tests (`app/src/test`). CI runs them on every push and pull request.
