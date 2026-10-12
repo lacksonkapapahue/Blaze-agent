@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.MutableContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.os.Environment
 import android.os.Handler
@@ -27,6 +28,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.webkit.ProfileStore
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -43,8 +50,13 @@ import kotlin.coroutines.resume
  * read, click and type on pages in the background, and the Browser screen just shows the current tab.
  */
 object BrowserEngine {
-    class Tab(val id: Int, val web: WebView, val ctxWrap: MutableContextWrapper) {
-        var title by mutableStateOf("New tab")
+    class Tab(val id: Int, val web: WebView, val ctxWrap: MutableContextWrapper, val isPrivate: Boolean = false) {
+        var title by mutableStateOf(if (isPrivate) "Private tab" else "New tab")
+        var icon by mutableStateOf<ImageBitmap?>(null)
+        /** A small picture of the page for the tab grid, taken when you leave the tab. */
+        var thumb by mutableStateOf<ImageBitmap?>(null)
+        internal var mask: ScriptHandler? = null
+        internal var maskJs: String? = null
         var url by mutableStateOf("")
         var progress by mutableIntStateOf(100)
         var canBack by mutableStateOf(false)
@@ -65,15 +77,73 @@ object BrowserEngine {
 
     fun tab(): Tab? = tabs.getOrNull(current)
 
-    fun init(ctx: Context) { if (!::app.isInitialized) app = ctx.applicationContext }
+    fun init(ctx: Context) {
+        if (::app.isInitialized) return
+        app = ctx.applicationContext
+        BrowserVpn.onMaskChanged = { remask() }
+        BrowserVpn.init(app)
+        main.post { clearPrivateData() }   // leftovers if Blaze was killed with private tabs open
+    }
+
+    // ---------- private tabs ----------
+    /** Private tabs get their own WebView profile: separate cookies, storage and cache, wiped when the last one closes. */
+    private const val PRIVATE_PROFILE = "blaze-private"
+    val privateIsolated: Boolean get() = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+    fun privateTabs() = tabs.filter { it.isPrivate }
+    fun normalTabs() = tabs.filter { !it.isPrivate }
+
+    private fun clearPrivateData() {
+        if (!privateIsolated) return
+        try {
+            val p = ProfileStore.getInstance().getOrCreateProfile(PRIVATE_PROFILE)
+            p.cookieManager.removeAllCookies(null)
+            p.webStorage.deleteAllData()
+        } catch (_: Exception) { }
+    }
+
+    // ---------- location masking ----------
+    private fun shouldMask(t: Tab) = BrowserVpn.maskLocation && (t.isPrivate || BrowserVpn.on)
+
+    private fun installMask(t: Tab) {
+        try { t.mask?.remove() } catch (_: Exception) { }
+        t.mask = null; t.maskJs = null
+        if (!shouldMask(t)) return
+        val js = LocationMask.script(BrowserVpn.maskCountry())
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try { t.mask = WebViewCompat.addDocumentStartJavaScript(t.web, js, setOf("*")); return } catch (_: Exception) { }
+        }
+        t.maskJs = js   // older WebView: injected as each page starts (best effort)
+    }
+
+    /** Re-applies masking after the VPN or the setting changed; reloads the visible page so it takes effect. */
+    fun remask() {
+        tabs.forEach { installMask(it) }
+        tab()?.let { if (it.url.startsWith("http")) it.web.reload() }
+    }
+
+    /** Takes a small picture of the tab for the tab grid (only works while it's on screen). */
+    fun snapshot(t: Tab? = tab()) {
+        val w = t?.web ?: return
+        if (w.width <= 0 || w.height <= 0 || !w.isAttachedToWindow) return
+        try {
+            val sc = 0.35f
+            val b = Bitmap.createBitmap((w.width * sc).toInt().coerceAtLeast(1), (w.height * sc).toInt().coerceAtLeast(1), Bitmap.Config.RGB_565)
+            val c = Canvas(b); c.scale(sc, sc); c.translate(-w.scrollX.toFloat(), -w.scrollY.toFloat())
+            w.draw(c)
+            t.thumb = b.asImageBitmap()
+        } catch (_: Throwable) { }
+    }
 
     // ---------- tabs ----------
     @SuppressLint("SetJavaScriptEnabled")
-    fun newTab(ctx: Context, url: String? = null): Tab {
+    fun newTab(ctx: Context, url: String? = null, isPrivate: Boolean = false): Tab {
         init(ctx)
         val wrap = MutableContextWrapper(app)
         val w = WebView(wrap)
-        val t = Tab(nextId++, w, wrap)
+        // The profile must be set before the WebView is used for anything else.
+        if (isPrivate && privateIsolated) { try { WebViewCompat.setProfile(w, PRIVATE_PROFILE) } catch (_: Exception) { } }
+        else if (isPrivate) toast("Private tabs share cookies with normal tabs on this phone. Update Android System WebView to keep them apart.")
+        val t = Tab(nextId++, w, wrap, isPrivate)
         w.settings.apply {
             javaScriptEnabled = true; domStorageEnabled = true; databaseEnabled = true
             loadWithOverviewMode = true; useWideViewPort = true
@@ -82,6 +152,7 @@ object BrowserEngine {
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setSupportMultipleWindows(false)
             userAgentString = ua(defaultUa(w), desktop)
+            if (isPrivate) cacheMode = WebSettings.LOAD_NO_CACHE
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
         w.webViewClient = object : WebViewClient() {
@@ -101,11 +172,12 @@ object BrowserEngine {
             override fun onPageStarted(v: WebView, url: String?, favicon: Bitmap?) {
                 t.url = url.orEmpty(); t.progress = 5
                 if (t.loaded.isCompleted) t.loaded = CompletableDeferred()
+                t.maskJs?.let { v.evaluateJavascript(it, null) }
             }
             override fun onPageFinished(v: WebView, url: String?) {
                 t.url = url.orEmpty(); t.progress = 100; t.canBack = v.canGoBack(); t.canForward = v.canGoForward()
                 t.loaded.complete(Unit)
-                if (!url.isNullOrBlank() && url != "about:blank") BrowserData.addHistory(app, v.title ?: url, url)
+                if (!t.isPrivate && !url.isNullOrBlank() && url != "about:blank") BrowserData.addHistory(app, v.title ?: url, url)
             }
             override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
                 t.url = url.orEmpty(); t.canBack = v.canGoBack(); t.canForward = v.canGoForward()
@@ -114,12 +186,14 @@ object BrowserEngine {
         w.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(v: WebView, p: Int) { t.progress = p }
             override fun onReceivedTitle(v: WebView, title: String?) { t.title = title?.ifBlank { null } ?: t.url }
+            override fun onReceivedIcon(v: WebView, icon: Bitmap?) { t.icon = icon?.asImageBitmap() }
             override fun onShowFileChooser(v: WebView, cb: ValueCallback<Array<Uri>>, p: FileChooserParams): Boolean =
                 filePicker?.invoke(cb, p) ?: run { cb.onReceiveValue(null); false }
             override fun onShowCustomView(view: View, callback: CustomViewCallback) { fullView = view; fullCallback = callback }
             override fun onHideCustomView() { fullView = null; fullCallback?.onCustomViewHidden(); fullCallback = null }
         }
         w.setDownloadListener { dl, userAgent, disposition, mime, _ -> download(dl, userAgent, disposition, mime) }
+        installMask(t)
         tabs.add(t); current = tabs.lastIndex
         if (!url.isNullOrBlank()) load(t, url)
         return t
@@ -133,7 +207,11 @@ object BrowserEngine {
         t.web.stopLoading(); t.web.destroy()
         tabs.removeAt(i)
         if (current >= tabs.size) current = (tabs.size - 1).coerceAtLeast(0)
+        if (t.isPrivate && tabs.none { it.isPrivate }) clearPrivateData()
     }
+
+    /** Closes every tab on one side of the tab grid. */
+    fun closeAll(isPrivate: Boolean) { for (i in tabs.indices.reversed()) if (tabs[i].isPrivate == isPrivate) close(i) }
 
     fun closeAll() { while (tabs.isNotEmpty()) close(tabs.lastIndex) }
 
@@ -197,9 +275,9 @@ object BrowserEngine {
 
     private suspend fun ensureTab(ctx: Context): Tab = withContext(Dispatchers.Main) { tab() ?: newTab(ctx) }
 
-    suspend fun open(ctx: Context, url: String, newTab: Boolean): String {
+    suspend fun open(ctx: Context, url: String, newTab: Boolean, isPrivate: Boolean = false): String {
         val t = withContext(Dispatchers.Main) {
-            if (newTab || tabs.isEmpty()) newTab(ctx, url) else tab()!!.also { load(it, url) }
+            if (newTab || tabs.isEmpty() || tab()?.isPrivate != isPrivate) newTab(ctx, url, isPrivate) else tab()!!.also { load(it, url) }
         }
         waitLoad(t)
         return "Opened ${t.title.take(80)} (${t.url}).\n\n" + read(ctx, 3500)
@@ -262,7 +340,7 @@ object BrowserEngine {
     }.also { tab()?.let { waitLoad(it, 8000) } }
 
     fun tabList(): String = if (tabs.isEmpty()) "No tabs open." else
-        tabs.mapIndexed { i, t -> "${if (i == current) "*" else " "}[$i] ${t.title.take(60)} — ${t.url}" }.joinToString("\n")
+        tabs.mapIndexed { i, t -> "${if (i == current) "*" else " "}[$i]${if (t.isPrivate) " (private)" else ""} ${t.title.take(60)} — ${t.url}" }.joinToString("\n")
 
     suspend fun switchTab(i: Int): String = withContext(Dispatchers.Main) {
         if (i in tabs.indices) { current = i; "Switched to ${tabs[i].title}." } else "No tab $i."
