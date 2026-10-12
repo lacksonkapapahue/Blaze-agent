@@ -129,7 +129,7 @@ object Connectors {
         status(c.id, "Waiting for you to sign in in the browser…")
         // GitHub "workflow" lets Blaze push the Actions file of an app it builds (android-app-builder);
         // only Workers from 0.8.0 accept it, so older ones keep getting the old scopes.
-        val scopes = if (c.kind == Kind.TOKEN) "" else if (c.id == "github" && BlazeAccount.workerAtLeast("0.8.0")) c.scopes + " workflow" else c.scopes
+        val scopes = if (c.kind == Kind.TOKEN) "" else if (c.id == "github" && BlazeAccount.workerAtLeast("0.8.0")) c.scopes + " workflow" else scopesFor(c)
         val t = BlazeAccount.connectTokens(ctx, c.id, scopes)
         val exp = t.optLong("expires_in", 0)
         if (exp > 0) t.put("expires_at", System.currentTimeMillis() + exp * 1000)
@@ -140,12 +140,15 @@ object Connectors {
         "Connected" + (t.optString("account").takeIf { it.isNotBlank() }?.let { " as $it" } ?: "")
     } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { BlazeAccount.message(e) }
 
+    /** Google asks for Classroom only once the user switched it on (v0.16.0); nothing changes for anyone else. */
+    fun scopesFor(c: Connector): String = if (c.id == "google" && Classroom.enabled) c.scopes + " " + Classroom.SCOPES else c.scopes
+
     private suspend fun loopback(ctx: Context, c: Connector): String = withContext(Dispatchers.IO) {
         val verifier = b64(rand(48))
         val challenge = b64(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()))
         val st = b64(rand(16))
         val url = c.authUrl + "?" + Http.form("client_id" to clientId(c.id), "redirect_uri" to REDIRECT, "response_type" to "code",
-            "scope" to c.scopes, "code_challenge" to challenge, "code_challenge_method" to "S256", "state" to st) +
+            "scope" to scopesFor(c), "code_challenge" to challenge, "code_challenge_method" to "S256", "state" to st) +
             (if (c.id == "google") "&access_type=offline&prompt=consent" else "")
         ServerSocket(PORT, 1, InetAddress.getByName("127.0.0.1")).use { server ->
             server.soTimeout = 300_000
@@ -249,7 +252,7 @@ object Connectors {
             fn("gcal_create", "Create a Google Calendar event.", JSONObject().put("title", s("Title")).put("start", s("yyyy-MM-dd HH:mm local")).put("end", s("yyyy-MM-dd HH:mm, optional")).put("location", s("Optional")), listOf("title", "start")),
             fn("drive_search", "Search the user's Google Drive files by name or content.", JSONObject().put("query", s("Words")), listOf("query")),
             fn("gcontacts_search", "Search the user's Google Contacts.", JSONObject().put("query", s("Name, email or number")), listOf("query")),
-        ),
+        ) + Classroom.tools { n, d, p, r -> fn(n, d, p, r) },
         "github" to listOf(
             fn("github_notifications", "List the user's unread GitHub notifications."),
             fn("github_my_prs", "List the user's open pull requests and ones awaiting their review."),
@@ -284,7 +287,8 @@ object Connectors {
 
     fun handles(name: String) = name in owner || name == "share_to_app"
 
-    fun tools(): List<JSONObject> = defs.filterKeys { connected(it) }.values.flatten() +
+    fun tools(): List<JSONObject> = defs.filterKeys { connected(it) }.values.flatten()
+        .filter { Classroom.enabled || it.getJSONObject("function").getString("name") !in Classroom.toolNames } +
         fn("share_to_app", "Share text (a link, note or message draft) into another app via Android's share sheet, e.g. WhatsApp, Telegram, Gmail, Notes.",
             JSONObject().put("app", s("App name")).put("text", s("What to share")), listOf("app", "text"))
 
@@ -299,6 +303,8 @@ object Connectors {
         name.startsWith("gcal_") -> "Checking Google Calendar"
         name.startsWith("drive_") -> "Searching Drive"
         name.startsWith("gcontacts") -> "Searching contacts"
+        name == "classroom_sync" -> "Syncing Google Classroom"
+        name.startsWith("classroom_") -> "Checking Google Classroom"
         name.startsWith("github_") -> "Checking GitHub"
         name.startsWith("spotify_") -> "Spotify"
         name.startsWith("notion_") -> "Checking Notion"
@@ -405,6 +411,7 @@ object Connectors {
                 if (l.length() == 0) "No Drive files matched." else (0 until l.length()).joinToString("\n") { k ->
                     val f = l.getJSONObject(k); "${f.optString("name")} (${f.optString("modifiedTime").take(10)}) ${f.optString("webViewLink")}" }
             }
+            "classroom_courses", "classroom_coursework", "classroom_sync" -> classroom(name, a, t)
             "gcontacts_search" -> {
                 val l = get("https://people.googleapis.com/v1/people:searchContacts?readMask=names,emailAddresses,phoneNumbers&query=" + Http.enc(a.optString("query")), t).optJSONArray("results") ?: JSONArray()
                 if (l.length() == 0) "No Google contact matched." else (0 until l.length()).joinToString("\n") { k ->
@@ -413,6 +420,34 @@ object Connectors {
                     "${first("names", "displayName")} · ${first("phoneNumbers", "value")} · ${first("emailAddresses", "value")}" }
             }
             else -> "Unknown tool"
+        }
+    }
+
+    private fun classroom(name: String, a: JSONObject, t: String): String {
+        if (!Classroom.enabled) return Classroom.NEEDS_SCOPE
+        val g: (String) -> JSONObject = { u -> get(u, t) }
+        return try {
+            when (name) {
+                "classroom_courses" -> Classroom.courses(g).let { l -> if (l.isEmpty()) "No active Google Classroom courses." else l.joinToString("\n") { "- ${it.second} [id ${it.first}]" } }
+                "classroom_coursework" -> Classroom.work(g, a.optString("course_id"), a.optInt("days", 21).coerceIn(1, 180), a.optBoolean("include_past"))
+                    .let { l -> if (l.isEmpty()) "No assignments due in that window." else l.take(40).joinToString("\n") { Classroom.line(it) } }
+                else -> {
+                    val l = Classroom.work(g, "", a.optInt("days", 30).coerceIn(1, 180), false).filter { !Classroom.done(it) }
+                    val have = com.blaze.assistant.routine.Routines.all.value.map { it.name }.toSet()
+                    val added = ArrayList<String>(); var kept = 0
+                    for (w in l) {
+                        val at = Classroom.reminderAt(w.due) ?: continue
+                        if (Classroom.reminderName(w) in have) { kept++; continue }
+                        com.blaze.assistant.routine.Routines.addAt(Classroom.reminderName(w), Classroom.reminderPrompt(w), at)
+                        added += w.title
+                    }
+                    if (l.isEmpty()) "Nothing due in Classroom in that window that isn't turned in."
+                    else "Classroom sync: ${added.size} new reminder${if (added.size == 1) "" else "s"} in Schedule (24 h before each is due)" +
+                        (if (kept > 0) ", $kept already there" else "") + "." + (if (added.isNotEmpty()) " Added: ${added.joinToString("; ").take(600)}" else "")
+                }
+            }
+        } catch (e: Exception) {
+            if ((e.message ?: "").let { it.contains("(403)") || it.contains("(401)") || it.contains("insufficient", true) }) Classroom.NEEDS_SCOPE else "Classroom error: ${e.message}"
         }
     }
 

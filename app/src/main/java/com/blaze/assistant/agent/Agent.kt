@@ -610,6 +610,7 @@ When you finish, say what you did in one short sentence.
         t.put(SelfKnowledge.tool())
         t.put(BlazeRouter.tool())
         if (Settings.longChat) LongChat.tools().forEach { t.put(it) }
+        t.put(Flashcards.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.CallControl.tool())
@@ -895,7 +896,7 @@ When you finish, say what you did in one short sentence.
                     mood = Mood.THINKING
                     val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
-                    val pic = if (fast == null && !offline) com.blaze.assistant.media.Media.directPrompt(shown) else null
+                    val pic = if (fast == null && !offline && !Settings.lowData) com.blaze.assistant.media.Media.directPrompt(shown) else null
                     if (pic != null) {
                         mood = Mood.ACTING
                         add(Role.STEP, "Drawing \u201c${pic.take(60)}\u201d")
@@ -1080,6 +1081,7 @@ When you finish, say what you did in one short sentence.
         }
 
         suspend fun runLoop() {
+            val bytes0 = DataMeter.used()
             try {
                 val allTools0 = tools().apply { put(ToolRouter.loadTool()) }
                 // Agents don't start or steer other agents; Plan keeps only read-only tools.
@@ -1316,6 +1318,7 @@ When you finish, say what you did in one short sentence.
                                 .put("content", if (!Settings.longChat || name in LongChat.keepWhole || result.contains(SCREEN_MARK)) result else LongChat.aside(result))
                         )
                     }
+                    if (Settings.lowData) shots.clear()
                     shots.lastOrNull()?.let { url ->
                         history.put(JSONObject().put("role", "user").put("content", JSONArray()
                             .put(JSONObject().put("type", "text").put("text", SHOT_NOTE))
@@ -1335,6 +1338,8 @@ When you finish, say what you did in one short sentence.
                 com.blaze.assistant.device.CrashLog.error("agent loop", e)
                 add(Role.ERROR, e.message ?: "Something went wrong.")
             } finally {
+                // Low-data mode: how much this task used (Blaze's own traffic: models, web, browser).
+                if (Settings.lowData) try { DataMeter.chip(bytes0)?.let { chip -> msgs.lastOrNull { it.role == Role.BLAZE }?.let { addMeta(it.id, chip) } } } catch (_: Exception) { }
                 LlmClient.liteTurn = false
                 thinking = ""
                 mood = Mood.IDLE
@@ -1602,7 +1607,10 @@ When you finish, say what you did in one short sentence.
                     if (act == "install") SelfSetup.install(app, args.optString("what")) else SelfControl.run(app, act, args)
                 }
                 "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
-                "look_at_screen" -> {
+                "look_at_screen" -> if (Settings.lowData) {
+                    add(Role.STEP, "Reading the screen (low-data mode)")
+                    "Low-data mode is on, so no screenshot was taken. Screen as text:\n" + (com.blaze.assistant.phone.BlazeAccessibilityService.instance?.readScreen() ?: "Phone control isn't connected.")
+                } else {
                     add(Role.STEP, "Looking at a screenshot")
                     val shot = PhoneTools.screenshot()
                     if (shot.startsWith("data:")) { shots += shot; "Screenshot taken. It is attached in the next message." } else shot
@@ -1714,6 +1722,8 @@ When you finish, say what you did in one short sentence.
                 }
                 else -> when {
                     name in LongChat.names -> longChatTool(name, args)
+                    name == Flashcards.TOOL -> { add(Role.STEP, if (args.optString("action") == "add") "Making flashcards" else "Checking your flashcards")
+                        kotlinx.coroutines.withContext(Dispatchers.IO) { Flashcards.run(args) } }
                     com.blaze.assistant.connect.Mcp.handles(name) -> mcpCall(name, args)
                     com.blaze.assistant.connect.Connectors.handles(name) -> { add(Role.STEP, com.blaze.assistant.connect.Connectors.describe(name)); com.blaze.assistant.connect.Connectors.run(app, name, args) }
                     else -> { add(Role.STEP, PhoneTools.describe(name, args)); PhoneTools.run(app, name, args) }

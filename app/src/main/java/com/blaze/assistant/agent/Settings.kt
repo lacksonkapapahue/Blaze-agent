@@ -173,6 +173,15 @@ object Settings {
         get() = prefs.getBoolean("long_chat", true)
         set(v) = prefs.edit().putBoolean("long_chat", v).apply()
 
+    /**
+     * Low-data mode (student pack, v0.16.0): text models get the turn (photos are described to text once by a
+     * vision model instead of being re-sent every step), screenshots are skipped for the text screen readout,
+     * the instant picture shortcut is off, and each answer shows the MB Blaze used.
+     */
+    var lowData: Boolean
+        get() = prefs.getBoolean("low_data", false)
+        set(v) = prefs.edit().putBoolean("low_data", v).apply()
+
     var phoneControl: Boolean
         get() = prefs.getBoolean("phone_control", true)
         set(v) = prefs.edit().putBoolean("phone_control", v).apply()

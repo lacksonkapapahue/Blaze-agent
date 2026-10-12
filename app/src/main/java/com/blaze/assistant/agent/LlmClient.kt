@@ -72,7 +72,7 @@ object LlmClient {
         if (Vision.hasImages(clean)) {
             val auto = Settings.providerId == Providers.AUTO
             val model = if (auto) "" else target(Settings.providerId).model
-            if (auto || !Vision.canSee(model)) clean = Vision.describeAll(clean)
+            if (auto || !Vision.canSee(model) || Settings.lowData) clean = Vision.describeAll(clean)
         }
         return try { completeRaw(clean, tools, onText, onThink, lane) }
         catch (e: LlmException) {

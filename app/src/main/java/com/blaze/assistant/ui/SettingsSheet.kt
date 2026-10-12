@@ -79,6 +79,7 @@ val settingsPages = listOf(
     SettingsPage("orb", "Floating orb", "Keep Blaze over other apps"),
     SettingsPage("routines", "Routines", "Things Blaze does on a schedule"),
     SettingsPage("memory", "Memory & learning", "What Blaze remembers and has learned"),
+    SettingsPage("learn", "Learn", "Flashcards, Google Classroom, low-data mode"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
     SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
     SettingsPage("device", "Device & diagnostics", "Phone health, self-check, crash report"),
@@ -159,6 +160,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "dashboard" -> DashboardPage()
                 "backup" -> BackupSection()
                 "router" -> RouterPage(onClassic = { page = "ai" })
+                "learn" -> LearnPage()
             }
             Spacer(Modifier.height(30.dp))
         }

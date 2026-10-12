@@ -16,13 +16,15 @@ import java.util.Calendar
 data class Routine(val id: Int, val name: String, val prompt: String, val hour: Int, val minute: Int,
                    val days: Int, val enabled: Boolean = true,
                    /** Shell job instead of a prompt: runs the command directly, no AI involved. */
-                   val command: String = "", val linux: Boolean = false, val notify: String = "always", val everyMinutes: Int = 0) {
+                   val command: String = "", val linux: Boolean = false, val notify: String = "always", val everyMinutes: Int = 0,
+                   /** v0.16.0: a one-off on a set date and time (epoch ms; 0 = by time of day and [days]). Assignment reminders use it. */
+                   val at: Long = 0L) {
     fun toJson() = JSONObject().put("id", id).put("name", name).put("prompt", prompt).put("hour", hour)
         .put("minute", minute).put("days", days).put("enabled", enabled)
-        .put("command", command).put("linux", linux).put("notify", notify).put("every_minutes", everyMinutes)
+        .put("command", command).put("linux", linux).put("notify", notify).put("every_minutes", everyMinutes).put("at", at)
     val isCommand get() = command.isNotBlank()
 
-    fun daysLabel(): String = if (everyMinutes > 0) "Every ${if (everyMinutes % 60 == 0) "${everyMinutes / 60} h" else "$everyMinutes min"}" else when (days) {
+    fun daysLabel(): String = if (at > 0) java.text.SimpleDateFormat("EEE d MMM", java.util.Locale.getDefault()).format(java.util.Date(at)) else if (everyMinutes > 0) "Every ${if (everyMinutes % 60 == 0) "${everyMinutes / 60} h" else "$everyMinutes min"}" else when (days) {
         0 -> "Once"; 127 -> "Every day"; 31 -> "Weekdays"; 96 -> "Weekends"
         else -> listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun").filterIndexed { i, _ -> days and (1 shl i) != 0 }.joinToString(" ")
     }
@@ -44,7 +46,7 @@ object Routines {
             (0 until a.length()).map { val o = a.getJSONObject(it)
                 Routine(o.getInt("id"), o.getString("name"), o.getString("prompt"), o.getInt("hour"), o.getInt("minute"),
                     o.optInt("days", 127), o.optBoolean("enabled", true), o.optString("command"), o.optBoolean("linux"),
-                    o.optString("notify", "always"), o.optInt("every_minutes", 0)) }
+                    o.optString("notify", "always"), o.optInt("every_minutes", 0), o.optLong("at", 0L)) }
         } catch (_: Exception) { emptyList() }
         scheduleAll()
     }
@@ -63,6 +65,14 @@ object Routines {
         save(_all.value + r); return r
     }
 
+    /** A one-off on a date (v0.16.0), e.g. "CIT102 lab 3 is due tomorrow". */
+    fun addAt(name: String, prompt: String, at: Long): Routine {
+        val c = Calendar.getInstance().apply { timeInMillis = at }
+        val r = Routine((_all.value.maxOfOrNull { it.id } ?: 0) + 1, name.trim().ifEmpty { "Reminder" }, prompt.trim(),
+            c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE), 0, at = at)
+        save(_all.value + r); return r
+    }
+
     fun addCommand(name: String, command: String, hour: Int, minute: Int, days: Int, linux: Boolean, notify: String, everyMinutes: Int): Routine {
         val r = Routine((_all.value.maxOfOrNull { it.id } ?: 0) + 1, name.trim().ifEmpty { "Shell job" }, "", hour.coerceIn(0, 23), minute.coerceIn(0, 59), days,
             command = command.trim(), linux = linux, notify = notify, everyMinutes = if (everyMinutes > 0) everyMinutes.coerceAtLeast(15) else 0)
@@ -70,12 +80,12 @@ object Routines {
     }
 
     fun rename(id: Int, name: String) = save(_all.value.map { if (it.id == id) it.copy(name = name.trim()) else it })
-    fun retime(id: Int, h: Int, m: Int) = save(_all.value.map { if (it.id == id) it.copy(hour = h, minute = m) else it })
+    fun retime(id: Int, h: Int, m: Int) = save(_all.value.map { if (it.id == id) it.copy(hour = h, minute = m, at = 0L) else it })
     fun setEnabled(id: Int, on: Boolean) = save(_all.value.map { if (it.id == id) it.copy(enabled = on) else it })
     fun delete(id: Int) { cancel(id); save(_all.value.filterNot { it.id == id }) }
 
     /** After a one-time routine runs it switches off. */
-    fun ran(id: Int) { get(id)?.let { if (it.days == 0 && it.everyMinutes == 0) setEnabled(id, false) else scheduleAll() } }
+    fun ran(id: Int) { get(id)?.let { if ((it.days == 0 && it.everyMinutes == 0) || it.at > 0) setEnabled(id, false) else scheduleAll() } }
 
     /** Parses "daily", "weekdays", "weekends", "once", or names like "mon,wed,fri". */
     fun parseDays(s: String): Int {
@@ -91,6 +101,7 @@ object Routines {
     }
 
     fun next(r: Routine, from: Long = System.currentTimeMillis()): Long {
+        if (r.at > 0) return r.at
         if (r.everyMinutes > 0) return from + r.everyMinutes * 60_000L
         val c = Calendar.getInstance().apply { timeInMillis = from; set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
             set(Calendar.HOUR_OF_DAY, r.hour); set(Calendar.MINUTE, r.minute) }
@@ -115,6 +126,7 @@ object Routines {
         for (r in _all.value) {
             if (!r.enabled) { cancel(r.id); continue }
             val t = next(r)
+            if (r.at > 0 && t < System.currentTimeMillis() - 60_000L) { cancel(r.id); continue }   // a dated one-off that already passed
             val exact = Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()
             try {
                 if (exact) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, t, pi(r.id))
@@ -133,7 +145,8 @@ object Routines {
                 JSONObject().put("name", p("Short name, e.g. 'Morning brief'"))
                     .put("prompt", p("What Blaze should do when it runs, written as an instruction to Blaze"))
                     .put("time", p("24h time HH:mm"))
-                    .put("days", p("daily, weekdays, weekends, once, or days like 'mon,wed,fri'")),
+                    .put("days", p("daily, weekdays, weekends, once, or days like 'mon,wed,fri'"))
+                    .put("date", p("Optional yyyy-MM-dd for a one-off on that date (reminders before a deadline)")),
                 listOf("name", "prompt", "time")),
             fn("schedule_command", "Run a shell command or script on a schedule (cron), without the AI: backups, scrapers, checks, syncs. Works offline, survives reboots, notifies the result. For things that need thinking, use create_routine instead.",
                 JSONObject().put("name", p("Short name")).put("command", p("Shell command, e.g. 'sh ~/scripts/backup.sh'"))
@@ -151,7 +164,9 @@ object Routines {
     fun run(name: String, a: JSONObject): String = when (name) {
         "create_routine" -> {
             val (h, m) = a.getString("time").split(":").let { it[0].trim().toInt() to (it.getOrNull(1)?.trim()?.take(2)?.toInt() ?: 0) }
-            val r = add(a.getString("name"), a.getString("prompt"), h, m, parseDays(a.optString("days", "daily")))
+            val date = a.optString("date").trim()
+            val at = if (date.isNotBlank()) try { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).parse("$date %02d:%02d".format(h, m))?.time ?: 0L } catch (_: Exception) { 0L } else 0L
+            val r = if (at > 0) addAt(a.getString("name"), a.getString("prompt"), at) else add(a.getString("name"), a.getString("prompt"), h, m, parseDays(a.optString("days", "daily")))
             "Created routine \"${r.name}\" at ${r.timeLabel()}, ${r.daysLabel()}. [ID ${com.blaze.assistant.agent.Processes.idFor("routine", r.id.toString())}]"
         }
         "schedule_command" -> {

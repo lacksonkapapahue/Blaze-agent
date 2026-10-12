@@ -17,7 +17,8 @@ object Views {
     val all = listOf(
         BlazeView("chats", "Chats", "Every saved conversation", special = "chats", aliases = listOf("history")),
         BlazeView("design", "Design", "Live preview of pages Blaze builds", special = "design", aliases = listOf("preview", "studio")),
-        BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learn", "learning")),
+        BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learning")),
+        BlazeView("learn", "Learn", "Flashcards with spaced repetition, Classroom, low-data mode", page = "learn", aliases = listOf("flashcards", "study", "student", "classroom")),
         BlazeView("jobs", "Jobs", "Running and past jobs, the terminal", page = "terminal", aliases = listOf("terminal", "shell")),
         BlazeView("schedule", "Schedule", "Routines and timed tasks", page = "routines", aliases = listOf("routines")),
         BlazeView("agents", "Agents", "Specialists and background agents", page = "specialists", aliases = listOf("specialists")),
