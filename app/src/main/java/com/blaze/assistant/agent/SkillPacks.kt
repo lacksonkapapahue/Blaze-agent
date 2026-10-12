@@ -246,8 +246,8 @@ object SkillPacks {
     suspend fun run(name: String, a: JSONObject): String = when (name) {
         "use_skill" -> use(a.optString("name"))
         "skill_file" -> file(a.optString("name"), a.optString("path"))
-        "install_skill" -> install(a.optString("url"))
-        "write_skill" -> write(a.optString("name"), a.optString("description"), a.optString("instructions"))
+        "install_skill" -> install(a.optString("url")).also { com.blaze.assistant.connect.SkillSync.localChange() }
+        "write_skill" -> write(a.optString("name"), a.optString("description"), a.optString("instructions")).also { com.blaze.assistant.connect.SkillSync.localChange() }
         else -> "Unknown tool"
     }
 }

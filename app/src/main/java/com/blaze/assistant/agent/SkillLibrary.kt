@@ -87,6 +87,7 @@ object SkillLibrary {
 
     fun delete(dirName: String) {
         File(root(), dirName).deleteRecursively()
+        com.blaze.assistant.connect.SkillSync.localChange()
         val m = manifest()
         m.optJSONObject(dirName)?.let { m.put(dirName, it.put("deleted", true)); saveManifest(m) }
         setOn(dirName, true)

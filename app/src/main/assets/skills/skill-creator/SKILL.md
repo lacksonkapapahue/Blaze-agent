@@ -61,14 +61,27 @@ Rules:
 - Keep it under ~150 lines; move long templates into `assets/` files in the skill folder and reference them by relative path (`assets/template.html`). Scripts in the folder can be run with run_shell.
 - Generic enough to reuse, specific enough to act on: parameterise names that change ("the project's package manager") and keep fixed facts fixed ("the store is homeglow.myshopify.com").
 
-## 4. Quality check before saving
+## 4. Combining skills into a new one
+
+When a task needed several skills together (a hand-drawn invitation = `paper-sketch` + `print-design`;
+a retro game = `browser-game` + `pixel-art` + `music-audio`) and it will come up again, save the
+combination as its own skill instead of copying their contents:
+
+- Name it for the result (`sketched-invitation`, `retro-arcade-game`); list the source skills in the
+  description so search finds it ("…built on paper-sketch and print-design").
+- Body: first line `Load first: paper-sketch, print-design.`, then only the glue: which part comes from
+  which skill, the order, the decisions that worked (sizes, palette, export settings), and the pitfalls hit.
+- Don't paste the source skills' steps: they keep improving on their own, and a copy goes stale.
+- One `assets/` starter for the combination is fine when it saves real work.
+
+## 5. Quality check before saving
 
 - [ ] Would another agent with no context finish the task using only this skill?
 - [ ] Description contains the trigger words; name is unique among existing skills.
 - [ ] Steps verified on a real run (or clearly marked untested).
 - [ ] No secrets, no personal data beyond what the workflow needs.
 
-## 5. Bundled skills
+## 6. Bundled skills
 
 Skills shipped with Blaze are seeded on start. Editing one is fine: Blaze never overwrites a
 skill you or it changed, and the user can reset it, turn it off or delete it in Settings › Skills.

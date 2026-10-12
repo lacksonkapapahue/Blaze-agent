@@ -131,3 +131,28 @@ jobs:
         run: |
           { echo "Steps: ${{ join(steps.*.outcome, ', ') }}"; echo "Build failed on ${{ github.sha }} (run ${{ github.run_id }})"; echo; echo '```'; grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log 2>/dev/null | head -120; echo '----- tail -----'; tail -80 build.log 2>/dev/null || echo "no build.log (failed before Gradle ran)"; echo '```'; } > comment.md
           gh issue edit 1 --repo ${{ github.repository }} --body-file comment.md
+
+  # The android-app-builder skill's template must keep building: make a project from it exactly as
+  # Blaze does on the phone (setup.sh), then build it like its own workflow would.
+  app-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Build an app from the skill template
+        env:
+          BUILD_NUMBER: '7'
+        run: |
+          sh app/src/main/assets/skills/android-app-builder/setup.sh /tmp/demo com.blaze.demo "Blaze Demo's App"
+          cd /tmp/demo
+          test -f .github/workflows/build.yml && test -f .gitignore
+          mkdir -p keystore
+          keytool -genkeypair -keystore keystore/release.jks -alias app -keyalg RSA -keysize 2048 -validity 1 -dname "CN=ci" -storepass blazeapp -keypass blazeapp
+          ./gradlew assembleRelease --stacktrace
+          ls -la app/build/outputs/apk/release/

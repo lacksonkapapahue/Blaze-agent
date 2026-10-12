@@ -33,8 +33,8 @@
   },
   {
    "name": "skill-creator",
-   "version": 1,
-   "sha256": "8678f0b26b19051dec5722259a8315777e899e9929610d2778cb8ff24c43a834"
+   "version": 2,
+   "sha256": "4cd192c01bc1d7f581a4f48004e034c35adf295ffd73f18ca94d51de2e031f2d"
   },
   {
    "name": "code-review",
@@ -110,6 +110,86 @@
    "sha256": "b0875c97b485e2f5e5ddcde214442effb79c17fc6016b643f47a15dda2adc43e",
    "files": [
     "SKILL.md"
+   ]
+  },
+  {
+   "name": "browser-game",
+   "version": 1,
+   "sha256": "090a818ce2a9b2b709d0f7b2a6f87a1f19781b6e906c6318206ccfcbee3f12e2"
+  },
+  {
+   "name": "diagrams",
+   "version": 1,
+   "sha256": "1802d9b100eb3fa26583598e222b3f677b90613685d463421d957494cbc22a21"
+  },
+  {
+   "name": "floor-plan",
+   "version": 1,
+   "sha256": "a0798910f5e75ce622ec7762e5e2f95afb34e2da7acb9853c6b69df93eb32c40"
+  },
+  {
+   "name": "motion-graphics",
+   "version": 1,
+   "sha256": "f8b9b468e7c17cfe224f2a0bf785dd285a33584eea9bdc88e2b4c9e9fd79b0f5"
+  },
+  {
+   "name": "music-audio",
+   "version": 1,
+   "sha256": "9563032d9a2f158c40f0667d5e146eb7d4764c2faa97dfeee6735d6f20269a6f"
+  },
+  {
+   "name": "paper-sketch",
+   "version": 1,
+   "sha256": "3c1657c78fff376043896e1d96e41e46d46d400a35d566f41a6c94d3e927a2b3",
+   "files": [
+    "SKILL.md",
+    "assets/sketch.svg"
+   ]
+  },
+  {
+   "name": "pixel-art",
+   "version": 1,
+   "sha256": "8ea4e1e69421bc6775d24554bd174dfb313f36cf7c23b59c2e6a1c6ad4b4419d"
+  },
+  {
+   "name": "print-design",
+   "version": 1,
+   "sha256": "ddeec053b0caa408449ec0be9d676e48d11fdf6fe6df4fa932352b2b0da7f59a"
+  },
+  {
+   "name": "shell-sysadmin",
+   "version": 1,
+   "sha256": "6bb16273b047554ae31bd9532eee058ce70f80c74bf7c91f2d9a01933bf2ee22"
+  },
+  {
+   "name": "three-d-design",
+   "version": 1,
+   "sha256": "2944743887a931f710347c5c7c232f1a231d7385bed69a16773439e59b30078e",
+   "files": [
+    "SKILL.md",
+    "assets/mockup.html"
+   ]
+  },
+  {
+   "name": "android-app-builder",
+   "version": 1,
+   "sha256": "3602a1f21cb25cf50c62be856766ea90e81e9517a0cdb0b0a9b583927e1294c5",
+   "files": [
+    "SKILL.md",
+    "setup.sh",
+    "template/app/build.gradle.kts",
+    "template/app/src/main/AndroidManifest.xml",
+    "template/app/src/main/java/com/example/app/MainActivity.kt",
+    "template/app/src/main/res/values/strings.xml",
+    "template/build.gradle.kts",
+    "template/github/workflows/build.yml",
+    "template/gitignore",
+    "template/gradle.properties",
+    "template/gradle/wrapper/gradle-wrapper.jar",
+    "template/gradle/wrapper/gradle-wrapper.properties",
+    "template/gradlew",
+    "template/gradlew.bat",
+    "template/settings.gradle.kts"
    ]
   }
  ]
