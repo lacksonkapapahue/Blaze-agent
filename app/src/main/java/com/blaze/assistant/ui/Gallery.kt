@@ -156,11 +156,8 @@ fun GalleryScreen(onDismiss: () -> Unit) {
                 Label("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Media.delete(sel.file); open = null }.padding(vertical = 10.dp))
             }
         } else if (items.isEmpty()) {
-            Column(Modifier.fillMaxSize().padding(28.dp)) {
-                Text("Nothing here yet.", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
-                Spacer(Modifier.height(8.dp))
-                Text("Ask Blaze to \u201cdraw a lion in sunglasses\u201d or \u201cmake me an afro beat\u201d. Everything it makes lands here.",
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp, color = c.sub))
+            Column(Modifier.fillMaxSize().padding(20.dp)) {
+                Rows { EmptyState("Nothing here yet", "Ask Blaze to \u201cdraw a lion in sunglasses\u201d or \u201cmake me an afro beat\u201d. Everything it makes lands here.") }
             }
         } else {
             LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().padding(2.dp)) {

@@ -154,6 +154,9 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
         ParticleField(com.blaze.assistant.agent.Mood.IDLE)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // v0.19.0: progress segments, like Desktop's onboarding.
+                (0 until 3).forEach { i -> Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).background(if (i <= page) c.accent else c.hair2)) }
+                Spacer(Modifier.width(8.dp))
                 Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.clickable { finish(null) }.padding(8.dp)) { Label("Skip", color = c.sub, size = 10.sp) }
@@ -174,18 +177,18 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                     0 -> {
                         val orOn = "OpenRouter" in have.joinToString()
                         val gOn = have.any { it.startsWith("Google") }
-                        SetupRow(if (orOn) "OpenRouter connected \u2713" else "Sign in with OpenRouter", "Free models, one tap. Sign in with Google or email there.", orOn) {
+                        SetupRow(if (orOn) "OpenRouter connected" else "Sign in with OpenRouter", "Free models, one tap. Sign in with Google or email there.", orOn) {
                             if (!busy && !orOn) { busy = true; scope.launch { Brains.connectOpenRouter(ctx); busy = false } }
                         }
                         Spacer(Modifier.height(10.dp))
-                        SetupRow(if (gOn) "Google Gemini connected \u2713" else "Get a free Google brain", "Opens Google. Tap Create API key, then the copy icon, then come back here.", gOn) {
+                        SetupRow(if (gOn) "Google Gemini connected" else "Get a free Google brain", "Opens Google. Tap Create API key, then the copy icon, then come back here.", gOn) {
                             if (!gOn) Brains.getGoogleKey(ctx)
                         }
                         Spacer(Modifier.height(10.dp))
                         if (!gOn && Settings.bool("key_catch_armed", false)) {
                             Box(Modifier.fillMaxWidth().height(52.dp).background(c.accent).clickable {
                                 scope.launch { Brains.takeFromClipboard(ctx, userTapped = true) }
-                            }, contentAlignment = Alignment.Center) { Label("I copied my key \u2713  tap here", color = c.paper, size = 11.sp) }
+                            }, contentAlignment = Alignment.Center) { Label("I copied my key \u2713  tap here", color = c.onAccent, size = 11.sp) }
                             Spacer(Modifier.height(10.dp))
                         }
                         if (brainStatus.isNotBlank()) Label(brainStatus, color = c.accent, size = 10.sp)
@@ -197,7 +200,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                     1 -> {
                         needs.forEach { n ->
                             val on = state[n.id] == true
-                            SetupRow((if (on) "\u2713  " else "") + n.title, n.why, on) { if (!on) fix(n) }
+                            SetupRow(n.title, n.why, on) { if (!on) fix(n) }
                             Spacer(Modifier.height(8.dp))
                         }
                     }
@@ -223,13 +226,22 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
     }
 }
 
+/** One setup step (v0.19.0): a raised card with a square check on the right; blue once it's done. */
 @Composable
 private fun SetupRow(title: String, sub: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().background(if (on) c.paper else c.paper).hairline(if (on) c.accent else c.hair).clickable(onClick = onClick).padding(16.dp)) {
-        Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))
-        Spacer(Modifier.height(2.dp))
-        Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
+    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))
+            Spacer(Modifier.height(2.dp))
+            Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
+            if (on) Text("\u2713", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.onAccent))
+            else Text("\u2192", style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = c.sub))
+        }
     }
 }
 

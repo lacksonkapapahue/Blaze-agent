@@ -61,10 +61,10 @@ internal fun FeelPage() {
 
 /** First run: three short screens, then straight into something real. */
 @Composable
-fun Onboarding(onDone: (firstPrompt: String?) -> Unit) {
+fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
-    var page by remember { mutableStateOf(0) }
+    var page by remember { mutableStateOf(page0) }
     var a11y by remember { mutableStateOf(BlazeAccessibilityService.isEnabled(ctx)) }
     var brain by remember { mutableStateOf(if (Settings.ready) "ready" else "") }
     LaunchedEffect(page) { while (page == 1) { a11y = BlazeAccessibilityService.isEnabled(ctx); delay(1200) } }
@@ -75,6 +75,11 @@ fun Onboarding(onDone: (firstPrompt: String?) -> Unit) {
         ParticleField(com.blaze.assistant.agent.Mood.IDLE)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(28.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                // v0.19.0: three progress segments, like Desktop's onboarding steps.
+                (0 until 3).forEach { i ->
+                    Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).background(if (i <= page) c.accent else c.hair2))
+                }
+                Spacer(Modifier.width(8.dp))
                 Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
                 Spacer(Modifier.weight(1f))
                 Box(Modifier.clickable { finish(null) }.padding(8.dp)) { Label("Skip", color = c.sub, size = 10.sp) }
@@ -118,8 +123,16 @@ fun Onboarding(onDone: (firstPrompt: String?) -> Unit) {
 @Composable
 private fun Choice(title: String, sub: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair).clickable(onClick = onClick).padding(16.dp)) {
-        Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.paper else c.ink))
-        Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = if (on) c.paper.copy(alpha = 0.75f) else c.sub))
+    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))
+            Spacer(Modifier.height(2.dp))
+            Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
+            if (on) Text("\u2713", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.onAccent))
+        }
     }
 }

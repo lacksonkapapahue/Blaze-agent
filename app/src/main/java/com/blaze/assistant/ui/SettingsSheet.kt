@@ -110,30 +110,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
             when (page) {
-                null -> {
-                    Spacer(Modifier.height(8.dp))
-                    var advanced by remember { mutableStateOf(false) }
-                    val shown = settingsPages.filter { it.id in essentialPages } + if (advanced) settingsPages.filter { it.id !in essentialPages } else emptyList()
-                    shown.forEachIndexed { i, sp ->
-                        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { page = sp.id }.padding(vertical = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(sp.title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 17.sp, color = c.ink))
-                                Text(sp.sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
-                            }
-                            Text("→", color = c.sub, fontSize = 16.sp)
-                        }
-                    }
-                    if (!advanced) Row(Modifier.fillMaxWidth().clickable { advanced = true }.padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Label("Advanced · ${settingsPages.size - essentialPages.size} more", color = c.accent, size = 10.sp)
-                        Spacer(Modifier.weight(1f)); Text("↓", color = c.accent, fontSize = 16.sp)
-                    }
-                    Spacer(Modifier.height(18.dp))
-                    val ctx = androidx.compose.ui.platform.LocalContext.current
-                    Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
-                }
+                null -> SettingsList { page = it }
                 "ai" -> {
                     BrainCard()
                     var adv by remember { mutableStateOf(Settings.providerId != com.blaze.assistant.agent.Providers.AUTO) }
@@ -150,8 +127,8 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "skills" -> SkillLibraryPage()
                 "voice" -> { VoiceSection(); VoiceTuning(); VoiceExtras() }
                 "orb" -> OrbSection()
-                "routines" -> RoutinesSection()
-                "memory" -> { MemorySection(); LearningSection() }
+                "routines" -> SchedulePage()
+                "memory" -> { MemoryPage(); LearningSection() }
                 "usage" -> { UsageSection(); CostCap() }
                 "privacy" -> SecuritySection()
                 "device" -> DevicePage()
@@ -167,6 +144,38 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
             Spacer(Modifier.height(30.dp))
         }
     }
+}
+
+/** The settings list (v0.19.0): Desktop's grouped rows, essentials first, the rest under Advanced. */
+@Composable
+fun SettingsList(advanced0: Boolean = false, onPage: (String) -> Unit) {
+    val c = LocalBlaze.current
+    var advanced by remember { mutableStateOf(advanced0) }
+    Spacer(Modifier.height(10.dp))
+    GroupHead("Essentials \u00b7 %02d".format(essentialPages.size), "What most people set once: sign-in, brain, voice, phone control.")
+    val ess = settingsPages.filter { it.id in essentialPages }
+    Rows {
+        ess.forEachIndexed { i, sp ->
+            KitRow(sp.title, sp.sub, n = i + 1, first = i == 0, onClick = { onPage(sp.id) }) {
+                Text("\u2192", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+            }
+        }
+    }
+    Spacer(Modifier.height(18.dp))
+    val more = settingsPages.filter { it.id !in essentialPages }
+    GroupHead("Advanced \u00b7 %02d".format(more.size), if (advanced) "Everything else Blaze can do, page by page." else "") {
+        KitButton(if (advanced) "Hide" else "Show all", Btn.GHOST) { advanced = !advanced }
+    }
+    if (advanced) Rows {
+        more.forEachIndexed { i, sp ->
+            KitRow(sp.title, sp.sub, n = ess.size + i + 1, first = i == 0, onClick = { onPage(sp.id) }) {
+                Text("\u2192", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+            }
+        }
+    }
+    Spacer(Modifier.height(22.dp))
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
 }
 
 @Composable
@@ -361,54 +370,8 @@ private fun ModelPicker(selected: String, key: String, pid: String, base: String
         Label("Model", modifier = Modifier.weight(1f))
         result?.plan?.takeIf { it.isNotBlank() }?.let { Label("Plan · $it", color = c.accent, size = 10.sp) }
     }
-    Row(
-        Modifier.fillMaxWidth().hairline(if (open) c.ink else c.hair)
-            .clickable { if (result == null) check() else open = !open }
-            .padding(horizontal = 14.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            selected.ifBlank { "Choose a model" }, modifier = Modifier.weight(1f), maxLines = 1,
-            style = TextStyle(fontFamily = Type.Mono, fontSize = 14.sp, color = c.ink)
-        )
-        Label(if (open) "▲" else "▼", color = c.sub)
-    }
-
-    if (open && result != null) {
-        val all = result!!.models
-        val shown = all.filter { query.isBlank() || it.id.contains(query, true) || it.name.contains(query, true) }
-        Column(Modifier.fillMaxWidth().hairline(c.hair)) {
-            Box(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 14.dp, vertical = 12.dp)) {
-                if (query.isEmpty()) Text("Search ${all.size} models", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.weak))
-                BasicTextField(
-                    value = query, onValueChange = { query = it }, singleLine = true,
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink),
-                    cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth()
-                )
-            }
-            if (shown.isEmpty()) {
-                Text("No model matches “$query”.", modifier = Modifier.padding(14.dp),
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
-            }
-            shown.forEach { m ->
-                val on = m.id == selected
-                Row(
-                    Modifier.fillMaxWidth().background(if (on) c.faint else c.paper)
-                        .clickable { onPick(m.id); open = false; query = "" }
-                        .hairlineBottom(c.hair).padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(Modifier.size(6.dp).background(if (on) c.accent else c.paper))
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(m.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 15.sp, color = c.ink))
-                        Text(m.id + if (m.note.isNotBlank()) "  ·  ${m.note}" else "",
-                            style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
-                    }
-                }
-            }
-        }
-    }
+    ModelField(selected, open) { if (result == null) check() else open = !open }
+    if (open && result != null) ModelList(result!!.models, selected, query, { query = it }) { onPick(it); open = false; query = "" }
 
     Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
@@ -659,29 +622,6 @@ private fun PersonaSection() {
 }
 
 @Composable
-private fun MemorySection() {
-    val c = LocalBlaze.current
-    val facts by com.blaze.assistant.agent.Memory.facts.collectAsState()
-    Spacer(Modifier.height(22.dp))
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-        Label("Memory", modifier = Modifier.weight(1f))
-        if (facts.isNotEmpty()) Label("Forget all", color = c.accent, size = 10.sp,
-            modifier = Modifier.clickable { com.blaze.assistant.agent.Memory.clear() })
-    }
-    if (facts.isEmpty()) Text("Nothing yet. Tell Blaze things like \u201cremember my sister is Mary\u201d and it keeps them across chats.",
-        style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.sub))
-    else Column(Modifier.fillMaxWidth().hairline(c.hair)) {
-        facts.forEachIndexed { i, f ->
-            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 14.dp, top = 6.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text(f, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.body))
-                Box(Modifier.clickable { com.blaze.assistant.agent.Memory.remove(i) }.padding(12.dp)) { Label("×", size = 14.sp) }
-            }
-        }
-    }
-}
-
-@Composable
 private fun BackupSection() {
     val c = LocalBlaze.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -740,67 +680,6 @@ private fun SkillsSection() {
     }
     Text("Quick settings (flashlight, volume, battery, Wi-Fi panel) work without any permission.",
         modifier = Modifier.padding(top = 8.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-}
-
-@Composable
-private fun RoutinesSection() {
-    val c = LocalBlaze.current
-    val list by com.blaze.assistant.routine.Routines.all.collectAsState()
-    var adding by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
-    var prompt by remember { mutableStateOf("") }
-    var time by remember { mutableStateOf("07:00") }
-    var days by remember { mutableStateOf(31) }
-    Spacer(Modifier.height(22.dp))
-    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-        Label("Routines", modifier = Modifier.weight(1f))
-        Label(if (adding) "Cancel" else "+ New", color = c.accent, size = 10.sp, modifier = Modifier.clickable { adding = !adding })
-    }
-    if (list.isEmpty() && !adding) Text("Nothing scheduled. Try saying \u201cevery weekday at 7, brief me on my calendar and messages\u201d.",
-        style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.sub))
-    if (list.isNotEmpty()) Column(Modifier.fillMaxWidth().hairline(c.hair)) {
-        list.forEach { r ->
-            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 14.dp, top = 10.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(r.name, style = TextStyle(fontFamily = Type.Display, fontSize = 15.sp, color = if (r.enabled) c.ink else c.weak))
-                    Label("${if (r.everyMinutes > 0) "" else r.timeLabel() + " · "}${r.daysLabel()}${if (r.isCommand) " · $ " + r.command.take(40) else ""}", size = 9.sp)
-                }
-                Box(Modifier.clickable { com.blaze.assistant.routine.Routines.setEnabled(r.id, !r.enabled) }.padding(10.dp)) {
-                    Label(if (r.enabled) "On" else "Off", color = if (r.enabled) c.accent else c.sub, size = 10.sp)
-                }
-                Box(Modifier.clickable { com.blaze.assistant.routine.Routines.delete(r.id) }.padding(12.dp)) { Label("×", size = 14.sp) }
-            }
-        }
-    }
-    if (adding) {
-        Spacer(Modifier.height(10.dp))
-        Field("Name", name, { name = it }, "Morning brief")
-        Spacer(Modifier.height(10.dp))
-        Field("What should Blaze do?", prompt, { prompt = it }, "Summarise today's calendar and unread texts")
-        Spacer(Modifier.height(10.dp))
-        Field("Time (24h)", time, { time = it }, "07:00")
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { i, d ->
-                val on = days and (1 shl i) != 0
-                Box(Modifier.weight(1f).height(38.dp).background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair)
-                    .clickable { days = days xor (1 shl i) }, contentAlignment = Alignment.Center) {
-                    Label(d, color = if (on) c.paper else c.sub, size = 11.sp)
-                }
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Box(Modifier.fillMaxWidth().height(46.dp).background(c.ink).clickable {
-            val parts = time.split(":")
-            val h = parts.getOrNull(0)?.trim()?.toIntOrNull() ?: 7
-            val m = parts.getOrNull(1)?.trim()?.toIntOrNull() ?: 0
-            if (prompt.isNotBlank()) {
-                com.blaze.assistant.routine.Routines.add(name, prompt, h, m, days)
-                adding = false; name = ""; prompt = ""
-            }
-        }, contentAlignment = Alignment.Center) { Label("Save routine", color = c.paper, size = 11.sp) }
-    }
 }
 
 @Composable
