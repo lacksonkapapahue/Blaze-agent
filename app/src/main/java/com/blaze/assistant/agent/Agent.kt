@@ -520,6 +520,7 @@ When you finish, say what you did in one short sentence.
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
             append(com.blaze.assistant.link.DesktopLink.promptLine())
+            append(com.blaze.assistant.ui.Views.PROMPT_LINE); append(Projects.promptLine(_chatId.value))
             append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
                 "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
             if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
@@ -558,6 +559,7 @@ When you finish, say what you did in one short sentence.
         if (Settings.bool("specialists_on", true)) t.put(Specialists.tool())
         Learning.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.update.Updater.tool())
+        t.put(com.blaze.assistant.ui.Views.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.CallControl.tool())
@@ -1390,6 +1392,24 @@ When you finish, say what you did in one short sentence.
                 }
                 "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
                 "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
+                com.blaze.assistant.ui.Views.TOOL -> {
+                    val v = com.blaze.assistant.ui.Views.find(args.optString("view"))
+                    if (v == null) "Unknown view. Pick one of: " + com.blaze.assistant.ui.Views.all.joinToString { it.id }
+                    else {
+                        add(Role.STEP, com.blaze.assistant.ui.Views.step(args))
+                        val go = if (args.optBoolean("ask") && !Modes.autopilot) {
+                            mood = Mood.IDLE
+                            val a = askUser("Switch to ${v.name}?" + args.optString("reason").let { if (it.isBlank()) "" else " $it" }, listOf("Switch", "Stay in chat"), title)
+                            mood = Mood.ACTING
+                            a.trim().startsWith("Switch", true) || a.trim().startsWith("yes", true)
+                        } else true
+                        if (!go) "The user chose to stay in the chat."
+                        else {
+                            kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open(v.id, args.optString("target")) }
+                            "Opened ${v.name}. The user can tap Exit to come back to the chat."
+                        }
+                    }
+                }
                 "ask_user" -> {
                     val opts = args.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
                     add(Role.STEP, "Asked: ${args.optString("question").take(80)}")

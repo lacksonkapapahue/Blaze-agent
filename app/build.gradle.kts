@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 53
-        versionName = "0.11.0"
+        versionCode = 54
+        versionName = "0.12.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -49,7 +49,17 @@ android {
         }
     }
     lint { checkReleaseBuilds = false; abortOnError = false }
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        // Robolectric screenshot tests (ui/ShotsTest) need the app's resources (fonts) and only run with BLAZE_SHOTS=1.
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.systemProperty("blaze.shots", System.getenv("BLAZE_SHOTS") ?: "0")
+            it.systemProperty("robolectric.graphicsMode", "NATIVE")
+            // The compose test rule needs ui-test-manifest, which only the debug build has.
+            if (it.name.contains("Release")) it.exclude("**/ShotsTest*")
+        }
+    }
 }
 
 dependencies {
@@ -72,4 +82,11 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")   // the real org.json (android.jar only has stubs)
+    // Screenshot tests: Compose UI test on Robolectric's native graphics.
+    testImplementation(bom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

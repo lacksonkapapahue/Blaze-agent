@@ -2,6 +2,17 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.12.0: Calm shell like a messaging app (1.0 redesign, part A)
+- **Top bar:** the B logo (back to the plain chat), a `Chat | Projects` switch, Search, the BlazeRouter dot (tap for models and keys) and your avatar. Tap *Chat* again for recent chats.
+- **Avatar menu:** Account, Settings, BlazeRouter, All views, Phone control, Theme (tap flips light/dark, long-press follows the phone), Check for updates, Sign out.
+- **Bubbles:** your messages on the right in an ink bubble; Blaze answers in plain text with no bubble, cards stay square hairline boxes.
+- **One live work card per turn:** `● Working · 4 steps · 1m 12s ›`, tap to see each step; it settles to `Worked · 13 steps · 3m 11s` and the answer follows. Settings › *Show every step* adds the exact calls inside it.
+- **Composer:** one bar with `+` and Send. The `+` menu holds Camera, Photos, Files, @ files, Paste image, Voice, Call Blaze, Plan/Build, Auto/Autopilot, Model, Views and New chat. The mode shows as a chip (`PLAN · AUTOPILOT`) only when it isn't the default. Typing `@` lists files in Blaze's home.
+- **Nothing deleted: `/views`.** Every page that was in the sidebar (and Desktop's list) opens from one picker with a filter: Chats, Design, Memory, Jobs, Schedule, Agents, Accounts, BlazeRouter, Skills, Gallery, Browser, Doctor, Usage, Voice, Phone control, Proactive, Blaze Desktop, Commands, Dashboard, Blaze account, Settings. Shortcuts: `/design /jobs /schedule /accounts /doctor /router /skills /gallery /browser /search /projects` (plus the old `/memory /routines /settings /chats`). Search lists views too.
+- **Blaze switches views itself:** new `open_view` tool. Visual work (a page, poster, design) opens **Design**, a live preview (phone or desktop width, reload, open in browser) with a box to ask for changes; other views ask first. A `DESIGN ✕ Exit` chip always returns to the chat.
+- **Projects:** group chats around a goal with instructions Blaze follows in every chat inside it; `Working` and `Needs you` chips. Stored on the phone (`projects_json`), deleting a project keeps its chats.
+- **Tests and screenshots:** `ViewsTest`; `ShotsTest` renders the shell on Robolectric (A12-sized) and CI pushes the PNGs to the `shots` branch.
+
 ## v0.11.0: Browser VPN by country, private tabs, Chrome-style tab grid
 - **Browser VPN.** Import WireGuard configs (a `.conf`, several at once, or the `.zip` Proton/Mullvad download) in the browser's ⋯ › *VPN & privacy*, one per country, and pick a country. Only the browser goes through it: the tunnel runs inside Blaze (`wgproxy/`, user-space WireGuard on gVisor's netstack, shipped as `libwgproxy.so` and built by CI) as an HTTP proxy on 127.0.0.1 that the WebViews use via `ProxyController`. No Android VPN prompt; chats with your model don't use it. DNS goes through the tunnel too. After connecting, Blaze checks the real exit IP and country through the tunnel (Cloudflare trace) and fixes the country label if the file name guessed wrong. The flag shows next to the address bar.
 - **Kill switch.** While the VPN is on, the browser never goes direct: if the tunnel fails to start or drops, pages fail to load (address bar shows !) until you reconnect or switch the VPN off. The VPN comes back on after a restart if it was on.
