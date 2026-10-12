@@ -162,4 +162,29 @@ class ShotsTest {
             }
         }
     }
+
+    private fun seedCards() {
+        val f = File(System.getProperty("java.io.tmpdir"), "blaze-shots-cards-" + System.nanoTime() + ".json")
+        com.blaze.assistant.agent.Flashcards.fileOverride = f
+        com.blaze.assistant.agent.Flashcards.reset()
+        com.blaze.assistant.agent.Flashcards.add("CIT102 loops", listOf(
+            "What does range(2, 10, 3) produce?" to "2, 5, 8 (start 2, stop before 10, step 3)",
+            "When does a while loop's else block run?" to "When the loop ends without break",
+            "What does break do inside nested loops?" to "Leaves only the innermost loop"))
+        com.blaze.assistant.agent.Flashcards.add("NET103 OSI layers", listOf("Layer 3?" to "Network (IP, routing)", "Layer 4?" to "Transport (TCP, UDP)"))
+        com.blaze.assistant.agent.Flashcards.add("COM102 citations", listOf("APA in-text, one author?" to "(Author, Year)"))
+        com.blaze.assistant.agent.Flashcards.load().filter { it.deck == "COM102 citations" }.forEach { com.blaze.assistant.agent.Flashcards.answer(it.id, com.blaze.assistant.agent.Flashcards.GOOD) }
+    }
+    @Test fun learn() { seedCards(); shot("12-learn") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Learn")
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) { LearnPage() }
+        }
+    } }
+    @Test fun flashcard() { seedCards(); shot("13-flashcard", dark = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Learn")
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp)) { LearnPage(startDeck = "CIT102 loops", reveal = true, now = t0) }
+        }
+    } }
 }

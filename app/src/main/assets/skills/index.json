@@ -191,6 +191,36 @@
     "template/gradlew.bat",
     "template/settings.gradle.kts"
    ]
+  },
+  {
+   "name": "study-planner",
+   "version": 1,
+   "sha256": "d615cdba550c8264d37948ffe88a6d36feaddbc7cd24059bd6f36cdb82609407"
+  },
+  {
+   "name": "tutor",
+   "version": 1,
+   "sha256": "10e93095f72e2952a48656668815b1432c7d3249b69fbef92606da9190240a22"
+  },
+  {
+   "name": "lecture-notes",
+   "version": 1,
+   "sha256": "bfdaf64d055105c8c12968c9f27ffde41b05484cbae8ce54cdaaa6f2db85dec6"
+  },
+  {
+   "name": "essay-coach",
+   "version": 1,
+   "sha256": "26e857ecc5c61821ba14d7eaf7931972b2ac0dd2a0c79faeea1e43ef1361c3b7"
+  },
+  {
+   "name": "group-project",
+   "version": 1,
+   "sha256": "0baf1469600521603aabae128f63d4d47ff3496a9f3deda275a6304619a92c73"
+  },
+  {
+   "name": "classroom-sync",
+   "version": 1,
+   "sha256": "d3d55933d903516abf50f75d0e21ecc10497182bc2452bc054c1a603e8bf62d6"
   }
  ]
 }
