@@ -2,6 +2,9 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.23.1: Linux works again after updates
+- **Fix:** after an app update every Alpine/proot job failed with `CANNOT LINK EXECUTABLE ... libproot.so: library "libtalloc.so.2" not found` (seen on the A12 for the BlazeRouter job). `filesDir/linux/lib/libtalloc.so.2` is a symlink to the APK's native library folder, which Android moves on every update; the old link was left dangling and never replaced. `Linux.prepare()` now checks the link on every run and re-points it (copying the library if symlinks fail). No data, prefs or signing changes.
+
 ## v0.23.0: Views + skills
 - **Blaze always uses its views.** A new always-present **VIEWS** block in the system prompt (`agent/ViewRouter.PROMPT`, in the cached prefix) lists every view (Learn, Schedule, Design, Gallery, Skills, Projects, Archive, Memory, Browser), what belongs there and the tool that writes to it, with a hard rule: output that fits a view is created there, the view is opened or named, and the chat gets one or two lines, never the whole thing as text. Fixes Blaze answering "make flashcards" with plain-text Q&A and saying it only uses views "when I use the specific tool to open them". SelfKnowledge's views section says the same.
 - **Required view per turn.** A cheap keyword classifier (`ViewRouter.route`, no model call) reads each request ("flashcards", "quiz me", "study", "revise" → Learn; "remind me", "every morning" → Schedule; "landing page", "poster", "slides" → Design; "generate an image", "make a beat" → Gallery; "save this as a skill" → Skills; "new project" → Projects; "old chats" → Archive; "remember that" → Memory; "log in to <site>" → Browser). The turn gets a REQUIRED VIEW hint, that view's tool group is switched on, and the turn skips the tool-less chat lane.
