@@ -73,7 +73,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private const val SHOT_NOTE = "[Screenshot of the phone screen]"
     private const val SCREEN_MARK = "Foreground app:"
     /** Read-only tools that are safe to run side by side. */
-    private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "search_past_chats", "gmail_search", "gmail_read",
+    private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "memory_search", "search_past_chats", "gmail_search", "gmail_read",
         "gcal_events", "calendar_events", "drive_search", "gcontacts_search", "find_contact", "recent_notifications", "read_messages",
         "recent_calls", "device_status", "battery_level", "github_issues", "github_my_prs", "github_notifications", "github_search_repos",
         "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing")
@@ -208,10 +208,26 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         LongChat.init(app)
         try { com.blaze.assistant.media.Media.init(app) } catch (_: Exception) { }
         refreshChats()
-        // Reopen the chat you were in.
+        // One mind (v0.18.0): one continuous main conversation. A project thread you were in reopens; anything
+        // else opens the main thread (old chats are read-only in Archive).
         val last = Settings.lastChatId
-        if (last.isNotEmpty() && ChatStore.load(last) != null) open(last) else show(Session(newId()))
+        if (last.isNotEmpty() && last != Mind.MAIN && Projects.of(last) != null && ChatStore.load(last) != null) open(last) else show(mainSession())
+        // One-time, idempotent import of every old chat into the journal (chat files are never changed).
+        io.launch {
+            val d = Mind.db() ?: return@launch
+            try { Mind.migrate(d, ChatStore.list().map { it.id }, { ChatStore.load(it) }, emptyList()) } catch (_: Exception) { }
+        }
     }
+
+    /** The one main conversation (id "main"), live or from disk, created the first time. */
+    private fun mainSession(): Session {
+        val s = load(Mind.MAIN) ?: Session(Mind.MAIN)
+        s.title = "Blaze"; s.titleSource = Titles.MANUAL; s.keep = true
+        return s
+    }
+
+    /** True for the main conversation or a project thread; everything else is archived (read-only). */
+    fun isLive(id: String): Boolean = id == Mind.MAIN || Projects.of(id) != null
 
     private fun newId() = UUID.randomUUID().toString().take(12)
 
@@ -293,7 +309,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         val o = ChatStore.load(id) ?: return null
         val s = Session(id)
         s.title = o.optString("title"); s.pinned = o.optBoolean("pinned"); s.summary = o.optString("summary")
-        s.lcSummary = o.optString("lc_summary"); s.lcUpto = o.optInt("lc_upto")
+        s.lcSummary = o.optString("lc_summary"); s.lcUpto = o.optInt("lc_upto"); s.ctxFrom = o.optInt("ctx_from")
         if (o.has("meter_in")) s.meter = Meter(o.optInt("meter_in"), o.optInt("meter_out"), o.optInt("meter_limit", 32_768))
         s.titleSource = o.optString("title_source"); s.titleTurns = o.optInt("title_turns"); s.keep = o.optBoolean("keep")
         o.optJSONArray("tips_pending")?.let { a -> for (i in 0 until a.length()) s.unseenTips += a.getString(i) }
@@ -331,10 +347,16 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         return s.id to reply
     }
 
-    /** Start a fresh chat. The one you leave keeps working if it was busy. */
-    fun clear() {
+    /**
+     * In a project: start a new thread there (the one you leave keeps working if it was busy). Everywhere else
+     * (one mind): a fresh context window on the main conversation; nothing is deleted and Blaze looks things up.
+     */
+    fun clear(inProject: Boolean = Projects.of(cur.id) != null) {
         cur.persist()
-        show(Session(newId()))
+        if (inProject) { show(Session(newId())); return }
+        val m = if (cur.id == Mind.MAIN) cur else mainSession()
+        show(m)
+        m.freshContext(null)
     }
 
     /** The model's context window (Settings › context_tokens, else a guess from its name; 0 = unknown). */
@@ -359,6 +381,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             } catch (e: CancellationException) { throw e } catch (_: Exception) { }
             s.status = ""
             if (note.isBlank()) note = LongChat.transcript(h, maxOf(0, h.length() - 6), h.length())
+            if (s.id == Mind.MAIN) { s.freshContext(note.take(LongChat.SUMMARY_MAX)); return@launch }
             val ns = Session(newId())
             ns.title = (s.title.ifBlank { "Chat" } + " (continued)").take(60)
             ns.keep = true
@@ -582,6 +605,7 @@ When you finish, say what you did in one short sentence.
     private suspend fun tools(): JSONArray {
         val t = JSONArray()
         Memory.tools().forEach { t.put(it) }
+        if (Mind.ready) Mind.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.device.DeviceStatus.tool())
         t.put(SelfControl.tool())
         t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "ask_user")
@@ -613,7 +637,7 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.ui.Views.tool())
         t.put(SelfKnowledge.tool())
         t.put(BlazeRouter.tool())
-        if (Settings.longChat) LongChat.tools().forEach { t.put(it) }
+        if (Settings.longChat || Mind.ready) LongChat.tools().forEach { t.put(it) }
         t.put(Flashcards.tool())
         t.put(Seller.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
@@ -687,6 +711,10 @@ When you finish, say what you did in one short sentence.
         /** Long-chat rolling summary and the first history index it doesn't cover (v0.15.0). */
         var lcSummary = ""
         var lcUpto = 0
+        /** One mind (v0.18.0): first history index of this context window ("Fresh start" moves it; nothing is deleted). */
+        var ctxFrom = 0
+        /** The ladder rung the last request used (diagnostics, tests). */
+        @Volatile var lastRung = Mind.Rung.RECENT
         private var _meterV: Meter? = null
         var meter: Meter?
             get() = _meterV
@@ -787,6 +815,18 @@ When you finish, say what you did in one short sentence.
             msgs = msgs.map { if (it.id == id) it.copy(meta = listOf(it.meta, chip).filter { s -> s.isNotBlank() }.joinToString(" · ")) else it }
         }
 
+        /** One mind: a fresh context window on this thread. [note] (a state note) is carried into it. Nothing is deleted. */
+        fun freshContext(note: String?) {
+            if (busy) return
+            ctxFrom = history.length(); lcSummary = ""; lcUpto = ctxFrom
+            val text = if (note.isNullOrBlank()) "Fresh start. Earlier turns are out of my context, not deleted: I'll look them up when I need them."
+                else "Fresh start. Here's where we were:\n\n$note"
+            val mid = add(Role.BLAZE, text)
+            addMeta(mid, "New context")
+            if (!note.isNullOrBlank()) history.put(JSONObject().put("role", "assistant").put("content", text))
+            persist()
+        }
+
         /** Save the current chat to disk (screenshots are dropped to keep files small). */
         fun persist() {
             if (msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
@@ -810,7 +850,7 @@ When you finish, say what you did in one short sentence.
             val doc = JSONObject().put("id", id).put("title", title).put("pinned", pinned)
                 .put("updated", System.currentTimeMillis()).put("preview", preview.take(90))
                 .put("messages", arr).put("history", hist).put("summary", summary)
-                .put("lc_summary", lcSummary).put("lc_upto", lcUpto)
+                .put("lc_summary", lcSummary).put("lc_upto", lcUpto).put("ctx_from", ctxFrom)
                 .apply { meter?.let { m -> put("meter_in", m.inTok).put("meter_out", m.outTok).put("meter_limit", m.limit) } }
                 .put("title_source", titleSource).put("title_turns", titleTurns).put("keep", keep)
                 .put("tips_pending", JSONArray(synchronized(unseenTips) { unseenTips.toList() }))
@@ -819,6 +859,8 @@ When you finish, say what you did in one short sentence.
             io.launch {
                 ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list()
                 try { LongChat.db()?.sync(cid, hist) } catch (_: Exception) { }
+                // One mind: every turn goes into the journal (searchable, queued for the idle review).
+                Mind.journal(cid, hist)
             }
         }
 
@@ -967,22 +1009,35 @@ When you finish, say what you did in one short sentence.
 
         /** Only the newest screenshot is sent as an image; older ones become a note. */
         fun requestMessages(): JSONArray {
-            val st = LongChat.State(lcSummary, lcUpto)
+            val base = ctxFrom.coerceIn(0, history.length())
+            val st = LongChat.State(lcSummary, maxOf(lcUpto, base))
+            // One mind's context ladder: recent turns word for word; then the rolling summary + tail; then lookup
+            // (pinned core + index + the last few turns, and Blaze looks the rest up).
+            var rung = Mind.Rung.RECENT
+            var windowed = false
+            val from: Int
+            if (Settings.longChat) {
+                val sFrom = maxOf(LongChat.sendFrom(history, st), base)
+                rung = Mind.rung(LongChat.tokens(history, base), budget(), lcSummary.isNotBlank(), lcSummary.length / 4 + 40,
+                    LongChat.tokens(history, sFrom), ctxWindow())
+                if (rung == Mind.Rung.LOOKUP && !Mind.ready) rung = if (lcSummary.isNotBlank()) Mind.Rung.SUMMARY else Mind.Rung.RECENT.also { windowed = true }
+                from = when {
+                    windowed -> maxOf(windowStart(), base)
+                    rung == Mind.Rung.RECENT -> base
+                    rung == Mind.Rung.SUMMARY -> sFrom
+                    else -> Mind.lookupStart(history, base)
+                }
+            } else { from = maxOf(windowStart(), base); windowed = from > base }
+            lastRung = rung
             val sys = systemPrompt(lastUserText()) + Modes.promptLine(agentPlan) +
-                (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + LongChat.summaryBlock(st) else "") +
+                (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
+                (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine())
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
-            // Speed plan step 3 (sliding window): long chats send only the recent part. The cut moves
-            // in big jumps, not every turn, so the cached prefix stays the same for many turns.
-            val from = when {
-                Settings.longChat && lcSummary.isNotBlank() -> LongChat.sendFrom(history, st)
-                Settings.longChat && LongChat.tokens(history) <= budget() -> 0
-                else -> windowStart()
-            }
-            if (from > 0 && lcSummary.isBlank()) msgs.put(JSONObject().put("role", "user").put("content",
-                "[Earlier in this chat (older messages not shown): ${summary.ifBlank { "use search_past_chats if you need them" }}]"))
+            if (windowed && from > base) msgs.put(JSONObject().put("role", "user").put("content",
+                "[Earlier in this chat (older messages not shown): ${summary.ifBlank { "use search_chat if you need them" }}]"))
                 .also { msgs.put(JSONObject().put("role", "assistant").put("content", "Got it.")) }
             var lastScreen = -1
             for (i in 0 until history.length()) if (history.getJSONObject(i).let { it.optString("role") == "tool" && it.optString("content").contains(SCREEN_MARK) }) lastScreen = i
@@ -1023,6 +1078,7 @@ When you finish, say what you did in one short sentence.
         suspend fun compact() {
             if (!Settings.longChat) return
             if (lcUpto > history.length()) { lcUpto = 0; lcSummary = "" }
+            if (lcUpto < ctxFrom && ctxFrom <= history.length()) { lcUpto = ctxFrom; lcSummary = "" }
             val st = LongChat.State(lcSummary, lcUpto)
             if (!LongChat.needsCompaction(history, st, budget())) return
             val to = LongChat.tailStart(history)
@@ -1042,9 +1098,11 @@ When you finish, say what you did in one short sentence.
             val me = id
             val load: (String) -> JSONArray? = { c -> if (c == me) snap else ChatStore.load(c)?.optJSONArray("history") }
             return when (name) {
-                "search_chat" -> { add(Role.STEP, "Looking back through ${if (args.optBoolean("all_chats")) "your chats" else "this chat"} for “${args.optString("query").take(40)}”")
+                "search_chat" -> if (Mind.ready) { add(Role.STEP, "Looking back through your conversations for \u201c${args.optString("query").take(40)}\u201d")
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { Mind.journal(me, snap); Mind.searchChat(args.optString("query"), args.optInt("limit", 8)) } }
+                else { add(Role.STEP, "Looking back through ${if (args.optBoolean("all_chats")) "your chats" else "this chat"} for “${args.optString("query").take(40)}”")
                     kotlinx.coroutines.withContext(Dispatchers.IO) { LongChat.searchText(args.optString("query"), me, args.optBoolean("all_chats"), args.optInt("limit", 8), load) { ChatStore.list().map { it.id } } } }
-                "read_turn" -> { add(Role.STEP, "Reading an earlier message"); kotlinx.coroutines.withContext(Dispatchers.IO) { LongChat.readTurn(args.optString("id"), me, load) } }
+                "read_turn" -> { add(Role.STEP, "Reading an earlier message"); kotlinx.coroutines.withContext(Dispatchers.IO) { Mind.readTurn(args.optString("id")) ?: LongChat.readTurn(args.optString("id"), me, load) } }
                 "read_artifact" -> { add(Role.STEP, "Reading the saved output"); kotlinx.coroutines.withContext(Dispatchers.IO) { LongChat.readArtifact(args.optString("id"), args.optInt("from", 1), args.optInt("lines", 200)) } }
                 "update_brief" -> {
                     val p = Projects.of(me) ?: return "This chat isn't in a project, so there's no brief to update. Keep going without it."
@@ -1486,6 +1544,8 @@ When you finish, say what you did in one short sentence.
             return when (name) {
                 "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact"), args.optString("replaces")) }
                 "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
+                in Mind.toolNames -> { add(Role.STEP, if (name == "memory_search") "Checking memory for \u201c${args.optString("query").take(40)}\u201d" else "Saving to memory")
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { Mind.run(name, args) } }
                 "generate_image" -> if (Regex("(?i)\\b(pie|bar|line)\\s*chart|\\bgraph\\b|\\bplot\\b|\\bdiagram\\b|\\btable\\b|\\bpdf\\b|\\binfographic|\\bspreadsheet").containsMatchIn(args.optString("prompt"))) {
                     "Refused: the AI picture tool can't draw exact charts, tables or documents (it makes a random look-alike). Make it with run_code (Python matplotlib / reportlab) and save under /root/phone/. " +
                         "If the terminal isn't installed yet, call linux_install first and wait for it, then run_code. Never send the user an AI picture instead of a real chart."
@@ -1870,10 +1930,21 @@ When you finish, say what you did in one short sentence.
             val userText = msgs[lastUser].text
             val (n, distinct) = Learn.steps(tools)
             val repeat = Learn.repeatsAndRecord(Learn.signature(userText, tools), n >= 5 && distinct >= 2)
-            val d = Learn.decide(Learn.Turn(userText, reply.text, tools,
-                savedMemory = tools.any { it == "remember" || it == "forget" },
+            val d0 = Learn.decide(Learn.Turn(userText, reply.text, tools,
+                savedMemory = tools.any { it == "remember" || it == "forget" || it == "memory_save" || it == "memory_update" },
                 savedSkill = tools.any { it == "write_skill" || it == "skill_manage" }), repeat)
-            if (!d.reflect) return
+            // One mind: save as you go. One cheap extraction call per real turn writes or merges memories; the
+            // learning review below then only looks for skills.
+            if (Mind.ready && agentId == null && userText.trim().split(Regex("\\s+")).size >= 3) {
+                val ex = msgs.drop(maxOf(0, lastUser - 4)).filter { it.role == Role.USER || it.role == Role.BLAZE }
+                    .joinToString("\n") { (if (it.role == Role.USER) "[user] " else "[assistant] ") + it.text.take(2000) }
+                io.launch {
+                    val n = try { MindReview.afterTurn(ex) } catch (_: Exception) { 0 }
+                    if (n > 0) scope.launch { addMeta(reply.id, "Memory updated"); persist() }
+                }
+            }
+            val d = if (Mind.ready) d0.copy(memory = false) else d0
+            if (!d.reflect || (!d.memory && !d.skill)) return
             val exchange = msgs.drop(maxOf(0, lastUser - 4)).joinToString("\n") { m ->
                 when (m.role) { Role.USER -> "User: "; Role.BLAZE -> "Blaze: "; Role.STEP -> "  (step) "; Role.ERROR -> "  (error) " } + m.text.take(1500) }
             val t = JSONArray(trace.toString())

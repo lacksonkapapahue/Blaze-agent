@@ -47,19 +47,21 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Saved chats: search, open, rename, pin, delete. */
+/**
+ * Archive (one mind, v0.18.0): every chat that isn't the main conversation or a project thread, read-only.
+ * Their words are also in the journal, so Blaze finds them with search_chat. Nothing here edits or deletes.
+ * [initial] opens one archived chat straight away.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ChatsSheet(onDismiss: () -> Unit) {
+fun ChatsSheet(onDismiss: () -> Unit, initial: String? = null) {
     val c = LocalBlaze.current
     val all by Agent.chats.collectAsState()
-    val current by Agent.chatId.collectAsState()
     var query by remember { mutableStateOf("") }
-    var expanded by remember { mutableStateOf<String?>(null) }
-    var renaming by remember { mutableStateOf<String?>(null) }
-    var renameText by remember { mutableStateOf("") }
-    val shown = remember(all, query) { if (query.isBlank()) all else ChatStore.search(query) }
-    BackHandler { onDismiss() }
+    var viewing by remember { mutableStateOf(initial) }
+    val archived = remember(all) { all.filter { !Agent.isLive(it.id) } }
+    val shown = remember(archived, query) { if (query.isBlank()) archived else ChatStore.search(query).filter { !Agent.isLive(it.id) } }
+    BackHandler { if (viewing != null && initial == null) viewing = null else onDismiss() }
 
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = if (c.dark) 0.5f else 0.25f))
         .clickable(remember { MutableInteractionSource() }, null) { onDismiss() }) {
@@ -69,53 +71,63 @@ fun ChatsSheet(onDismiss: () -> Unit) {
                 .clickable(remember { MutableInteractionSource() }, null) { }
                 .navigationBarsPadding().imePadding().padding(20.dp)
         ) {
-            Label("History")
+            val open = viewing
+            if (open != null) ArchivedChat(open, onBack = { if (initial == null) viewing = null else onDismiss() }) else {
+            Label("Read-only")
             Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Chats", modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium,
-                    fontSize = 32.sp, letterSpacing = (-0.03).em, color = c.ink))
-                Box(Modifier.background(c.ink).clickable { Agent.clear(); onDismiss() }.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Label("New chat", color = c.paper, size = 11.sp)
-                }
-            }
+            Text("Archive", style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium,
+                fontSize = 32.sp, letterSpacing = (-0.03).em, color = c.ink))
+            Text("Chats from before Blaze had one conversation. Blaze still finds anything in them when it looks back.",
+                modifier = Modifier.padding(top = 6.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
             Spacer(Modifier.height(16.dp))
             Box(Modifier.fillMaxWidth().hairline(c.hair).padding(14.dp)) {
-                if (query.isEmpty()) Text("Search chats", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+                if (query.isEmpty()) Text("Search the archive", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
                 BasicTextField(query, { query = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
                     textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
             }
             Spacer(Modifier.height(8.dp))
             if (shown.isEmpty()) {
-                Text(if (query.isBlank()) "No saved chats yet. They appear here once you send a message." else "Nothing matches \"$query\".",
+                Text(if (query.isBlank()) "Nothing archived. Every conversation now happens in one place." else "Nothing matches \"$query\".",
                     modifier = Modifier.padding(vertical = 24.dp),
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.sub))
             }
             LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                 items(shown, key = { it.id }) { m ->
-                    ChatRow(m, m.id == current, expanded == m.id,
-                        onOpen = { Agent.open(m.id); onDismiss() },
-                        onMore = { expanded = if (expanded == m.id) null else m.id })
-                    if (expanded == m.id) {
-                        if (renaming == m.id) {
-                            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.weight(1f).hairline(c.accent).padding(12.dp)) {
-                                    BasicTextField(renameText, { renameText = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
-                                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
-                                }
-                                Spacer(Modifier.width(8.dp))
-                                Box(Modifier.background(c.ink).clickable { Agent.renameChat(m.id, renameText); renaming = null }
-                                    .padding(horizontal = 14.dp, vertical = 12.dp)) { Label("Save", color = c.paper, size = 11.sp) }
-                            }
-                        } else {
-                            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                RowAction("Rename") { renaming = m.id; renameText = m.title }
-                                RowAction(if (m.pinned) "Unpin" else "Pin") { Agent.pinChat(m.id, !m.pinned) }
-                                RowAction("Delete", c.accent) { Agent.deleteChat(m.id); expanded = null }
-                            }
-                        }
-                    }
+                    ChatRow(m, false, false, onOpen = { viewing = m.id }, onMore = { viewing = m.id })
                 }
+            }
+            }
+        }
+    }
+}
+
+/** One archived chat's words, read-only. */
+@Composable
+private fun ArchivedChat(id: String, onBack: () -> Unit) {
+    val c = LocalBlaze.current
+    val doc = remember(id) { ChatStore.load(id) }
+    val lines = remember(doc) {
+        val ms = doc?.optJSONArray("messages")
+        (0 until (ms?.length() ?: 0)).mapNotNull { i -> ms!!.optJSONObject(i) }
+            .filter { it.optString("role") == "USER" || it.optString("role") == "BLAZE" }
+            .map { (it.optString("role") == "USER") to it.optString("text") }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Label("\u2190 Archive", color = c.accent, size = 11.sp, modifier = Modifier.clickable(onClick = onBack).padding(vertical = 6.dp))
+        Spacer(Modifier.weight(1f))
+        Label("Read-only", size = 9.sp)
+    }
+    Spacer(Modifier.height(8.dp))
+    Text(doc?.optString("title").orEmpty().ifBlank { "Chat" }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 24.sp, color = c.ink))
+    Spacer(Modifier.height(12.dp))
+    if (lines.isEmpty()) Text("This chat is empty or couldn't be read.", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.sub))
+    LazyColumn(Modifier.fillMaxWidth()) {
+        items(lines.size) { i ->
+            val (mine, text) = lines[i]
+            Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                Label(if (mine) "You" else "Blaze", color = if (mine) c.ink else c.accent, size = 9.sp)
+                Text(text, modifier = Modifier.padding(top = 3.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
             }
         }
     }

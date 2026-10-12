@@ -699,7 +699,7 @@ private fun BackupSection() {
         uri ?: return@rememberLauncherForActivityResult
         msg = try {
             val n = Settings.importJson(ctx.contentResolver.openInputStream(uri)!!.bufferedReader().readText())
-            com.blaze.assistant.agent.Memory.init(ctx)
+            com.blaze.assistant.agent.Memory.init(ctx, mergeLegacy = true)
             "Restored $n settings. Close and reopen Settings to see them."
         } catch (e: Exception) { "That file isn't a Blaze backup." }
     }

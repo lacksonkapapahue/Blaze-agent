@@ -15,7 +15,7 @@ Actions secrets (`BLAZE_SIGNING_P12`, `BLAZE_SIGNING_PASS`); see v1.14.2 in [CHA
 Phones already on a rotated build won't accept an APK signed only with the local key.
 
 ## Layout
-- `agent/` – Agent loop, LlmClient (OpenAI-compatible), Providers, Settings, Memory, ChatStore, Secrets (Keystore encryption), LongChat (rolling summary, FTS chat search, artifacts)
+- `agent/` – Agent loop, LlmClient (OpenAI-compatible), Providers, Settings, Memory, ChatStore, Secrets (Keystore encryption), LongChat (rolling summary, FTS chat search, artifacts), Mind + MindReview (one mind: journal, memories, context ladder, idle review)
 - `phone/` – BlazeAccessibilityService (read/tap/type), PhoneTools, Skills (SMS, calls, calendar, contacts)
 - `ui/` – Compose screens (ChatScreen, SettingsSheet, Overlay orb, Theme)
 - `connect/` – Blaze account, OAuth connectors (incl. Google Classroom), key sync, MCP client
@@ -25,13 +25,16 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.17.0 (versionCode 59) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.18.0 (versionCode 60) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
 before it were numbered 1.0–1.17.0 (CHANGELOG.md keeps those numbers); `versionCode` keeps counting up, so phones
 update normally. Because the name went down, CI also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
 1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
+
+## One mind
+One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/mind.db` holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats are read-only in **Archive** (`/views`). Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.
 
 ## Student pack
 Settings › Learn (or `/learn`): flashcards with spaced repetition, Google Classroom (switch on, then reconnect Google once) and low-data mode. Skills: study-planner, tutor, lecture-notes, essay-coach, group-project, classroom-sync.

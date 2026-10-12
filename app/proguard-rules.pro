@@ -7,3 +7,4 @@
 # Services, receivers and the widget are referenced from the manifest (kept by default).
 -keep class com.blaze.assistant.** extends android.app.Service { *; }
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-keep class com.blaze.assistant.agent.MindReviewWorker { <init>(...); }

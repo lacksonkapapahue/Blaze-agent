@@ -165,6 +165,7 @@ fun ChatScreen() {
     val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
     LaunchedEffect(askedPage) { askedPage?.let { settingsPage = it; com.blaze.assistant.agent.SelfSetup.openPage.value = null } }
     var showChats by rememberSaveable { mutableStateOf(false) }
+    var archiveOpen by remember { mutableStateOf<String?>(null) }
     var drawer by rememberSaveable { mutableStateOf(false) }
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var quote by rememberSaveable { mutableStateOf("") }
@@ -310,7 +311,7 @@ fun ChatScreen() {
             if (cmdName == "views") { input = TextFieldValue(""); showViews = true; return }
             if (cmdName == "search") { input = TextFieldValue(""); showSearch = true; return }
             if (cmdName == "projects") { input = TextFieldValue(""); shellMode = "projects"; return }
-            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser") && !text.contains(' ')) {
+            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser", "archive") && !text.contains(' ')) {
                 input = TextFieldValue(""); Views.find(cmdName)?.let { openView(it) }; return
             }
         }
@@ -321,15 +322,17 @@ fun ChatScreen() {
         if (full.isBlank() && pending.isEmpty()) return
         if (mood != Mood.IDLE) return
         val pid = com.blaze.assistant.agent.Projects.current.value
-        if (pid.isNotBlank() && com.blaze.assistant.agent.Projects.of(Agent.chatId.value) == null) com.blaze.assistant.agent.Projects.assign(Agent.chatId.value, pid)
+        if (pid.isNotBlank() && Agent.chatId.value != com.blaze.assistant.agent.Mind.MAIN && com.blaze.assistant.agent.Projects.of(Agent.chatId.value) == null) com.blaze.assistant.agent.Projects.assign(Agent.chatId.value, pid)
         Agent.send(full, attachments = pending)
         pending = emptyList(); quote = ""; input = TextFieldValue("")
     }
     fun newChat(projectId: String = "") {
-        Agent.clear(); quote = ""; com.blaze.assistant.agent.Projects.current.value = projectId
+        Agent.clear(projectId.isNotBlank()); quote = ""; com.blaze.assistant.agent.Projects.current.value = projectId
         exitView(); shellMode = "chat"
     }
     fun openChat(id: String) {
+        // One mind: old chats are read-only in Archive; only the main thread and project threads open for writing.
+        if (!Agent.isLive(id)) { archiveOpen = id; showChats = true; drawer = false; showSearch = false; return }
         Agent.open(id); com.blaze.assistant.agent.Projects.current.value = com.blaze.assistant.agent.Projects.of(id)?.id.orEmpty()
         drawer = false; showSearch = false; exitView(); shellMode = "chat"
     }
@@ -422,7 +425,7 @@ fun ChatScreen() {
                 }
                 if (plusOpen) {
                     val model = if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "Auto (free)" else Settings.model.substringAfterLast('/').take(28)
-                    PlusMenu(plusItems(work, approval, model, clipHasImage)) { id ->
+                    PlusMenu(plusItems(work, approval, model, clipHasImage, com.blaze.assistant.agent.Projects.of(currentChat) != null)) { id ->
                         plusOpen = false
                         when (id) {
                             "camera" -> openCamera()
@@ -436,7 +439,7 @@ fun ChatScreen() {
                             "approval" -> com.blaze.assistant.agent.Modes.toggleApproval()
                             "model" -> settingsPage = "router"
                             "views" -> showViews = true
-                            "new" -> newChat()
+                            "new" -> newChat(com.blaze.assistant.agent.Projects.of(Agent.chatId.value)?.id.orEmpty())
                         }
                     }
                     BackHandler { plusOpen = false }
@@ -474,7 +477,7 @@ fun ChatScreen() {
         }
         AnimatedVisibility(drawer, enter = slideInHorizontally(tween(220)) { -it }, exit = slideOutHorizontally(tween(200)) { -it }) {
             Box(Modifier.statusBarsPadding().navigationBarsPadding()) {
-                RecentRail(allChats, busyChats, currentChat, onNew = { newChat(); drawer = false }, onChat = { openChat(it) },
+                RecentRail(allChats.filter { Agent.isLive(it.id) && com.blaze.assistant.agent.Projects.of(it.id) == null }, busyChats, currentChat, onNew = { newChat(); drawer = false }, onChat = { openChat(it) },
                     onAll = { Agent.refreshChats(); showChats = true; drawer = false }, onClose = { drawer = false })
             }
         }
@@ -515,7 +518,7 @@ fun ChatScreen() {
             SearchScreen(allChats, onChat = { openChat(it) }, onView = { openView(it) }, onDismiss = { showSearch = false })
             BackHandler { showSearch = false }
         }
-        if (showChats) ChatsSheet(onDismiss = { showChats = false })
+        if (showChats) ChatsSheet(onDismiss = { showChats = false; archiveOpen = null }, initial = archiveOpen)
         if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
         if (onboard) SetupFlow(setupPage) { prompt ->
             onboard = false; setupPage = 0

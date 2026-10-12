@@ -22,6 +22,8 @@ class BlazeApp : Application() {
         com.blaze.assistant.phone.Watchers.init(this)
         com.blaze.assistant.agent.Autonomy.init(this)
         com.blaze.assistant.agent.Processes.init(this)
+        // One mind (v0.18.0): mind.db first; Memory is now a view of its memories table.
+        com.blaze.assistant.agent.Mind.init(this)
         com.blaze.assistant.agent.Memory.init(this)
         com.blaze.assistant.agent.Usage.init(this)
         try { com.blaze.assistant.agent.ToolStats.init(this) } catch (_: Exception) { }
@@ -47,6 +49,7 @@ class BlazeApp : Application() {
             }
         }
         Thread { com.blaze.assistant.agent.SkillPacks.ensureStarters(); com.blaze.assistant.agent.SkillLibrary.seed(this) }.start()
+        try { com.blaze.assistant.agent.MindReview.schedule(this) } catch (_: Throwable) { }
         com.blaze.assistant.proactive.Triggers.init(this)
         com.blaze.assistant.proactive.Proactive.start(this)
         com.blaze.assistant.ui.Overlay.watchTasks(this)

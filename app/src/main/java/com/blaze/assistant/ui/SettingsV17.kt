@@ -284,6 +284,13 @@ fun LearningSection() {
     ToggleRow("Learn from chats", "Blaze saves lasting facts and preferences as you go, replaces ones that changed, and saves tasks you teach it or repeat as skills. Small talk costs nothing: it only checks when something worth keeping was said", auto) { auto = !auto; Settings.autoLearn = auto }
     var long by remember { mutableStateOf(Settings.longChat) }
     ToggleRow("Long chats", "Older turns fold into a running summary, Blaze searches the chat instead of re-reading it, long tool output is saved aside, and the work card shows tokens in and out", long) { long = !long; Settings.longChat = long }
+    var review by remember { mutableStateOf(com.blaze.assistant.agent.MindReview.enabled) }
+    ToggleRow("Review past conversations when idle", "When the phone is idle and charging, or idle on Wi-Fi, Blaze reads past turns (old chats too) a little at a time with the cheapest free model and saves what's worth remembering", review) {
+        review = !review; com.blaze.assistant.agent.MindReview.enabled = review
+        try { com.blaze.assistant.agent.MindReview.schedule(ctx) } catch (_: Throwable) { }
+    }
+    val waiting = remember { try { com.blaze.assistant.agent.Mind.db()?.unreviewedCount() ?: 0 } catch (_: Exception) { 0 } }
+    if (review && waiting > 0) Label("$waiting turns waiting for review", size = 9.sp, modifier = Modifier.padding(bottom = 6.dp))
     ToggleRow("Name chats by topic", "Chats are titled by what most of the conversation is about, not the first message. Chats you rename stay as you named them", titles) { titles = !titles; Settings.autoTitles = titles }
     ToggleRow("Ask before saving", "Changes wait here for your OK instead of saving straight away", ask) { ask = !ask; Settings.learnApproval = ask }
     if (pending.isNotEmpty()) {
