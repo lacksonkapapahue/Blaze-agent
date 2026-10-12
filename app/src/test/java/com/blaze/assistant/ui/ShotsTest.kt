@@ -488,4 +488,29 @@ class ShotsTest {
             Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = androidx.compose.ui.Alignment.TopCenter) { PointerBar() }
         }
     }
+
+    // v0.23.4: Settings › Brains / Auto, models per provider with cooling counts, one provider opened.
+    @Test fun autoPool() = shot("38-auto-pool") {
+        fun S(pid: String, name: String, n: Int, cool: Int, tools: Int, at: Long, err: String, next: Long) =
+            com.blaze.assistant.agent.FreeRouter.PoolSummary(pid, name, n, cool, tools, at, err, next)
+        val rows = listOf(
+            S("gemini", "Google Gemini", 9, 1, 7, 1L, "", 0),
+            S("groq", "Groq", 12, 12, 9, 1L, "", 40_000),
+            S("nvidia", "NVIDIA NIM", 31, 2, 24, 1L, "", 0),
+            S("openrouter", "OpenRouter", 14, 0, 10, 1L, "", 0),
+            S("pollinations", "Keyless", 1, 0, 0, 0L, "", 0),
+        )
+        val nim = listOf(
+            PoolModel("moonshotai/kimi-k2.6", true, "worked", false),
+            PoolModel("z-ai/glm-5.3", true, "limited · back in 52s · rate limit", true),
+            PoolModel("nvidia/nemotron-3-super-120b-a12b", true, "untried", false),
+            PoolModel("meta/llama-3.3-70b-instruct", true, "failed · back in 23h 59m · not available", true),
+            PoolModel("deepseek-ai/deepseek-v4.1-flash", true, "untried", false),
+            PoolModel("google/gemma-4-31b-it", false, "untried", false),
+        )
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
+            PageHead("Brains", "Auto (free routing)", "Every free model your providers offer, taking turns.")
+            AutoPoolPanel(rows, refreshing = false, onRefresh = {}, models = { if (it == "nvidia") nim else emptyList() }, initiallyOpen = "nvidia")
+        }
+    }
 }

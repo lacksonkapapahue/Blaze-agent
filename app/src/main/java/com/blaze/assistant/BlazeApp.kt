@@ -11,6 +11,8 @@ class BlazeApp : Application() {
         com.blaze.assistant.device.CrashLog.init(this)
         com.blaze.assistant.device.CrashLog.shieldMainThread()
         Settings.init(this)
+        // v0.23.4: Auto's per-provider model lists and per-model cooldowns (new files, no prefs changes).
+        try { com.blaze.assistant.agent.ProviderCatalog.init(filesDir); com.blaze.assistant.agent.ModelMemory.init(filesDir) } catch (_: Exception) { }
         try { com.blaze.assistant.agent.Projects.load() } catch (_: Exception) { }
         // v1.9.10 fix: a leftover "Auto" steps model silently sent phone steps through the free chain
         // even after the user picked a specific model. Clear it once; they can set it again.

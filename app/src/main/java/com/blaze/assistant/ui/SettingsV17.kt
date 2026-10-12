@@ -62,24 +62,41 @@ private fun Section(title: String) { Spacer(Modifier.height(24.dp)); Label(title
 @Composable
 fun AutoRouterSection() {
     val c = LocalBlaze.current
+    val scope = rememberCoroutineScope()
     var chain by remember { mutableStateOf(FreeRouter.entries()) }
-    val health by FreeRouter.status.collectAsState()
-    Note("Blaze uses the first model in this chain and moves down it when one is rate-limited, out of quota, slow or failing, then comes back once it cools down. Only providers with a key saved are used. Free tiers have their own limits and terms.")
+    // v0.23.4: per provider, how many models Auto can use and how many are cooling.
+    val marks by com.blaze.assistant.agent.ModelMemory.status.collectAsState()
+    val listed by com.blaze.assistant.agent.ProviderCatalog.changed.collectAsState()
+    var refreshing by remember { mutableStateOf(false) }
+    val rows = remember(chain, marks, listed, refreshing) { FreeRouter.summary() }
+    Note("Blaze tries every free model your providers offer, taking turns between providers. A model that fails or is rate-limited rests until its cooldown passes and isn't tried again before the others. Only providers with a key saved are used. Free tiers have their own limits and terms.")
+    AutoPoolPanel(rows, refreshing, onRefresh = {
+        refreshing = true
+        scope.launch {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.blaze.assistant.agent.ProviderCatalog.refreshAll(chain.map { it.first } + Providers.keyless.id)
+            }
+            refreshing = false
+        }
+    })
+    Section("Your chain (preferred model first)")
+    Note("The order providers take turns in, and the model each starts with. The rest of each provider's models follow automatically.")
     Button("Use my free stack") { FreeRouter.presetFreeStack(); chain = FreeRouter.entries() }
     Spacer(Modifier.height(12.dp))
     if (chain.isEmpty()) Note("Nothing to route yet. Pick Google Gemini, Groq or OpenRouter above, paste a free key, then come back to Auto.")
     else Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         chain.forEachIndexed { i, (pid, model) ->
-            val h = health["$pid|$model"]
-            val cooling = (h?.coolUntil ?: 0) > System.currentTimeMillis()
+            val until = com.blaze.assistant.agent.ModelMemory.coolingUntil(pid, model)
+            val cooling = marks.isNotEmpty() && until > System.currentTimeMillis()
+            val m = marks["$pid|$model"]
             Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
                 Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(6.dp).background(when { h == null -> c.weak; cooling -> c.sub; else -> c.accent }))
+                Box(Modifier.size(6.dp).background(when { m == null -> c.weak; cooling -> c.sub; else -> c.accent }))
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(Providers.byId(pid).name.substringBefore(" ("), style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
-                    Text(model + (h?.let { if (cooling) " · resting" else if (it.avgMs > 0) " · ${it.avgMs} ms" else "" } ?: ""), maxLines = 1,
+                    Text(model + (if (cooling) " · resting ${FreeRouter.fmt(until - System.currentTimeMillis())}" else if ((m?.okAt ?: 0) > 0) " · worked" else ""), maxLines = 1,
                         style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
                 }
                 Box(Modifier.clickable(enabled = i > 0) { chain = chain.toMutableList().also { l -> l.add(i - 1, l.removeAt(i)) }; FreeRouter.save(chain) }.padding(10.dp)) { Label("↑", size = 13.sp) }
