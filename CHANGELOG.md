@@ -2,6 +2,11 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.13.0: Blaze knows itself
+- **ABOUT YOU in every prompt:** what Blaze is (Android, Desktop and CLI, one Blaze account), this app's version, the paired PC and whether you're signed in, plus a rule: questions about Blaze, its apps or connecting phone and PC are answered, never bounced back with "what are you building?".
+- **`about_blaze` tool:** a live report of every nook and cranny: the Blaze family and how to pair with Blaze Link, this app (mode, personality, projects), the phone, brains and which providers have keys (never the keys), Blaze account, connected apps, MCP servers, skills, memory and running things, files and folders, Alpine/Termux/dashboard, voice, every view and command, and the setup check. Ask for one section or everything. Allowed in Plan mode.
+- **Tests:** `SelfKnowledgeTest`.
+
 ## v0.12.0: Calm shell like a messaging app (1.0 redesign, part A)
 - **Top bar:** the B logo (back to the plain chat), a `Chat | Projects` switch, Search, the BlazeRouter dot (tap for models and keys) and your avatar. Tap *Chat* again for recent chats.
 - **Avatar menu:** Account, Settings, BlazeRouter, All views, Phone control, Theme (tap flips light/dark, long-press follows the phone), Check for updates, Sign out.
