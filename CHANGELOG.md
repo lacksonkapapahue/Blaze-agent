@@ -2,6 +2,16 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.17.0: Marketer & seller pack
+Plan part D, for running and growing an online store (like a Shopify dropshipping store) and its social media. Blaze Desktop's `marketer-pack` branch didn't exist yet when this was built, so the six skills are written here in the shared SKILL.md format for Desktop to take as-is.
+- **Six skills** (bundled, version-aware seeding; 41 in all): `content-calendar` (a week of posts in a mix of types, visuals in the brand kit, each post saved as a dated Schedule reminder to publish), `product-listing` (supplier URL from AliExpress, Zendrop, CJ and others → title, description, benefits, tags, SEO, variants, suggested price with margin, image prompts), `ad-lab` (5 angles, each scored on hook, clarity and CTA with a weighted total, best first, plus what to A/B test), `research-brief` (one-page competitor and pricing brief built with deep-research, only real prices with links), `whatsapp-replies` (customer replies in the brand voice, one approval per message), `weekly-digest` (orders and revenue from the store's order emails, top posts, next 3 posts).
+- **Brand kit**: `brand_kit` tool (get / set only the given fields) and Settings › Seller (name, colours with swatches, fonts, voice). Stored in `~/.blaze/brand.json` with the same fields as Blaze Desktop's studio brand kit.
+- **WhatsApp replies from the PC**: Blaze Link inbox requests with `kind: "message"` (`to`, `text`, `app`) are sent from the phone through `message_contact`, with no model call. The confirm card always shows ("Drafted on <PC>"), even in Autopilot or with a standing OK (`Agent.confirm(always = true)`); SMS isn't allowed from the PC. The PC gets back `Sent …` / `Not sent: …`. Protocol: [docs/blaze-link-messages.md](docs/blaze-link-messages.md).
+- **Weekly store digest job**: Settings › Seller › *Weekly store digest* adds (or removes) the Schedule routine "Weekly store digest", Mondays 08:00, which runs the weekly-digest skill.
+- **Seller view** (`/seller`, /views, aliases store, shop, marketing, brand). Plan mode allows `brand_kit get` and `flashcards list/due` (read-only).
+- **Screenshots:** `14-seller`.
+- **Tests:** `MarketerPackTest` (brand kit shape, merge and clearing; PC message parsing and outcomes; the always-confirm guard; skill hashes; digest schedule).
+
 ## v0.16.0: Student pack
 Plan part C (Desktop's 1.0 plan, `docs/plans/plan-v1.0-redesign.md` in Blaze-dekstop). Desktop has no student-pack code yet, so these skills are written in the shared SKILL.md format for Desktop to reuse.
 - **Google Classroom** (Google connector): `classroom_courses`, `classroom_coursework` (due dates in your time, turned in or not, overdue on request) and `classroom_sync` (every assignment that isn't turned in becomes a Schedule reminder 24 hours before it's due; safe to repeat). Read-only scopes `classroom.courses.readonly` + `classroom.coursework.me.readonly`, asked for only after you switch on **Settings › Learn › Google Classroom** and reconnect Google once, so nobody's existing Google connection changes. The Classroom API and those scopes must be enabled in Google Cloud project blaze-511220 (Testing mode).

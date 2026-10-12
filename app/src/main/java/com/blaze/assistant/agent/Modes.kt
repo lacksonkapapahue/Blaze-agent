@@ -45,7 +45,7 @@ object Modes {
         "recall_memory", "search_past_chats", "search_screen_memory", "search_chat", "read_turn", "read_artifact",
         "device_status", "battery_level", "list_apps", "app_usage", "read_screen", "look_at_screen", "self_test",
         "recent_notifications", "read_messages", "recent_calls", "find_contact", "calendar_events",
-        "gcal_events", "gmail_search", "gmail_read", "drive_search", "gcontacts_search", "classroom_courses", "classroom_coursework",
+        "gcal_events", "gmail_search", "gmail_read", "drive_search", "gcontacts_search", "classroom_courses", "classroom_coursework", "brand_kit", "flashcards",
         "github_issues", "github_my_prs", "github_my_repos", "github_notifications", "github_search_repos", "github_ci",
         "notion_search", "slack_read", "slack_channels", "spotify_now_playing",
         "file_read", "file_list", "file_search", "terminal_status", "terminal_jobs",
@@ -62,6 +62,8 @@ object Modes {
         "blaze_self" to setOf("setup_check", "status"),
         "process" to setOf("details", "status"),
         "gallery" to setOf("list"),
+        "brand_kit" to setOf("get"),
+        "flashcards" to setOf("list", "due"),
     )
 
     private val gitReadOnly = setOf("status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog", "grep",

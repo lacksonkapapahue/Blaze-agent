@@ -19,6 +19,7 @@ object Views {
         BlazeView("design", "Design", "Live preview of pages Blaze builds", special = "design", aliases = listOf("preview", "studio")),
         BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learning")),
         BlazeView("learn", "Learn", "Flashcards with spaced repetition, Classroom, low-data mode", page = "learn", aliases = listOf("flashcards", "study", "student", "classroom")),
+        BlazeView("seller", "Seller", "Brand kit, store digest, posts, ads and listings", page = "seller", aliases = listOf("store", "shop", "marketing", "marketer", "brand")),
         BlazeView("jobs", "Jobs", "Running and past jobs, the terminal", page = "terminal", aliases = listOf("terminal", "shell")),
         BlazeView("schedule", "Schedule", "Routines and timed tasks", page = "routines", aliases = listOf("routines")),
         BlazeView("agents", "Agents", "Specialists and background agents", page = "specialists", aliases = listOf("specialists")),
