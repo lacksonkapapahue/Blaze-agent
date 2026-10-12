@@ -56,7 +56,7 @@ internal fun LearnPage(startDeck: String = "", reveal: Boolean = false, now: Lon
     Spacer(Modifier.height(16.dp))
     Label("Decks", modifier = Modifier.padding(bottom = 8.dp))
     val decks = remember(all) { Flashcards.decks(clock) }
-    if (decks.isEmpty()) Text("No cards yet.", modifier = Modifier.padding(vertical = 8.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
+    if (decks.isEmpty()) Rows { EmptyState("No cards yet", "Ask Blaze to \u201cmake flashcards from my notes\u201d, or study with the tutor skill. Decks show up here.") }
     decks.forEachIndexed { i, d ->
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { deck = d.name }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Label("%02d".format(i + 1), color = c.weak, size = 10.sp)

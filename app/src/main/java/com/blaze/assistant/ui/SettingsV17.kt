@@ -139,45 +139,50 @@ fun StepsModelSection() {
 
 // ---------------- Connections ----------------
 
+/**
+ * Settings › Connected accounts (v0.19.0 look, Desktop's Accounts view): page header, one raised row per
+ * app with a status tag, tap for Connect / Disconnect. [connected0] + [online0] are for screenshots (no network).
+ */
 @Composable
-fun ConnectionsPage() {
+fun ConnectionsPage(connected0: Set<String>? = null, online0: Boolean? = null, open0: String = "") {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
-    val uri = LocalUriHandler.current
     val scope = rememberCoroutineScope()
     val st by Connectors.state.collectAsState()
-    var open by remember { mutableStateOf("") }
+    var open by remember { mutableStateOf(open0) }
     var tick by remember { mutableStateOf(0) }
-    Spacer(Modifier.height(10.dp))
-    val acct by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
-    LaunchedEffect(Unit) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.blaze.assistant.connect.BlazeAccount.refreshProviders(true) } }
-    Note("Let Blaze use your accounts: tap Connect, approve in your browser, and you're back. Tokens stay encrypted on this phone. Sending or posting always asks you first.")
-    if (!acct.online) Note("Can't reach Blaze's sign-in service right now. Check your connection.")
-    Connectors.all.forEach { conn ->
-        val on = remember(tick, st) { Connectors.connected(conn.id) }
-        val one = acct.connectors[conn.id] == true
-        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { open = if (open == conn.id) "" else conn.id }.padding(vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(if (on) c.accent else c.weak)); Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(conn.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = c.ink))
-                Text(st[conn.id]?.takeIf { it.isNotBlank() } ?: conn.blurb, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-            }
-            Label(when { on -> "On"; one -> "Connect"; acct.online -> "Soon"; else -> "Offline" }, color = if (on) c.accent else c.sub, size = 10.sp)
-        }
-        if (open == conn.id) Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-            when {
-                on -> Button("Disconnect", primary = false) { Connectors.disconnect(conn.id); tick++ }
-                one -> {
-                    Note("Blaze opens ${conn.name} in your browser. Approve, and you're back here connected.")
-                    Button("Connect ${conn.name}") { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
+    val acct0 by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
+    val acct = if (online0 != null) acct0.copy(online = online0, connectors = Connectors.all.associate { it.id to online0 }) else acct0
+    if (connected0 == null) LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.blaze.assistant.connect.BlazeAccount.refreshProviders(true) } }
+    }
+    PageHead("Accounts", "Connected accounts", "Let Blaze use your apps: tap Connect, approve in your browser, and you're back. Tokens stay encrypted on this phone; sending or posting always asks you first.")
+    if (!acct.online) Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(6.dp).background(c.sub)); Spacer(Modifier.width(10.dp))
+        Text("Can't reach Blaze's sign-in service right now. Check your connection.", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, lineHeight = 17.sp, color = c.body))
+    }
+    val states = Connectors.all.map { conn -> conn to (connected0?.contains(conn.id) ?: remember(tick, st) { runCatching { Connectors.connected(conn.id) }.getOrDefault(false) }) }
+    GroupHead("Apps \u00b7 %02d".format(states.size), right = { Label("${states.count { it.second }} connected", size = 9.sp, color = c.weak) })
+    Rows {
+        states.forEachIndexed { i, (conn, on) ->
+            val one = acct.connectors[conn.id] == true
+            val tag = when { on -> "Connected"; one -> "Connect"; acct.online -> "Soon"; else -> "Offline" }
+            KitRow(conn.name, st[conn.id]?.takeIf { it.isNotBlank() } ?: conn.blurb, first = i == 0, pill = tag, pillOn = on,
+                onClick = { open = if (open == conn.id) "" else conn.id }, lead = { Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2)) })
+            if (open == conn.id) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 33.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+                when {
+                    on -> KitButton("Disconnect", Btn.LINE) { Connectors.disconnect(conn.id); tick++ }
+                    one -> {
+                        Note("Blaze opens ${conn.name} in your browser. Approve, and you're back here connected.")
+                        KitButton("Connect ${conn.name}", Btn.ACCENT) { scope.launch { Connectors.connect(ctx, conn.id); tick++ } }
+                    }
+                    acct.online -> Note("One-tap Connect for ${conn.name} is coming soon.")
+                    else -> Note("Connect needs Blaze's sign-in service, which can't be reached right now.")
                 }
-                acct.online -> Note("One-tap Connect for ${conn.name} is coming soon.")
-                else -> Note("Connect needs Blaze's sign-in service, which can't be reached right now.")
             }
         }
     }
-    McpSection()
+    if (connected0 == null) McpSection()
 }
 
 @Composable

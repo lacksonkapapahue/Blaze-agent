@@ -14,6 +14,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -307,9 +309,9 @@ fun formatDuration(ms: Long): String {
  */
 @Composable
 fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long, status: String = "", exact: Boolean = false, now: Long? = null,
-             meter: String = "", meterHigh: Boolean = false) {
+             meter: String = "", meterHigh: Boolean = false, open0: Boolean = false) {
     val c = LocalBlaze.current
-    var open by rememberSaveable(steps.firstOrNull()?.id ?: -1L) { mutableStateOf(false) }
+    var open by rememberSaveable(steps.firstOrNull()?.id ?: -1L) { mutableStateOf(open0) }
     var tick by remember { mutableLongStateOf(now ?: System.currentTimeMillis()) }
     if (live && now == null) LaunchedEffect(Unit) { while (true) { tick = System.currentTimeMillis(); delay(1000) } }
     val end = if (live) (now ?: tick) else endAt
@@ -317,8 +319,10 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
     val count = if (n == 1) "1 step" else "$n steps"
     val time = if (startAt > 0 && end >= startAt) " · " + formatDuration(end - startAt) else ""
     val pulse = if (live) rememberInfiniteTransition(label = "p").animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a").value else 1f
-    Column(Modifier.fillMaxWidth().widthIn(max = 520.dp).hairline(if (live) c.accent.copy(alpha = 0.55f) else c.hair)) {
-        Row(Modifier.fillMaxWidth().clickable(enabled = n > 0) { open = !open }.padding(horizontal = 12.dp, vertical = 10.dp),
+    // v0.19.0: Desktop's raised card; a live one gets a blue edge and a 3dp blue bar on the left (like .card.confirm).
+    Column(Modifier.fillMaxWidth().widthIn(max = 520.dp).background(c.raised).hairline(if (live) c.accent.copy(alpha = 0.55f) else c.hair2)
+        .let { if (live) it.drawBehind { drawRect(c.accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) } else it }) {
+        Row(Modifier.fillMaxWidth().clickable(enabled = n > 0) { open = !open }.padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(7.dp).alpha(pulse).background(if (live) c.accent else c.weak))
             Spacer(Modifier.width(10.dp))
@@ -337,15 +341,24 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
         if (meter.isNotBlank()) Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1,
             modifier = Modifier.padding(start = 29.dp, end = 12.dp, bottom = 10.dp))
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Column(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().hairlineTop(c.hair).background(c.faint).padding(vertical = 4.dp)) {
                 steps.forEachIndexed { i, s ->
-                    Row(verticalAlignment = Alignment.Top) {
-                        Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
+                    val running = live && i == n - 1
+                    val nextAt = steps.getOrNull(i + 1)?.at ?: if (live) end else endAt
+                    val dur = if (s.at > 0 && nextAt >= s.at) formatDuration(nextAt - s.at) else ""
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
+                        // Desktop's step marks: filled blue when done, a pulsing blue outline while running.
+                        Box(Modifier.padding(top = 5.dp).size(8.dp).let { m ->
+                            if (running) m.alpha(pulse).border(1.5.dp, c.accent) else m.background(c.accent.copy(alpha = 0.85f)) })
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(s.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.body))
+                            Text(s.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = if (running) c.sub else c.body))
                             if (exact && s.meta.isNotBlank()) Text(s.meta, maxLines = 3, overflow = TextOverflow.Ellipsis,
                                 style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
+                        }
+                        if (dur.isNotEmpty() && !running) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(dur, maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.weak))
                         }
                     }
                 }
@@ -539,8 +552,7 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
                         }
                     }
                 }
-                if (projects.isEmpty()) Text("No projects yet. Name one above to start.", modifier = Modifier.padding(20.dp),
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
+                if (projects.isEmpty()) Box(Modifier.padding(16.dp)) { Rows { EmptyState("No projects yet", "Name one above to start. Each project keeps its own chats, instructions and brief.") } }
             }
         } else {
             var ins by remember(open.id) { mutableStateOf(open.instructions) }
@@ -573,8 +585,7 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
                 Label("Chats", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp))
                 val list = open.chats.mapNotNull { id -> chats.firstOrNull { it.id == id } }
                 list.forEach { ch -> ChatRow(ch, ch.id in busy, chip = if (ch.id in needsYou) "Needs you" else "") { onChat(ch.id) } }
-                if (list.isEmpty()) Text("No chats yet.", modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
+                if (list.isEmpty()) Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { Rows { EmptyState("No chats yet", "Start one with + New chat. It keeps this project's instructions and brief.", mark = false) } }
                 Label("Delete project (chats stay)", color = c.sub, size = 9.sp, modifier = Modifier.padding(20.dp).clickable { onDelete(open.id) }.padding(4.dp))
             }
         }
