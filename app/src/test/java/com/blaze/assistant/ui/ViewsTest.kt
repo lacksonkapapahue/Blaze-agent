@@ -20,7 +20,8 @@ class ViewsTest {
 
     @Test fun aliasesAndSlash() {
         assertEquals("schedule", Views.find("/routines")?.id)
-        assertEquals("router", Views.find("models")?.id)
+        assertEquals("brain", Views.find("models")?.id)
+        assertEquals("router", Views.find("blazerouter")?.id)
         assertEquals("jobs", Views.find("Terminal")?.id)
         assertNull(Views.find("nope"))
     }

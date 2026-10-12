@@ -14,7 +14,7 @@ object ToolRouter {
 
     /** Always sent. */
     private val core = setOf(
-        "remember", "forget", "open_view", "about_blaze", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user", "self_test",
+        "remember", "forget", "open_view", "about_blaze", "blazerouter", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user", "self_test",
         "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
         // Basic phone control stays in core: it's the most common thing people ask for.
         "run_plan", "open_app", "search_in_app", "read_screen",

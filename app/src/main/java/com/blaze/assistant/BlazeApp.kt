@@ -3,6 +3,7 @@ package com.blaze.assistant
 import android.app.Application
 import com.blaze.assistant.agent.Agent
 import com.blaze.assistant.agent.Settings
+import kotlinx.coroutines.launch
 
 class BlazeApp : Application() {
     override fun onCreate() {
@@ -38,6 +39,13 @@ class BlazeApp : Application() {
         // microphone service while Blaze is in the background makes Android 12+ kill the app.
         com.blaze.assistant.terminal.Terminal.init(this)
         com.blaze.assistant.agent.SkillLibrary.init(this)
+        // BlazeRouter: start when it's the brain or set to start with Blaze (after Terminal/Linux are ready).
+        if (com.blaze.assistant.agent.BlazeRouter.autostart || Settings.providerId == com.blaze.assistant.agent.BlazeRouter.ID) {
+            val app = this
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+                try { com.blaze.assistant.agent.BlazeRouter.start(app) } catch (_: Throwable) { }
+            }
+        }
         Thread { com.blaze.assistant.agent.SkillPacks.ensureStarters(); com.blaze.assistant.agent.SkillLibrary.seed(this) }.start()
         com.blaze.assistant.proactive.Triggers.init(this)
         com.blaze.assistant.proactive.Proactive.start(this)

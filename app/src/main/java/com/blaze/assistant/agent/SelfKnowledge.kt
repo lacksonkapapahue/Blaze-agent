@@ -18,7 +18,7 @@ object SelfKnowledge {
         "The Blaze account (Settings › Blaze account; sign in with Google, GitHub or email) syncs model keys, MCP servers and your own skills between them. " +
         "Phone and PC connect with Blaze Link: on the PC open Blaze Desktop › Phone › Show pairing QR code, " +
         "then on the phone open /views › Blaze Desktop › Scan QR code (or paste the blaze://pair link); same Wi-Fi, or anywhere when both are on Tailscale. After that the phone can ask_pc and the PC can use the phone. " +
-        "All three use free AI providers by default (Auto), plus BlazeRouter on Desktop for routing presets."
+        "All three use free AI providers by default (Auto), plus BlazeRouter (Desktop, and on the phone) for routing presets like auto/best-free with a web dashboard."
 
     private fun safe(f: () -> String): String = try { f() } catch (_: Throwable) { "unknown" }
 
@@ -60,6 +60,7 @@ object SelfKnowledge {
                 append("## Brains (AI providers)\n")
                 append("Answering with: ").append(safe { if (Settings.providerId == Providers.AUTO) "Auto (free brains, fastest first)" else Settings.provider.name + " · " + Settings.model }).append(".\n")
                 append("Providers with keys: ").append(safe { Providers.all.filter { it.id != Providers.AUTO && KeyRing.all(it.id).isNotEmpty() }.joinToString { "${it.name} (${KeyRing.all(it.id).size})" }.ifBlank { "none (Auto still works keyless)" } }).append(".\n")
+                append("BlazeRouter (this phone): ").append(safe { val st = BlazeRouter.state.value; if (st.running) "running in ${BlazeRouter.label(st.where)} on ${BlazeRouter.BASE}/v1 (dashboard /views › BlazeRouter)" else "stopped (blazerouter start; runner ${BlazeRouter.runner})" }).append(".\n")
                 append("Fast lane (on-device): ").append(safe { if (FastLane.ready(ctx)) "installed" else "not installed" }).append(".\n\n")
             }
             if (on("accounts")) {

@@ -20,6 +20,8 @@ object Providers {
 
     val all = listOf(
         Provider(AUTO, "Auto (free routing)", "", "", "", "", ""),
+        // Runs on this phone (agent/BlazeRouter.kt); its key is set when it starts.
+        Provider("blazerouter", "BlazeRouter (on this phone)", "http://127.0.0.1:20128/v1/", "auto/best-free", "set automatically", "", ""),
         Provider("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/",
             "gemini-3.8-flash", "AIza…", "https://aistudio.google.com/apikey",
             "https://aistudio.google.com/rate-limit?timeRange=last-28-days"),
