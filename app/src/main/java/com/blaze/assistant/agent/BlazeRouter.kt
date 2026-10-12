@@ -23,7 +23,7 @@ object BlazeRouter {
     const val ID = "blazerouter"
     const val PORT = 20128
     const val BASE = "http://127.0.0.1:$PORT"
-    /** Every OmniRoute auto/* preset is served; this is Luke's daily driver. */
+    // Every OmniRoute auto-preset is served; this one is the daily driver.
     const val DEFAULT_MODEL = "auto/best-free"
     val RUNNERS = listOf("auto", "alpine", "termux", "direct")
 
@@ -158,7 +158,7 @@ object BlazeRouter {
         "stop" -> stop(ctx)
         "use" -> {
             if (!ensure(ctx)) "BlazeRouter isn't running: ${state.value.note}"
-            else { Settings.providerId = ID; Settings.setStr("model_$ID", args.optString("model").ifBlank { DEFAULT_MODEL }); "Blaze now answers through BlazeRouter · ${Settings.model}." }
+            else { Settings.providerId = ID; Settings.model = args.optString("model").ifBlank { DEFAULT_MODEL }; "Blaze now answers through BlazeRouter · ${Settings.model}." }
         }
         "dashboard" -> {
             if (!ensure(ctx)) "BlazeRouter isn't running: ${state.value.note}"
