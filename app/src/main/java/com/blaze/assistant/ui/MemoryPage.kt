@@ -168,10 +168,11 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
     fun fit() {
         if (size.width == 0) return
         val b = graph.bounds()
-        val pad = 36f
+        // Room for the overlays: count + tools and the top cluster's label above, the hint below.
+        val side = 36f; val top = 76f; val bottom = 44f
         val w = size.width / dens; val h = size.height / dens
-        val z = min(2.2f, max(0.15f, min((w - pad * 2) / (b[2] - b[0]).coerceAtLeast(1f), (h - pad * 2 - 24f) / (b[3] - b[1]).coerceAtLeast(1f))))
-        cam.x = (b[0] + b[2]) / 2; cam.y = (b[1] + b[3]) / 2 + 6f / z; cam.z = z; camTick++
+        val z = min(2.2f, max(0.15f, min((w - side * 2) / (b[2] - b[0]).coerceAtLeast(1f), (h - top - bottom) / (b[3] - b[1]).coerceAtLeast(1f))))
+        cam.x = (b[0] + b[2]) / 2; cam.y = (b[1] + b[3]) / 2 - (top - bottom) / 2f / z; cam.z = z; camTick++
     }
     LaunchedEffect(graph) { fit() }
 
@@ -321,16 +322,19 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
             val want = ns.filter { it.i == selIndex || it.i in near || (matchIdx != null && it.i in matchIdx) || (selIndex < 0 && matchIdx == null && it.i in top) }
                 .sortedWith(compareByDescending<MemGraph.Node> { it.i == selIndex }.thenByDescending { it.i in near }.thenByDescending { it.deg })
             var count = 0
+            val said = HashSet<String>()
             for (n in want) {
                 if (count >= 40) break
                 val txt = n.label.uppercase().let { if (it.length > 22) it.take(21) + "\u2026" else it }
+                // One label per subject (three "You" memories read as one YOU), the selected one always.
+                if (n.i != selIndex && txt in said) continue
                 val lay = layout(txt, labelStyle)
                 val X = sx(n.x) - lay.size.width / 2f; val Y = sy(n.y) + max(4f * d, n.size * z) / 2f + 5f * d
                 if (X + lay.size.width < 0 || X > w || Y > h || Y < 0) continue
                 val rect = floatArrayOf(X - 4f, Y - 1f, X + lay.size.width + 4f, Y + lay.size.height + 1f)
                 val forced = n.i == selIndex
                 if (!forced && placed.any { p -> rect[0] < p[2] && rect[2] > p[0] && rect[1] < p[3] && rect[3] > p[1] }) continue
-                placed += rect; count++
+                placed += rect; count++; said += txt
                 // A paper backing keeps labels readable where they cross links and dots.
                 drawRect(c.paper.copy(alpha = if (forced) 0.95f else 0.82f * reveal), Offset(rect[0], rect[1]), Size(rect[2] - rect[0], rect[3] - rect[1]))
                 drawText(lay, color = if (forced) c.accent else c.ink, topLeft = Offset(X, Y), alpha = reveal * (if (forced) 1f else if (dimmed(n.i)) 0.25f else 0.78f))
