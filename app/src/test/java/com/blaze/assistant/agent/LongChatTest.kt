@@ -137,6 +137,8 @@ class LongChatTest {
     @Test fun toolsAreDeclared() {
         val names = LongChat.tools().map { it.getJSONObject("function").getString("name") }.toSet()
         assertEquals(LongChat.names, names)
-        assertTrue(Modes.planTools.containsAll(listOf("search_chat", "read_turn", "read_artifact")))
+        // Plan mode allows the read-only ones (Modes needs Settings at init, so read its source).
+        val modes = java.io.File(listOf("src/main", "app/src/main").first { java.io.File(it).isDirectory }, "java/com/blaze/assistant/agent/Modes.kt").readText()
+        listOf("search_chat", "read_turn", "read_artifact").forEach { assertTrue(it, modes.contains("\"$it\"")) }
     }
 }
