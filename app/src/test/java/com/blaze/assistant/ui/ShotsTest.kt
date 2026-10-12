@@ -253,6 +253,10 @@ class ShotsTest {
             Column(Modifier.fillMaxSize()) {
                 ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Saved logins")
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) { SavedLoginsPage() }
+            }
+        }
+    }
+
     // ---------------- v0.19.0 visual parity ----------------
 
     /** The settings screen's frame (back arrow + title, then a padded scroll column), without its BackHandler. */
