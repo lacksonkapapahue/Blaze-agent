@@ -33,6 +33,7 @@ object Views {
         BlazeView("usage", "Usage", "Tokens and estimated cost", page = "usage", aliases = listOf("cost")),
         BlazeView("voice", "Voice", "Hey Blaze, spoken replies, call", page = "voice"),
         BlazeView("control", "Phone control", "Accessibility, permissions", page = "control"),
+        BlazeView("logins", "Saved logins", "Sign-ins from the secure form: view, edit, delete", page = "logins", aliases = listOf("vault", "passwords", "logins")),
         BlazeView("proactive", "Proactive", "Speak up on its own, triggers", page = "proactive", aliases = listOf("triggers")),
         BlazeView("desktop", "Blaze Desktop", "Pair with Blaze on your computer", page = "desktop", aliases = listOf("pc", "pair")),
         BlazeView("commands", "Commands", "Slash commands and prompt skills", page = "commands"),

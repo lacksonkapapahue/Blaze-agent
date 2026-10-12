@@ -176,6 +176,35 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 
     fun answerQuestion(text: String) { _question.value?.answer?.complete(text) }
 
+    // ---------- v0.20.0: secure forms for the background browser ----------
+    private val _form = MutableStateFlow<com.blaze.assistant.browser.SecureInput.Request?>(null)
+    val pendingForm: StateFlow<com.blaze.assistant.browser.SecureInput.Request?> = _form
+    private val formLock = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var formSession: Session? = null
+
+    /**
+     * Shows the secure form card and waits (15 minutes at most). When Blaze isn't on screen an
+     * "Action required" notification opens the chat at the card. Null = cancelled or no answer.
+     */
+    suspend fun askSecure(req: com.blaze.assistant.browser.SecureInput.Request, from: Session?): com.blaze.assistant.browser.SecureInput.Answer? = formLock.withLock {
+        val tag = kotlin.coroutines.coroutineContext[BgAgents.Tag]
+        tag?.let { BgAgents.setWaiting(it.id, true) }
+        formSession = from
+        _form.value = req
+        if (!inForeground) Notifier.actionRequired(req.title, req.site)
+        val a = kotlinx.coroutines.withTimeoutOrNull(15 * 60_000L) { req.answer.await() }
+        tag?.let { BgAgents.setWaiting(it.id, false) }
+        _form.value = null
+        formSession = null
+        Notifier.clearAction()
+        a
+    }
+
+    fun answerForm(a: com.blaze.assistant.browser.SecureInput.Answer?) { _form.value?.answer?.complete(a) }
+
+    /** The "Action required" notification was tapped: show the chat that's waiting on the form. */
+    fun showFormChat() { formSession?.let { s -> if (s !== cur) show(s) } }
+
     private val risky = Regex("\\b(send|pay|buy|purchase|order|checkout|check out|delete|remove|post|publish|transfer|confirm|subscribe|place order|book)\\b", RegexOption.IGNORE_CASE)
 
     private val _chats = MutableStateFlow<List<ChatMeta>>(emptyList())
@@ -204,6 +233,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
+        com.blaze.assistant.browser.Vault.dir = app.filesDir
         ChatStore.init(app)
         LongChat.init(app)
         try { com.blaze.assistant.media.Media.init(app) } catch (_: Exception) { }
@@ -549,8 +579,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             append("\nIf you're unsure what the user wants, or there are several options (accounts, contacts, items, times), don't guess and don't end your turn: call ask_user with short options, then carry on with the answer. ")
             if (control) {
                 append("""
-BACKGROUND FIRST: never take over the user's screen when a background tool can do it. Web questions → web_search/fetch_page; sites you must click, fill or log in to → browser_open/browser_click/browser_type (Blaze's own background browser; browser_show only when the user must see or take over). Messaging someone → message_contact (never open WhatsApp on screen yourself). Email → gmail_search/gmail_read. Calendar → gcal_events or calendar tools. Texts, calls, contacts → the SMS/call/contact tools. Notifications → recent_notifications. Music → spotify tools. Files/code → run_shell. Only if no background tool exists or it isn't connected, use the screen; when a background tool isn't connected, offer to connect it (blaze_self open "settings connections") instead of silently driving the app.
+BACKGROUND FIRST: never take over the user's screen when a background tool can do it. Web questions → web_search/fetch_page; sites you must click, fill or log in to → browser_open/browser_click/browser_type (Blaze's own background browser; browser_show only when the user must see or take over). When a page needs the user's email, phone, username + password, API key or a one-time code, call browser_secure_input (a secure form in the chat; you get {{secret:name}} placeholders, never the values) instead of asking in chat or showing the browser. If a page says the account can't sign in with a password, don't loop on the password: offer Continue with Google, a passkey or the live browser with ask_user. Browser tools never need phone control. Messaging someone → message_contact (never open WhatsApp on screen yourself). Email → gmail_search/gmail_read. Calendar → gcal_events or calendar tools. Texts, calls, contacts → the SMS/call/contact tools. Notifications → recent_notifications. Music → spotify tools. Files/code → run_shell. Only if no background tool exists or it isn't connected, use the screen; when a background tool isn't connected, offer to connect it (blaze_self open "settings connections") instead of silently driving the app.
 You can control the phone. SPEED MATTERS: the user is watching.
+${Orient.RULE}
 - For anything in an app, call run_plan ONCE with the whole script, using the visible words on buttons and fields as targets (e.g. open_app YouTube → tap "Search" → type "lofi hip hop" submit → tap the first result's title). You know how common apps look; you don't need to read the screen first. Add optional:true for popups you might need to dismiss, and expect:"..." when a step must lead somewhere.
 - Element numbers stay the same while the screen stays the same; after an action you often get only the changes ("Same screen… Changed or new"), so keep using the numbers you have.
 - For flows with predictable pop-ups (sign-in, cookie banners, "Not now"), set watchers with watch (or a preset) so the phone reacts instantly instead of spending your steps.
@@ -1158,6 +1189,9 @@ When you finish, say what you did in one short sentence.
                     addAll(ToolRouter.usedIn(history))
                 }
                 var tools = ToolRouter.select(allTools, groupsOn)
+                orient.reset()
+                val orientNote = if (!routine && "screen" in groupsOn) orientContext() else ""
+                var orientSent = false
                 // Chat lane: small talk and plain questions = one light call with no tools.
                 val lastBlaze = msgs.lastOrNull { it.role == Role.BLAZE }?.text.orEmpty()
                 var lite = !routine && history.optJSONObject(history.length() - 1)?.opt("content") is String &&
@@ -1211,6 +1245,8 @@ When you finish, say what you did in one short sentence.
                     if (!lite) compact()
                     LlmClient.liteTurn = lite
                     val req = if (lite) ChatLane.messages(requestMessages(), lastUserText(), personaText(), Settings.userName.ifBlank { null }) else requestMessages()
+                    // Orient loop, step 1 (context → orientation): where the phone is, sent with the first call only, never saved.
+                    if (!lite && !orientSent && orientNote.isNotEmpty()) { req.put(JSONObject().put("role", "user").put("content", orientNote)); orientSent = true }
                     tools = if (lite) JSONArray() else ToolRouter.select(allTools, groupsOn)
                     // Watchdog: only a model that goes SILENT (no text, thinking or tool-call chunks) for the
                     // limit is cut off and retried once on the same model. Long thinking is fine while it streams.
@@ -1472,12 +1508,56 @@ When you finish, say what you did in one short sentence.
             return "Stopped after 14 steps without finishing."
         }
 
-        /** Fresh compact screen after an action, so the model doesn't spend a turn on read_screen. */
+        /** Fresh compact screen after an action, so the model doesn't spend a turn on read_screen (the orient loop's "look after"). */
         suspend fun screenAfter(result: String): String {
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance ?: return ""
-            if (!Settings.phoneControl || result.startsWith("Error") || result.startsWith("No app") || result.startsWith("Phone control is off")) return ""
+            if (!Settings.phoneControl || result.startsWith("Error") || result.startsWith("No app") || result.startsWith("Phone control is off") || result.startsWith("Not done yet")) return ""
             svc.settle(1500, 250)
-            return "\n\nScreen now:\n" + svc.readScreen(diff = true) + com.blaze.assistant.phone.Watchers.drain()
+            val s = svc.readScreen(diff = true)
+            orient.saw(svc.currentPkg())
+            return "\n\nScreen now:\n" + s + com.blaze.assistant.phone.Watchers.drain()
+        }
+
+        /** Orient loop state for this turn (v0.20.0). */
+        val orient = Orient.State()
+        /** Secure-form asks per site this session, so a refusing site can't loop on the form. */
+        private val formAsks = HashMap<String, Int>()
+
+        /** browser_secure_input: secure card in the chat → values straight into the page; the model gets placeholders. */
+        private suspend fun secureInput(args: JSONObject): String {
+            val B = com.blaze.assistant.browser.BrowserEngine
+            val S = com.blaze.assistant.browser.SecureInput
+            val V = com.blaze.assistant.browser.Vault
+            val host = kotlinx.coroutines.withContext(Dispatchers.Main) { B.host() }
+            if (host.isBlank()) return "No page is open in Blaze's browser. Open the sign-in page with browser_open first, then call this again."
+            val fields = S.parseFields(args.optJSONArray("fields"))
+            if (fields.isEmpty()) return "Error: give fields, e.g. [{\"name\":\"email\",\"kind\":\"email\"},{\"name\":\"password\",\"kind\":\"password\"}]."
+            if (fields.any { S.isCardField(it) }) return "Card details are never collected in the chat. Show the live browser with browser_show so the user types them on the page, or stop before paying."
+            if (fields.any { it.kind == S.Kind.PASSWORD }) B.passwordRefused()?.let { return it }
+            val asks = (formAsks[host] ?: 0) + 1; formAsks[host] = asks
+            if (asks > 3) return "I've already asked for this on $host 3 times. Don't ask again: use ask_user to offer Continue with Google, a passkey, or the user doing it themselves in the live browser (browser_show)."
+            val names = fields.map { it.name }
+            val fromVault = !args.optBoolean("fresh") && V.has(host, names)
+            val title = args.optString("title").ifBlank { "Details for $host" }
+            val answer = if (fromVault) {
+                add(Role.STEP, "Using your saved details for $host")
+                S.Answer(names.associateWith { V.get(host, it).orEmpty() }, false)
+            } else {
+                add(Role.STEP, "Waiting for you: ${title.take(60)}")
+                mood = Mood.IDLE
+                val a = askSecure(S.Request(ids.getAndIncrement(), host, title, args.optString("reason"), fields,
+                    args.optBoolean("submit", true), kotlinx.coroutines.CompletableDeferred()), this)
+                mood = Mood.ACTING
+                a ?: return "The user cancelled the form (or didn't answer). Don't ask again right away: say what you needed, and offer the live browser (browser_show) or another way in."
+            }
+            answer.values.forEach { (n, v) -> S.put(n, v) }
+            if (answer.save) fields.filter { it.kind.saveable }.forEach { f -> answer.values[f.name]?.takeIf { it.isNotEmpty() }?.let { V.save(host, f.name, it) } }
+            add(Role.STEP, "Filling the page on $host")
+            val missed = fields.filter { f -> val v = answer.values[f.name].orEmpty(); v.isEmpty() || !B.fillSecret(f, v) }
+            var out = S.summary(fields, answer.save, fromVault)
+            if (missed.isNotEmpty()) out += " Couldn't find the page field for ${missed.joinToString { it.label }}: call browser_read, then browser_type number=N text=\"${S.placeholder(missed.first().name)}\"."
+            else if (args.optBoolean("submit", true)) out += "\n" + B.submitSecret()
+            return S.scrub(out)
         }
 
         /** Every tool call goes through here: a crash or an empty result becomes a plain error with a fix. */
@@ -1485,10 +1565,48 @@ When you finish, say what you did in one short sentence.
             // Plan mode is enforced here, at dispatch, not only in the prompt.
             Modes.block(name, args, agentPlan).takeIf { it.isNotEmpty() }?.let { add(Role.STEP, "Plan mode: skipped ${name.replace('_', ' ')}"); return it }
             if (agentId != null && name in BgAgents.leadOnly) return "Error: background agents can't start or steer other agents. Do the work yourself."
+            // Orient loop (v0.20.0): know where we are before acting on the screen.
+            val (held, glance) = try { orientFirst(name, args) } catch (e: CancellationException) { throw e } catch (_: Throwable) { null to "" }
+            if (held != null) return held
             val r = try { runToolRaw(name, args, shots) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
-            return if (r.isBlank()) ToolGuide.empty(name) else r
+            if (name in Orient.looking && !r.startsWith("Phone control")) com.blaze.assistant.phone.BlazeAccessibilityService.instance?.let { orient.saw(it.currentPkg()) }
+            return if (r.isBlank()) ToolGuide.empty(name) else glance + r
+        }
+
+        /**
+         * Before a screen action: GO, a compact glance put in front of the result, or (for numbered taps
+         * on a screen Blaze hasn't seen this turn) hold the action and return the fresh screen instead.
+         */
+        private suspend fun orientFirst(name: String, args: JSONObject): Pair<String?, String> {
+            if (name !in Orient.acting || !Settings.phoneControl) return null to ""
+            val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance ?: return null to ""
+            val now = svc.currentPkg()
+            return when (Orient.decide(name, args, orient, now)) {
+                Orient.Decision.GO -> null to ""
+                Orient.Decision.LOOK_FIRST -> {
+                    orient.bounced++
+                    add(Role.STEP, "Looking at the screen first")
+                    val screen = svc.readScreen()
+                    orient.saw(now)
+                    Orient.lookFirst(name, screen) to ""
+                }
+                Orient.Decision.GLANCE -> {
+                    val screen = svc.readScreen()
+                    orient.saw(now)
+                    null to Orient.glanceNote(Orient.compact(screen))
+                }
+            }
+        }
+
+        /** The "context → orientation" step at the start of a phone-control turn: a compact look, or "" when it wouldn't help. */
+        private fun orientContext(): String {
+            if (!Settings.phoneControl || agentId != null) return ""
+            val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance ?: return ""
+            val pkg = svc.currentPkg()
+            if (pkg.isBlank() || pkg == app.packageName) return ""   // Blaze's own chat is on screen: nothing to orient on yet
+            return try { Orient.contextNote(Orient.compact(svc.readScreen())).also { orient.saw(pkg) } } catch (_: Throwable) { "" }
         }
 
         /** Runs terminal work, then puts any new pictures / audio / video it wrote into the Gallery and this reply. */
@@ -1757,6 +1875,7 @@ When you finish, say what you did in one short sentence.
                 "search_screen_memory" -> { add(Role.STEP, "Searching screen memory"); ScreenMemory.search(app, args.optString("query"), args.optString("app").ifBlank { null }) }
                 "recent_notifications" -> { add(Role.STEP, "Checking notifications"); com.blaze.assistant.notify.NotificationBrain.list(args.optString("app").ifBlank { null }, args.optDouble("hours", 6.0)) }
                 com.blaze.assistant.phone.Messaging.NAME -> { add(Role.STEP, "Messaging ${args.optString("to")}"); com.blaze.assistant.phone.Messaging.run(app, args) }
+                com.blaze.assistant.browser.BrowserTools.SECURE -> secureInput(args)
                 in com.blaze.assistant.browser.BrowserTools.names -> {
                     add(Role.STEP, com.blaze.assistant.browser.BrowserTools.describe(name, args))
                     com.blaze.assistant.browser.BrowserTools.run(app, name, args)

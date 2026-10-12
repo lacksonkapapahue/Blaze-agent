@@ -62,7 +62,12 @@ object BrowserEngine {
         var canBack by mutableStateOf(false)
         var canForward by mutableStateOf(false)
         @Volatile var loaded: CompletableDeferred<Unit> = CompletableDeferred(Unit)
+        /** A JS alert/confirm the page showed while nobody was looking (answered for it, told to Blaze on the next read). */
+        @Volatile var lastDialog: String? = null
     }
+
+    /** Set when a page's renderer died (Android closed it for memory, or it crashed) and the tab was reopened. */
+    @Volatile var lastCrash: String? = null
 
     val tabs = mutableStateListOf<Tab>()
     var current by mutableIntStateOf(0)
@@ -155,7 +160,16 @@ object BrowserEngine {
             if (isPrivate) cacheMode = WebSettings.LOAD_NO_CACHE
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
+        layoutOffscreen(w)
         w.webViewClient = object : WebViewClient() {
+            // v0.20.0: a dead page renderer (Android reclaims it on a 3 GB phone, or it crashes) used to take the
+            // whole app down with it, and Samsung then switches Blaze's phone control off. Reopen the tab instead.
+            override fun onRenderProcessGone(v: WebView, d: android.webkit.RenderProcessGoneDetail): Boolean {
+                val crashed = try { d.didCrash() } catch (_: Throwable) { false }
+                com.blaze.assistant.device.CrashLog.write("Browser renderer ${if (crashed) "crashed" else "was closed by Android"} on ${t.url.take(80)}; tab reopened")
+                main.post { reopen(t) }
+                return true
+            }
             override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                 val u = r.url
                 if (u.scheme == "http" || u.scheme == "https" || u.scheme == "about" || u.scheme == "data" || u.scheme == "blob") return false
@@ -185,6 +199,23 @@ object BrowserEngine {
         }
         w.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(v: WebView, p: Int) { t.progress = p }
+            // In the background there's no Activity to show a page's dialog: answer it here and tell Blaze.
+            override fun onJsAlert(v: WebView, url: String?, message: String?, r: android.webkit.JsResult): Boolean {
+                if (visible(t)) return false
+                t.lastDialog = "alert: " + message.orEmpty().take(300); r.confirm(); return true
+            }
+            override fun onJsConfirm(v: WebView, url: String?, message: String?, r: android.webkit.JsResult): Boolean {
+                if (visible(t)) return false
+                t.lastDialog = "confirm (answered Cancel): " + message.orEmpty().take(300); r.cancel(); return true
+            }
+            override fun onJsPrompt(v: WebView, url: String?, message: String?, def: String?, r: android.webkit.JsPromptResult): Boolean {
+                if (visible(t)) return false
+                t.lastDialog = "prompt (answered Cancel): " + message.orEmpty().take(300); r.cancel(); return true
+            }
+            override fun onJsBeforeUnload(v: WebView, url: String?, message: String?, r: android.webkit.JsResult): Boolean {
+                if (visible(t)) return false
+                r.confirm(); return true
+            }
             override fun onReceivedTitle(v: WebView, title: String?) { t.title = title?.ifBlank { null } ?: t.url }
             override fun onReceivedIcon(v: WebView, icon: Bitmap?) { t.icon = icon?.asImageBitmap() }
             override fun onShowFileChooser(v: WebView, cb: ValueCallback<Array<Uri>>, p: FileChooserParams): Boolean =
@@ -197,6 +228,36 @@ object BrowserEngine {
         tabs.add(t); current = tabs.lastIndex
         if (!url.isNullOrBlank()) load(t, url)
         return t
+    }
+
+    /** True while the Browser screen shows this tab (an Activity is attached to its dialogs). */
+    private fun visible(t: Tab) = t.ctxWrap.baseContext !== app && t.web.isAttachedToWindow
+
+    /**
+     * The background browser: a WebView that isn't on screen still needs a size, or pages lay out at 0×0
+     * and every element looks invisible to browser_read. Give it the phone's screen size, offscreen.
+     */
+    fun layoutOffscreen(w: WebView) {
+        if (w.isAttachedToWindow) return
+        try {
+            val dm = app.resources.displayMetrics
+            val wp = dm.widthPixels.coerceAtLeast(360); val hp = dm.heightPixels.coerceAtLeast(640)
+            w.measure(View.MeasureSpec.makeMeasureSpec(wp, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(hp, View.MeasureSpec.EXACTLY))
+            w.layout(0, 0, wp, hp)
+        } catch (_: Throwable) { }
+    }
+
+    /** Replaces a tab whose renderer died with a fresh one on the same page. */
+    private fun reopen(t: Tab) {
+        val i = tabs.indexOf(t); if (i < 0) return
+        val url = t.url.takeIf { it.startsWith("http") }
+        val keep = tabs.getOrNull(current)?.takeIf { it !== t }
+        try { (t.web.parent as? ViewGroup)?.removeView(t.web); t.web.destroy() } catch (_: Throwable) { }
+        tabs.removeAt(i)
+        val n = newTab(app, url, t.isPrivate)
+        tabs.remove(n); tabs.add(i.coerceAtMost(tabs.size), n)
+        current = keep?.let { tabs.indexOf(it) }?.takeIf { it >= 0 } ?: tabs.indexOf(n)
+        lastCrash = "The page ${url?.take(80) ?: ""} stopped (Android closed it to save memory) and was reopened; anything typed there was lost."
     }
 
     fun exitFull() { fullCallback?.onCustomViewHidden(); fullView = null; fullCallback = null }
@@ -292,7 +353,69 @@ object BrowserEngine {
         sb.append("Page: ").append(r.optString("title")).append(" — ").append(r.optString("url")).append('\n')
         sb.append(r.optString("text").take(max)).append("\n\nElements:\n")
         for (i in 0 until minOf(items.length(), 120)) sb.append(items.getString(i)).append('\n')
-        return sb.toString()
+        notes(t, r)?.let { sb.append('\n').append(it) }
+        return SecureInput.scrub(sb.toString())
+    }
+
+    /** Things Blaze should know about the page: a dialog it answered, a renderer restart, a site that refuses passwords. */
+    private fun notes(t: Tab, r: JSONObject?): String? {
+        val out = ArrayList<String>()
+        lastCrash?.let { out += it; lastCrash = null }
+        t.lastDialog?.let { out += "The page showed a dialog while in the background ($it)."; t.lastDialog = null }
+        if (r != null) {
+            val items = r.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+            SignInHints.check(r.optString("text"), items)?.let { out += it }
+        }
+        return out.takeIf { it.isNotEmpty() }?.joinToString("\n")
+    }
+
+    /** Notes for the page as it is now (after a click or a submit). */
+    private suspend fun notesNow(t: Tab): String = notes(t, js(t, READ_JS) as? JSONObject)?.let { "\n$it" }.orEmpty()
+
+    /** Host of the page in the current tab ("" when none). */
+    fun host(): String = tab()?.url?.let { SecureInput.hostOf(it) }.orEmpty()
+    fun url(): String = tab()?.url.orEmpty()
+
+    /** True when the current page says this account can't use a password. */
+    suspend fun passwordRefused(): String? {
+        val t = withContext(Dispatchers.Main) { tab() } ?: return null
+        val r = js(t, READ_JS) as? JSONObject ?: return null
+        val items = r.optJSONArray("items")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()
+        return SignInHints.check(r.optString("text"), items)
+    }
+
+    /**
+     * Types a value the user gave in a secure form into the page. The value comes from SecureInput,
+     * never from the model, and the field is marked so browser_read never shows what's in it.
+     */
+    suspend fun fillSecret(f: SecureInput.Field, value: String): Boolean {
+        val t = withContext(Dispatchers.Main) { tab() } ?: return false
+        val sel = f.target.toIntOrNull()?.let { "document.querySelector('[data-bz=\"$it\"]')" }
+            ?: f.target.takeIf { it.isNotBlank() }?.let { "bzFind(${JSONObject.quote(it)}, true)" }
+            ?: "bzFirst(${JSONObject.quote(SecureInput.autoSelector(f.kind))})"
+        val r = js(t, """(function(){$FIND_JS
+            function bzFirst(s){var l=[].slice.call(document.querySelectorAll(s)).filter(function(e){return bzVis(e)&&!e.disabled&&!e.readOnly&&!e.hasAttribute('data-bz-secret');});return l[0]||null;}
+            var e=$sel; if(!e) return 'missing'; e.scrollIntoView({block:'center'}); e.focus();
+            var v=${JSONObject.quote(value)};
+            var proto = e.tagName=='TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+            Object.getOwnPropertyDescriptor(proto,'value').set.call(e, v);
+            e.setAttribute('data-bz-secret','1');
+            e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true}));
+            return 'ok'; })()""")
+        return r == "ok"
+    }
+
+    /** Submits the form the secure fields are in (its submit button, else requestSubmit, else Enter). */
+    suspend fun submitSecret(): String {
+        val t = withContext(Dispatchers.Main) { tab() } ?: return "No page open."
+        js(t, """(function(){var l=document.querySelectorAll('[data-bz-secret]'); var e=l[l.length-1]; if(!e) return 'missing';
+            var f=e.form; var b=f&&f.querySelector('button[type=submit],input[type=submit],button:not([type])');
+            if(b){b.click();return 'ok';} if(f){ if(f.requestSubmit) f.requestSubmit(); else f.submit(); return 'ok'; }
+            var o={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true};
+            e.dispatchEvent(new KeyboardEvent('keydown',o)); e.dispatchEvent(new KeyboardEvent('keyup',o)); return 'ok'; })()""")
+        kotlinx.coroutines.delay(400)
+        if (t.progress < 100) waitLoad(t, 12_000) else kotlinx.coroutines.delay(800)
+        return "Submitted. Now on: ${t.title.take(80)} (${t.url})" + notesNow(t)
     }
 
     suspend fun click(ctx: Context, n: Int?, text: String?): String {
@@ -302,11 +425,15 @@ object BrowserEngine {
         if (r == "missing") return "No such element. Call browser_read to get fresh numbers."
         kotlinx.coroutines.delay(300)
         if (t.progress < 100) waitLoad(t, 12_000) else kotlinx.coroutines.delay(500)
-        return "Clicked ${r.toString().removePrefix("ok:")}. Now on: ${t.title.take(80)} (${t.url})"
+        return SecureInput.scrub("Clicked ${r.toString().removePrefix("ok:")}. Now on: ${t.title.take(80)} (${t.url})" + notesNow(t))
     }
 
-    suspend fun type(ctx: Context, n: Int?, label: String?, text: String, submit: Boolean): String {
+    suspend fun type(ctx: Context, n: Int?, label: String?, text0: String, submit: Boolean): String {
         val t = withContext(Dispatchers.Main) { tab() } ?: return "No page open."
+        // {{secret:name}} placeholders: swapped for the real value here, at the last moment; the model only ever saw the placeholder.
+        val secret = SecureInput.hasPlaceholder(text0)
+        val text = if (!secret) text0 else SecureInput.resolve(text0, SecureInput.hostOf(t.url)).let { (v, missing) ->
+            v ?: return "No value for ${missing.joinToString { SecureInput.placeholder(it) }} yet. Ask the user with browser_secure_input (it shows a secure form in the chat)." }
         val sel = if (n != null && n >= 0) "document.querySelector('[data-bz=\"$n\"]')"
             else if (!label.isNullOrBlank()) "bzFind(${JSONObject.quote(label)}, true)"
             else "(document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName) ? document.activeElement : document.querySelector('input[type=search],input[type=text],input:not([type]),textarea'))"
@@ -315,6 +442,7 @@ object BrowserEngine {
             if (e.isContentEditable) { e.innerText = v; } else {
               var proto = e.tagName=='TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
               var setter = Object.getOwnPropertyDescriptor(proto,'value').set; setter.call(e, v); }
+            if (${if (secret) "true" else "false"}) e.setAttribute('data-bz-secret','1');
             e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true}));
             if (${if (submit) "true" else "false"}) {
               var o={key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true};
@@ -324,7 +452,7 @@ object BrowserEngine {
             return 'ok'; })()""")
         if (r == "missing") return "No text field found. Call browser_read to see the fields."
         if (submit) { kotlinx.coroutines.delay(400); if (t.progress < 100) waitLoad(t, 12_000) }
-        return if (submit) "Typed and submitted. Now on: ${t.title.take(80)} (${t.url})" else "Typed \u201c${text.take(60)}\u201d."
+        return SecureInput.scrub(if (submit) "Typed and submitted. Now on: ${t.title.take(80)} (${t.url})" + notesNow(t) else "Typed \u201c${text0.take(60)}\u201d.")
     }
 
     suspend fun scroll(ctx: Context, down: Boolean): String {
@@ -360,7 +488,8 @@ object BrowserEngine {
       var items=[];
       els.slice(0,150).forEach(function(e,i){ e.setAttribute('data-bz',i);
         var tag=e.tagName.toLowerCase(), type=e.getAttribute('type')||'';
-        var label=(e.innerText||e.value||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.getAttribute('title')||e.getAttribute('name')||e.getAttribute('alt')||'').replace(/\s+/g,' ').trim().slice(0,80);
+        var hide = type=='password' || e.hasAttribute('data-bz-secret');
+        var label=(e.innerText||(hide?(e.value?'(filled, hidden)':''):e.value)||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.getAttribute('title')||e.getAttribute('name')||e.getAttribute('alt')||'').replace(/\s+/g,' ').trim().slice(0,80);
         var kind = tag=='a'?'link':(tag=='input'||tag=='textarea'||e.isContentEditable)?('field'+(type?':'+type:'')):tag=='select'?'select':'button';
         if (tag=='input' && /checkbox|radio/.test(type)) kind=type+(e.checked?' (checked)':'');
         if (!label && kind=='link') return;

@@ -97,7 +97,8 @@ class BrowserActivity : ComponentActivity() {
     override fun onPause() { BrowserEngine.attach(null); super.onPause() }
     override fun onDestroy() {
         BrowserEngine.attach(null); BrowserEngine.filePicker = null
-        BrowserEngine.tabs.forEach { (it.web.parent as? ViewGroup)?.removeView(it.web) }
+        // Back to the background browser: the tabs keep running offscreen at screen size.
+        BrowserEngine.tabs.forEach { (it.web.parent as? ViewGroup)?.removeView(it.web); BrowserEngine.layoutOffscreen(it.web) }
         super.onDestroy()
     }
 }

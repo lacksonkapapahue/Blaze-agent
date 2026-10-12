@@ -7,7 +7,9 @@ import org.json.JSONObject
 
 /** Tools that let Blaze browse in its own browser, in the background, without touching the screen. */
 object BrowserTools {
-    val names = setOf("browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_back", "browser_tabs", "browser_show", "browser_vpn")
+    val names = setOf("browser_open", "browser_read", "browser_click", "browser_type", "browser_scroll", "browser_back", "browser_tabs", "browser_show", "browser_vpn", SECURE)
+    /** v0.20.0: in-chat secure form; handled by the Agent (it needs the chat card). */
+    const val SECURE = "browser_secure_input"
 
     private fun fn(name: String, desc: String, props: JSONObject = JSONObject(), req: List<String> = emptyList()) =
         JSONObject().put("type", "function").put("function", JSONObject().put("name", name).put("description", desc)
@@ -29,7 +31,22 @@ object BrowserTools {
         fn("browser_scroll", "Scroll the browser page.", JSONObject().put("direction", JSONObject().put("type", "string").put("enum", JSONArray(listOf("down", "up"))))),
         fn("browser_back", "Go back one page in the browser."),
         fn("browser_tabs", "List browser tabs, or switch with switch_to.", JSONObject().put("switch_to", p("integer", "Tab number to switch to"))),
-        fn("browser_show", "Show the built-in browser on screen with the current page, so the user can see or take over (e.g. to log in or pay)."),
+        fn(SECURE, "When the page in Blaze's background browser needs something only the user has (email, phone, username + password, API key, " +
+            "one-time code), call this instead of asking in chat or showing the browser. The user gets a secure form card in the chat (an 'Action required' " +
+            "notification if they're away); the browser fills the page from it and (by default) submits. You never see the values: you get placeholders like " +
+            "{{secret:password}} that browser_type can reuse. Saved values for the site are used without asking. Never for card numbers (use browser_show for payment).",
+            JSONObject().put("title", p("string", "Short title, e.g. 'Sign in to GitHub'"))
+                .put("reason", p("string", "One line on why it's needed"))
+                .put("fields", JSONObject().put("type", "array").put("description", "The fields to ask for, in page order")
+                    .put("items", JSONObject().put("type", "object").put("properties", JSONObject()
+                        .put("name", p("string", "Short id, e.g. email, password, code"))
+                        .put("label", p("string", "What the user sees, e.g. 'GitHub password'"))
+                        .put("kind", JSONObject().put("type", "string").put("enum", JSONArray(listOf("email", "phone", "username", "password", "api_key", "otp", "number", "text"))))
+                        .put("target", p("string", "The page field's [number] from browser_read, or its label; leave out to find it by kind")))
+                        .put("required", JSONArray(listOf("name", "kind")))))
+                .put("submit", p("boolean", "Submit the form after filling (default true)"))
+                .put("fresh", p("boolean", "Ask even if values are saved for this site (e.g. the saved password was wrong)")), listOf("title", "fields")),
+        fn("browser_show", "Show the built-in browser on screen with the current page, so the user can watch or take over (e.g. to pay, solve a captcha, or approve Google's own sign-in). Optional: work stays in the background by default."),
         fn("browser_vpn", "The built-in browser's VPN (only the browser goes through it, from the user's own WireGuard configs, one per country). " +
             "status: is it on, which country, which IP, which countries are available. connect: browse from a country (name or code), e.g. to see a site as it looks there. " +
             "disconnect: back to the real connection. Only countries the user has imported are available; if none, tell them to import a WireGuard config in the browser (⋯ › VPN & privacy).",
@@ -45,6 +62,7 @@ object BrowserTools {
         "browser_scroll" -> "Scrolling the page"
         "browser_back" -> "Going back"
         "browser_tabs" -> "Checking tabs"
+        SECURE -> "Asking you for ${a.optString("title").ifBlank { "a detail" }.take(40)}"
         "browser_vpn" -> when (a.optString("action")) { "connect" -> "Switching the browser VPN to ${a.optString("country")}"; "disconnect" -> "Turning the browser VPN off"; else -> "Checking the browser VPN" }
         else -> "Showing the browser"
     }
