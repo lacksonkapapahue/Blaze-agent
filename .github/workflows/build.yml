@@ -76,6 +76,8 @@ jobs:
           ls -la app/build/shots
 
       - name: Publish screenshots
+        env:
+          GH_TOKEN: ${{ github.token }}
         if: always() && github.repository == 'lacksonkapapahue/Blaze-agent' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: |
           mkdir -p /tmp/shots
@@ -86,7 +88,11 @@ jobs:
           git init -q -b shots
           git config user.name "Blaze CI"; git config user.email "ci@users.noreply.github.com"
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git add -A && git commit -qm "Screenshots ${{ github.sha }}" && git push -q origin shots --force
+          git add -A && git commit -qm "Screenshots ${{ github.sha }}"
+          if ! git push origin shots --force > /tmp/push.log 2>&1; then
+            sed 's/x-access-token:[^@]*@/x-access-token:***@/g' /tmp/push.log | gh issue comment 1 --repo ${{ github.repository }} --body-file - || true
+            exit 1
+          fi
 
       # Key rotation (v1.14.2+): v1/v2 stay on the old key for Android 8, v3 moves to the new key with a lineage
       # for Android 9+. The old key keeps installed-data (so current installs update) but loses rollback,
@@ -167,7 +173,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          { echo "Steps: ${{ join(steps.*.outcome, ', ') }}"; echo "Build failed on ${{ github.sha }} (run ${{ github.run_id }})"; echo; echo '```'; grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log 2>/dev/null | head -120; echo '----- tail -----'; tail -80 build.log 2>/dev/null || echo "no build.log (failed before Gradle ran)"; echo '```'; } > comment.md
+          { echo "Steps: ${{ join(steps.*.outcome, ', ') }}"; echo "Build failed on ${{ github.sha }} (run ${{ github.run_id }})"; echo; echo '```'; grep -E "^e: |error:|FAILURE|What went wrong| FAILED$" -A6 build.log 2>/dev/null | head -160; echo '----- tail -----'; tail -80 build.log 2>/dev/null || echo "no build.log (failed before Gradle ran)"; echo '```'; } > comment.md
           gh issue edit 1 --repo ${{ github.repository }} --body-file comment.md
 
   # The android-app-builder skill's template must keep building: make a project from it exactly as

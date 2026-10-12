@@ -56,6 +56,8 @@ android {
         unitTests.all {
             it.systemProperty("blaze.shots", System.getenv("BLAZE_SHOTS") ?: "0")
             it.systemProperty("robolectric.graphicsMode", "NATIVE")
+            // The compose test rule needs ui-test-manifest, which only the debug build has.
+            if (it.name.contains("Release")) it.exclude("**/ShotsTest*")
         }
     }
 }
