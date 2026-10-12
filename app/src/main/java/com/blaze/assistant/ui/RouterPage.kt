@@ -92,7 +92,7 @@ internal fun RouterPage(onClassic: () -> Unit) {
     Spacer(Modifier.height(8.dp))
     ToggleRow("Start with Blaze", "Run the router whenever Blaze opens", auto) { auto = !auto; BlazeRouter.autostart = auto }
     Row(Modifier.fillMaxWidth().clickable(onClick = onClassic).padding(vertical = 16.dp)) {
-        Label("Classic editor: providers, keys and models  →", color = c.accent, size = 10.sp)
+        Label("Classic editor: keys and models  →", color = c.accent, size = 10.sp)
     }
     Text("BlazeRouter is a Go port of OmniRoute (MIT). Your keys stay on this phone in ~/.blaze.",
         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.weak))

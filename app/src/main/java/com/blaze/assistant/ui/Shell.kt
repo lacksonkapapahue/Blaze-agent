@@ -325,7 +325,7 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
             Text((if (live) "Working" else "Worked") + (if (n > 0) " · $count" else "") + time, modifier = Modifier.weight(1f), maxLines = 1,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = if (live) c.ink else c.sub))
             // Token meter (v0.15.0): what the last model call sent and got back.
-            if (meter.isNotBlank()) { Spacer(Modifier.width(8.dp)); Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1) }
+            if (meter.isNotBlank()) { Spacer(Modifier.width(8.dp)); Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1); Spacer(Modifier.width(8.dp)) }
             if (n > 0) {
                 val rot by animateFloatAsState(if (open) 90f else 0f, label = "chev")
                 Text("›", modifier = Modifier.rotate(rot), style = TextStyle(fontFamily = Type.Display, fontSize = 18.sp, color = c.sub))
