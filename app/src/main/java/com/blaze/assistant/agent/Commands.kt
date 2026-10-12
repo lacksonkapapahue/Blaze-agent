@@ -48,6 +48,8 @@ object Commands {
         Command("skills", "", "Skill library"),
         Command("gallery", "", "Things Blaze made"),
         Command("browser", "", "Blaze's browser"),
+        Command("logs", "[on|off|pause|status]", "Life logs: transcribe what the mic hears into memory"),
+        Command("brainstorm", "", "Think out loud; get ideas, decisions and next steps when you stop"),
         Command("help", "", "List all commands")
     )
 
