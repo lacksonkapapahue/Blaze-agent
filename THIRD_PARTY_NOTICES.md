@@ -34,7 +34,7 @@ SOFTWARE.
 
 ## three.js
 
-The Design view bundles three.js r170 (`app/src/main/assets/design/three`: `three.module.min.js`, `OrbitControls.js`, `GLTFExporter.js`) so 3D designs open offline.
+The Design view bundles three.js r170 (`app/src/main/assets/design/three`: `three.module.min.js`, `OrbitControls.js`, `GLTFExporter.js`) so 3D designs open offline, and since v0.23.3 also three.js r162 (`app/src/main/assets/design/three-r162`: `three.module.min.js`, `OrbitControls.js`, `GLTFExporter.js`, `TextureUtils.js`, from the npm package three@0.162.0), the last release that still runs on WebGL 1, for phones whose WebView has WebGL 2 turned off. Both are MIT-licensed by the three.js authors (each folder carries its LICENSE; r162's copyright line reads 2010-2024 three.js authors too).
 
 Source: https://github.com/mrdoob/three.js
 

@@ -8,3 +8,6 @@
 -keep class com.blaze.assistant.** extends android.app.Service { *; }
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
 -keep class com.blaze.assistant.agent.MindReviewWorker { <init>(...); }
+# v0.23.3: the Design view's JS bridge (BlazeDesign.gl / error / ready / fail) is called by name from the page.
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
+-keep class com.blaze.assistant.ui.DesignBridge { *; }

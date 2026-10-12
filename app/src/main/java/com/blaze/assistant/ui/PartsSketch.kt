@@ -2,7 +2,13 @@ package com.blaze.assistant.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -94,7 +100,7 @@ object PartsSketch {
     }
 
     /** Projected, shaded and depth-sorted faces of [spec] fitted into [w]×[h] (far faces first). */
-    fun faces(spec: JSONObject, w: Float, h: Float, yawDeg: Double = 35.0, pitchDeg: Double = 22.0): List<Face> {
+    fun faces(spec: JSONObject, w: Float, h: Float, yawDeg: Double = 35.0, pitchDeg: Double = 22.0, zoom: Double = 1.0): List<Face> {
         val parts = spec.optJSONArray("parts") ?: JSONArray()
         val byId = HashMap<String, JSONObject>()
         for (i in 0 until parts.length()) parts.optJSONObject(i)?.let { byId[it.optString("id")] = it }
@@ -124,7 +130,7 @@ object PartsSketch {
         if (raw.isEmpty()) return emptyList()
         var minX = Double.MAX_VALUE; var maxX = -Double.MAX_VALUE; var minY = Double.MAX_VALUE; var maxY = -Double.MAX_VALUE
         raw.forEach { (vs, _, _) -> vs.forEach { minX = min(minX, it.x); maxX = max(maxX, it.x); minY = min(minY, it.y); maxY = max(maxY, it.y) } }
-        val sc = 0.82 * min(w / max(maxX - minX, 1e-6), h / max(maxY - minY, 1e-6))
+        val sc = 0.82 * zoom.coerceIn(0.2, 8.0) * min(w / max(maxX - minX, 1e-6), h / max(maxY - minY, 1e-6))
         val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
         return raw.sortedBy { it.second }.map { (vs, depth, c) ->
             Face(vs.map { ((w / 2 + (it.x - cx) * sc).toFloat()) to ((h / 2 - (it.y - cy) * sc).toFloat()) }, depth, c)
@@ -132,11 +138,21 @@ object PartsSketch {
     }
 }
 
-/** Draws [spec] (a blaze-parts object) filling its box. */
+/** Turn and zoom for the native drawing: one-finger drag turns (yaw/pitch), pinch zooms. Pure, unit-tested. */
+data class SketchView(val yaw: Double = 35.0, val pitch: Double = 22.0, val zoom: Double = 1.0) {
+    fun drag(dx: Float, dy: Float): SketchView = copy(yaw = (yaw - dx * 0.4) % 360.0, pitch = (pitch + dy * 0.4).coerceIn(-85.0, 85.0))
+    fun pinch(factor: Float): SketchView = copy(zoom = (zoom * factor).coerceIn(0.3, 6.0))
+}
+
+/** Draws [spec] (a blaze-parts object) filling its box. v0.23.3: drag to turn, pinch to zoom ([interactive]). */
 @Composable
-fun PartsSketchView(spec: JSONObject, modifier: Modifier = Modifier.fillMaxSize()) {
-    Canvas(modifier) {
-        val fs = PartsSketch.faces(spec, size.width, size.height)
+fun PartsSketchView(spec: JSONObject, modifier: Modifier = Modifier.fillMaxSize(), interactive: Boolean = true) {
+    var view by remember(spec.toString()) { mutableStateOf(SketchView()) }
+    val gestures = if (!interactive) Modifier else Modifier.pointerInput(spec.toString()) {
+        detectTransformGestures { _, pan, zoom, _ -> view = view.drag(pan.x, pan.y).let { if (zoom != 1f) it.pinch(zoom) else it } }
+    }
+    Canvas(modifier.then(gestures)) {
+        val fs = PartsSketch.faces(spec, size.width, size.height, view.yaw, view.pitch, view.zoom)
         for (f in fs) {
             val path = Path().apply { moveTo(f.pts[0].first, f.pts[0].second); for (k in 1 until f.pts.size) lineTo(f.pts[k].first, f.pts[k].second); close() }
             drawPath(path, Color(f.argb.toInt()), style = Fill)
