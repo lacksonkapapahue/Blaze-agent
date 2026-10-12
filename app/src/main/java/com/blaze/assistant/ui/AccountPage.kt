@@ -63,7 +63,7 @@ fun AccountPage() {
                 if (how.isNotEmpty()) Label("Signs in with " + how.joinToString(", "), color = c.weak, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
-        Note("The same account works in Blaze Desktop and Blaze CLI. Your model API keys follow it, encrypted, so a key added on your PC works here and the other way round. Connected accounts stay on this phone.", top = 12)
+        Note("The same account works in Blaze Desktop and Blaze CLI. Your model API keys and your own skills follow it, encrypted, so a key or skill added on your PC works here and the other way round. Connected accounts stay on this phone.", top = 12)
         if (v.message.isNotEmpty()) Note(v.message)
         val keyStatus by KeySync.status.collectAsState()
         var syncing by remember { mutableStateOf(false) }
@@ -73,6 +73,15 @@ fun AccountPage() {
             scope.launch { KeySync.sync(); syncing = false }
         }
         if (keyStatus.isNotEmpty()) Note(keyStatus, top = 8)
+        val skillStatus by com.blaze.assistant.connect.SkillSync.status.collectAsState()
+        var syncingSkills by remember { mutableStateOf(false) }
+        Spacer(Modifier.height(8.dp))
+        AccountButton(if (syncingSkills) "Syncing skills…" else "Sync skills now", primary = false) {
+            if (syncingSkills) return@AccountButton
+            syncingSkills = true
+            scope.launch { com.blaze.assistant.connect.SkillSync.sync(); syncingSkills = false }
+        }
+        if (skillStatus.isNotEmpty()) Note(skillStatus, top = 8)
         Spacer(Modifier.height(8.dp))
         AccountButton("Sign out", primary = false) { scope.launch { BlazeAccount.signOut() } }
         Spacer(Modifier.height(24.dp))

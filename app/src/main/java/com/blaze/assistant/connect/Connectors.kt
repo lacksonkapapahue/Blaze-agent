@@ -127,7 +127,10 @@ object Connectors {
 
     private suspend fun oneClick(ctx: Context, c: Connector): String = try {
         status(c.id, "Waiting for you to sign in in the browser…")
-        val t = BlazeAccount.connectTokens(ctx, c.id, if (c.kind == Kind.TOKEN) "" else c.scopes)
+        // GitHub "workflow" lets Blaze push the Actions file of an app it builds (android-app-builder);
+        // only Workers from 0.8.0 accept it, so older ones keep getting the old scopes.
+        val scopes = if (c.kind == Kind.TOKEN) "" else if (c.id == "github" && BlazeAccount.workerAtLeast("0.8.0")) c.scopes + " workflow" else c.scopes
+        val t = BlazeAccount.connectTokens(ctx, c.id, scopes)
         val exp = t.optLong("expires_in", 0)
         if (exp > 0) t.put("expires_at", System.currentTimeMillis() + exp * 1000)
         saveTokens(c.id, t.put("via", "blaze"))
@@ -254,6 +257,12 @@ object Connectors {
             fn("github_create_issue", "Open an issue in a repo. The user approves first.", JSONObject().put("repo", s("owner/name")).put("title", s("Title")).put("body", s("Body")), listOf("repo", "title")),
             fn("github_my_repos", "List ALL of the user's own repositories, private ones included, newest activity first. Use this (not search) for 'my repos'."),
             fn("github_search_repos", "Search public GitHub repositories (not for the user's own list: use github_my_repos).", JSONObject().put("query", s("Search words")), listOf("query")),
+            fn("github_create_repo", "Create a new repository on the user's GitHub (private unless they want it public). The user approves first. Use for a new app or project.",
+                JSONObject().put("name", s("Repo name, e.g. habit-tracker")).put("description", s("One line")).put("public", JSONObject().put("type", "boolean").put("description", "true only if the user asked for public")), listOf("name")),
+            fn("github_ci", "Status of the latest GitHub Actions run in a repo (or a branch). Waits up to wait_seconds for a running build to finish. On failure it returns the failing step and the compiler errors.",
+                JSONObject().put("repo", s("owner/name")).put("branch", s("Optional, default the repo's default branch")).put("wait_seconds", i("0-150, default 120")), listOf("repo")),
+            fn("github_install_apk", "Download the APK from a repo's latest GitHub release and open Android's installer for it (the user taps Install).",
+                JSONObject().put("repo", s("owner/name")), listOf("repo")),
         ),
         "spotify" to listOf(
             fn("spotify_now_playing", "What's playing on the user's Spotify right now."),
@@ -305,7 +314,7 @@ object Connectors {
         try {
             when (id) {
                 "google" -> google(name, a, tok)
-                "github" -> github(name, a, tok)
+                "github" -> github(name, a, tok, ctx)
                 "spotify" -> spotify(name, a, tok)
                 "notion" -> notion(name, a, tok)
                 "slack" -> slack(name, a, tok)
@@ -407,7 +416,7 @@ object Connectors {
         }
     }
 
-    private suspend fun github(name: String, a: JSONObject, t: String): String {
+    private suspend fun github(name: String, a: JSONObject, t: String, ctx: Context): String {
         val api = "https://api.github.com"
         val h = mapOf("Accept" to "application/vnd.github+json")
         return when (name) {
@@ -449,6 +458,9 @@ object Connectors {
                 val l = get("$api/search/repositories?per_page=8&q=" + Http.enc(a.optString("query")), t, h).optJSONArray("items") ?: JSONArray()
                 (0 until l.length()).joinToString("\n") { k -> val r = l.getJSONObject(k); "${r.optString("full_name")} ★${r.optInt("stargazers_count")} · ${r.optString("description").take(90)}" }.ifEmpty { "Nothing found." }
             }
+            "github_create_repo" -> GitHubApps.createRepo(a, t)
+            "github_ci" -> GitHubApps.ci(a, t)
+            "github_install_apk" -> GitHubApps.installApk(ctx, a, t)
             else -> "Unknown tool"
         }
     }

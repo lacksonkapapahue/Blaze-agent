@@ -83,6 +83,9 @@ object Friendly {
             "drive_search" -> "Searching your Drive"
             "github_my_repos", "github_issues", "github_my_prs", "github_notifications", "github_search_repos" -> "Checking GitHub"
             "github_create_issue" -> "Opening a GitHub issue"
+            "github_create_repo" -> "Creating the GitHub repo"
+            "github_ci" -> "Waiting for the app to build"
+            "github_install_apk" -> "Installing the app"
             "notion_search", "notion_add_page" -> "Working in Notion"
             "slack_channels", "slack_read", "slack_post" -> "Working in Slack"
             "use_skill", "run_skill", "skill_file" -> "Following a saved skill"
@@ -146,6 +149,7 @@ object Friendly {
         lastTool in setOf("read_screen", "look_at_screen", "tap", "type_text", "scroll", "run_plan", "do_actions", "open_app") -> "Looking at the screen"
         lastTool.startsWith("gmail_") -> "Going through your email"
         lastTool.contains("calendar") || lastTool.startsWith("gcal_") -> "Checking your schedule"
+        lastTool == "github_ci" -> "Reading the build result"
         lastTool.startsWith("github_") || lastTool == "git" -> "Going through the project"
         else -> "Working out the next step"
     }

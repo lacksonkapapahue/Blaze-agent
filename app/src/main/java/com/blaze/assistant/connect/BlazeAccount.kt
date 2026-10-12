@@ -78,7 +78,7 @@ object BlazeAccount {
     fun start() {
         val cached = Settings.str(USER).takeIf { it.isNotBlank() }?.let { runCatching { User.from(JSONObject(it)) }.getOrNull() }
         _view.value = _view.value.copy(user = cached)
-        scope.launch { refreshProviders(true); checkSession(); KeySync.syncIfStale() }
+        scope.launch { refreshProviders(true); checkSession(); KeySync.syncIfStale(); SkillSync.syncIfStale() }
     }
 
     // ---------------- errors ----------------
@@ -169,7 +169,7 @@ object BlazeAccount {
         val fresh = Settings.secret(SESSION) != token
         Settings.setSecret(SESSION, token); Settings.setStr(USER, user.json().toString())
         _view.value = _view.value.copy(user = user)
-        if (fresh) KeySync.syncSoon()   // just signed in: bring this account's model keys here, and ours there
+        if (fresh) { KeySync.syncSoon(); SkillSync.syncSoon() }   // just signed in: bring this account's model keys here, and ours there
     }
 
     private fun takeSession(o: JSONObject) {
@@ -350,6 +350,21 @@ object BlazeAccount {
         call("POST", "/oauth/${Uri.encode(id)}/refresh", body = JSONObject().put("refresh_token", refreshToken))
             .optJSONObject("tokens")?.takeIf { it.optString("access_token").isNotBlank() }
     } catch (_: Exception) { null }
+
+    /** The Worker's version ("0.8.0"), or "" when it can't be reached. */
+    fun workerVersion(): String = try { call("GET", "/health").optString("version") } catch (_: Exception) { "" }
+
+    /** True when the Worker is at least [v] (dotted numbers). */
+    fun workerAtLeast(v: String): Boolean {
+        val have = workerVersion().split('.').map { it.toIntOrNull() ?: 0 }
+        if (have.isEmpty() || have.all { it == 0 }) return false
+        val want = v.split('.').map { it.toIntOrNull() ?: 0 }
+        for (i in 0 until maxOf(have.size, want.size)) {
+            val a = have.getOrElse(i) { 0 }; val b = want.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+        return true
+    }
 
     fun clearMessage() { _view.value = _view.value.copy(message = "") }
 
