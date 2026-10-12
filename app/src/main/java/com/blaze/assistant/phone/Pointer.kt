@@ -67,7 +67,7 @@ object Pointer {
     fun isOwnTouch(now: Long, ownUntil: Long) = now <= ownUntil
 
     // ---------- windows ----------
-    private val main = Handler(Looper.getMainLooper())
+    private val main by lazy { Handler(Looper.getMainLooper()) }
     private var wm: WindowManager? = null
     private var dot: Dot? = null
     private var dotLp: WindowManager.LayoutParams? = null
