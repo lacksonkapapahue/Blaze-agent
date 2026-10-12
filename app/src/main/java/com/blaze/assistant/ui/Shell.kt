@@ -324,8 +324,6 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
             Spacer(Modifier.width(10.dp))
             Text((if (live) "Working" else "Worked") + (if (n > 0) " · $count" else "") + time, modifier = Modifier.weight(1f), maxLines = 1,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = if (live) c.ink else c.sub))
-            // Token meter (v0.15.0): what the last model call sent and got back.
-            if (meter.isNotBlank()) { Spacer(Modifier.width(8.dp)); Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1); Spacer(Modifier.width(8.dp)) }
             if (n > 0) {
                 val rot by animateFloatAsState(if (open) 90f else 0f, label = "chev")
                 Text("›", modifier = Modifier.rotate(rot), style = TextStyle(fontFamily = Type.Display, fontSize = 18.sp, color = c.sub))
@@ -335,6 +333,9 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
         if (live && !open && line.isNotBlank()) Box(Modifier.fillMaxWidth().padding(start = 29.dp, end = 12.dp, bottom = 10.dp)) {
             Shimmer(line)
         }
+        // Token meter (v0.15.0): what the last model call sent and got back, on its own line so the title never clips.
+        if (meter.isNotBlank()) Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1,
+            modifier = Modifier.padding(start = 29.dp, end = 12.dp, bottom = 10.dp))
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
             Column(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 steps.forEachIndexed { i, s ->
