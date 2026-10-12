@@ -276,19 +276,19 @@ fun RecentRail(chats: List<ChatMeta>, busy: Set<String>, current: String, onNew:
     val c = LocalBlaze.current
     Column(Modifier.width(304.dp).fillMaxSize().background(c.paper).hairline(c.hair).clickable(remember { MutableInteractionSource() }, null) { }) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Label("Recent chats", color = c.ink, size = 10.sp, modifier = Modifier.weight(1f))
+            Label("Conversation", color = c.ink, size = 10.sp, modifier = Modifier.weight(1f))
             Label("×", size = 16.sp, modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
         }
         Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(46.dp).background(c.ink).clickable(onClick = onNew), contentAlignment = Alignment.Center) {
-            Label("+  New chat", color = c.paper, size = 11.sp)
+            Label("+  Fresh start", color = c.paper, size = 11.sp)
         }
         Spacer(Modifier.height(8.dp))
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             chats.take(40).forEach { ch -> ChatRow(ch, ch.id in busy, ch.id == current) { onChat(ch.id) } }
-            if (chats.isEmpty()) Text("No chats yet", modifier = Modifier.padding(20.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
+            if (chats.isEmpty()) Text("Say hi to start", modifier = Modifier.padding(20.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
         }
         Row(Modifier.fillMaxWidth().hairlineTop(c.hair).clickable(onClick = onAll).padding(horizontal = 20.dp, vertical = 14.dp)) {
-            Label("All chats  →", color = c.accent, size = 10.sp)
+            Label("Archive  →", color = c.accent, size = 10.sp)
         }
     }
 }
@@ -393,7 +393,7 @@ fun UserBubble(text: String, quoted: String = "") {
 /** What the + menu offers. [id] is handled by the screen. */
 data class PlusItem(val id: String, val label: String, val sub: String = "", val on: Boolean = false)
 
-fun plusItems(work: String, approval: String, model: String, hasClipImage: Boolean): List<PlusItem> = buildList {
+fun plusItems(work: String, approval: String, model: String, hasClipImage: Boolean, inProject: Boolean = false): List<PlusItem> = buildList {
     add(PlusItem("camera", "Camera", "Take a photo"))
     add(PlusItem("photos", "Photos", "Pick pictures"))
     add(PlusItem("files", "Files", "Photos, PDFs, text"))
@@ -405,7 +405,8 @@ fun plusItems(work: String, approval: String, model: String, hasClipImage: Boole
     add(PlusItem("approval", if (approval == "autopilot") "Autopilot" else "Auto", if (approval == "autopilot") "Works on without asking · tap for Auto" else "Asks before risky steps · tap for Autopilot", on = approval == "autopilot"))
     add(PlusItem("model", "Model", model))
     add(PlusItem("views", "Views", "Memory, jobs, design, accounts…"))
-    add(PlusItem("new", "New chat", ""))
+    // One mind: outside projects there is one conversation; "Fresh start" clears the context, nothing is deleted.
+    add(if (inProject) PlusItem("new", "New chat", "A new thread in this project") else PlusItem("new", "Fresh start", "Clear the context · nothing is deleted"))
 }
 
 @Composable

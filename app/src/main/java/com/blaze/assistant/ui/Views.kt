@@ -15,7 +15,7 @@ data class BlazeView(val id: String, val name: String, val desc: String, val pag
 
 object Views {
     val all = listOf(
-        BlazeView("chats", "Chats", "Every saved conversation", special = "chats", aliases = listOf("history")),
+        BlazeView("chats", "Archive", "Chats from before one mind, read-only", special = "chats", aliases = listOf("history", "archive")),
         BlazeView("design", "Design", "Live preview of pages Blaze builds", special = "design", aliases = listOf("preview", "studio")),
         BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learning")),
         BlazeView("learn", "Learn", "Flashcards with spaced repetition, Classroom, low-data mode", page = "learn", aliases = listOf("flashcards", "study", "student", "classroom")),

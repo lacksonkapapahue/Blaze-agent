@@ -7,18 +7,44 @@ import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Long-term facts Blaze keeps about the user, across chats. */
+/**
+ * Long-term facts Blaze keeps about the user, across chats.
+ *
+ * Since v0.18.0 (one mind) the memories table in mind.db is the source of truth and this object is a view of it:
+ * the Memory screen, remember / recall_memory / forget and the learning review all go through [Mind]. The old
+ * prefs list ("memory") is imported once and then kept as a mirror of the table's lines, so a downgrade or a
+ * backup export still carries every fact. If mind.db can't open, everything works on the old list as before.
+ */
 object Memory {
     private lateinit var prefs: SharedPreferences
     private val _facts = MutableStateFlow<List<String>>(emptyList())
     val facts: StateFlow<List<String>> = _facts
+    @Volatile private var ids: List<Long> = emptyList()
 
-    fun init(ctx: Context) {
+    private fun legacy(): List<String> = try {
+        val a = JSONArray(prefs.getString("memory", "[]")); (0 until a.length()).map { a.getString(it) }
+    } catch (_: Exception) { emptyList() }
+
+    /** [mergeLegacy]: also fold the prefs list into the table (after a backup was restored). */
+    fun init(ctx: Context, mergeLegacy: Boolean = false) {
         prefs = ctx.getSharedPreferences("blaze", Context.MODE_PRIVATE)
-        _facts.value = try {
-            val a = JSONArray(prefs.getString("memory", "[]"))
-            (0 until a.length()).map { a.getString(it) }
-        } catch (_: Exception) { emptyList() }
+        val d = Mind.db()
+        if (d == null) { _facts.value = legacy(); return }
+        try {
+            if (d.meta("mig_memory") != "1") { Mind.importFacts(d, legacy()); d.setMeta("mig_memory", "1") }
+            else if (mergeLegacy) Mind.importFacts(d, legacy())
+        } catch (_: Exception) { }
+        Mind.onChange = { reload() }
+        reload()
+    }
+
+    /** Re-reads the table (oldest first, like the old list) and mirrors it to prefs. */
+    fun reload() {
+        val d = Mind.db() ?: return
+        val l = try { d.all() } catch (_: Exception) { return }
+        ids = l.map { it.id }
+        _facts.value = l.map { it.text }
+        try { prefs.edit().putString("memory", JSONArray(l.map { it.text }).toString()).apply() } catch (_: Exception) { }
     }
 
     private fun persist(list: List<String>) {
@@ -26,14 +52,31 @@ object Memory {
         prefs.edit().putString("memory", JSONArray(list).toString()).apply()
     }
 
+    private fun matches(text: String, q: String): Boolean { val t = text.lowercase(); return t.contains(q) || q.contains(t) }
+
     /** Saves [fact]. [replaces] (words from an older fact) removes the fact it supersedes first. */
     fun add(fact: String, replaces: String = ""): String {
         val f = fact.trim().removeSuffix(".")
         if (f.isEmpty()) return "Nothing to remember."
         // Keys, passwords, codes and card/account numbers are never kept, even when asked (Desktop v0.7 rule).
         if (Learn.secret(f)) return "Not saved: that looks like a password, code or account number, which Blaze never keeps in memory."
+        val d = Mind.db()
+        if (d != null) {
+            val r = replaces.trim().lowercase()
+            var gone = 0
+            if (r.length >= 3) try { d.all().filter { matches(it.text, r) }.forEach { d.delete(it.id); gone++ } } catch (_: Exception) { }
+            val (k, s) = Mind.guessKind(f)
+            val (out, _) = Mind.save(k, s, f)
+            if (gone > 0) reload()
+            return when (out) {
+                "same" -> if (gone > 0) "Updated: $f" else "Already remembered."
+                "updated" -> "Updated: $f"
+                "saved" -> if (gone > 0) "Updated: $f" else "Remembered: $f"
+                else -> "Nothing to remember."
+            }
+        }
         val gone = replaces.trim().takeIf { it.length >= 3 }?.let { r ->
-            val q = r.lowercase(); val keep = _facts.value.filterNot { it.lowercase().contains(q) || q.contains(it.lowercase()) }
+            val q = r.lowercase(); val keep = _facts.value.filterNot { matches(it, q) }
             (_facts.value.size - keep.size).also { if (it > 0) persist(keep) } } ?: 0
         if (_facts.value.any { it.equals(f, true) }) return "Already remembered."
         // A newer version of the same fact replaces the old one ("lives in Ndola" -> "lives in Lusaka").
@@ -44,24 +87,44 @@ object Memory {
         persist(_facts.value + f); return if (gone > 0) "Updated: $f" else "Remembered: $f"
     }
 
+    /** The user asked to forget it: removes every saved line that matches. */
     fun forget(query: String): String {
         val q = query.trim().lowercase()
-        val keep = _facts.value.filterNot { it.lowercase().contains(q) || q.contains(it.lowercase()) }
+        if (q.isEmpty()) return "Nothing matched \"$query\"."
+        val d = Mind.db()
+        if (d != null) {
+            val hit = try { d.all().filter { matches(it.text, q) || matches(it.subject + ": " + it.text, q) } } catch (_: Exception) { emptyList() }
+            hit.forEach { d.delete(it.id) }
+            reload()
+            return if (hit.isEmpty()) "Nothing matched \"$query\"." else "Forgot ${hit.size} item(s)."
+        }
+        val keep = _facts.value.filterNot { matches(it, q) }
         val n = _facts.value.size - keep.size
         persist(keep)
         return if (n == 0) "Nothing matched \"$query\"." else "Forgot $n item(s)."
     }
 
-    fun remove(index: Int) { persist(_facts.value.filterIndexed { i, _ -> i != index }) }
-    fun clear() = persist(emptyList())
+    fun remove(index: Int) {
+        val d = Mind.db()
+        if (d != null) { ids.getOrNull(index)?.let { d.delete(it) }; reload(); return }
+        persist(_facts.value.filterIndexed { i, _ -> i != index })
+    }
+
+    /** "Forget all" on the Memory screen (the user's explicit request). */
+    fun clear() {
+        val d = Mind.db()
+        if (d != null) { try { d.all().forEach { d.delete(it.id) } } catch (_: Exception) { }; reload(); return }
+        persist(emptyList())
+    }
 
     private fun words(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 2 }.toSet()
 
     /**
-     * Facts for the prompt. Small memories go in whole; big ones send only what fits this
-     * request (word overlap) plus the newest few, which keeps prompts short and cheap.
+     * Memory for the prompt. With one mind: the pinned core and the subject index only (everything else is looked
+     * up). Without mind.db: the old list (small memories whole, big ones only what fits the request).
      */
     fun promptBlock(query: String = ""): String {
+        if (Mind.ready) return Mind.promptBlock()
         val all = _facts.value
         if (all.isEmpty()) return ""
         val chosen = if (all.size <= 30) all else {
@@ -77,6 +140,7 @@ object Memory {
     }
 
     fun recall(query: String): String {
+        if (Mind.ready) return Mind.run("memory_search", JSONObject().put("query", query))
         val q = words(query)
         val hits = _facts.value.filter { (words(it) intersect q).isNotEmpty() || it.contains(query, true) }
         return if (hits.isEmpty()) "Nothing saved about \"$query\"." else hits.take(25).joinToString("\n") { "- $it" }
@@ -85,20 +149,20 @@ object Memory {
     fun tools(): List<JSONObject> = listOf(
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "remember")
-            .put("description", "Save a lasting fact or preference about the user (name, family, likes, routines, contacts) so you know it in future chats. Use when they tell you something worth keeping or say 'remember'.")
+            .put("description", "Save a lasting fact or preference about the user when they say 'remember'. Prefer memory_save, which also takes the kind and subject.")
             .put("parameters", JSONObject().put("type", "object")
                 .put("properties", JSONObject().put("fact", JSONObject().put("type", "string").put("description", "Short fact, e.g. 'Sister is Mary, lives in Ndola'"))
                     .put("replaces", JSONObject().put("type", "string").put("description", "Optional: words from an older saved fact this one replaces (it is removed)")))
                 .put("required", JSONArray(listOf("fact"))))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "recall_memory")
-            .put("description", "Search everything you've saved about the user (when the prompt says more facts are saved).")
+            .put("description", "Search everything you've saved about the user (same as memory_search).")
             .put("parameters", JSONObject().put("type", "object")
                 .put("properties", JSONObject().put("query", JSONObject().put("type", "string")))
                 .put("required", JSONArray(listOf("query"))))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "forget")
-            .put("description", "Delete a remembered fact when the user asks you to forget it or it's no longer true.")
+            .put("description", "Delete a remembered fact when the user asks you to forget it.")
             .put("parameters", JSONObject().put("type", "object")
                 .put("properties", JSONObject().put("fact", JSONObject().put("type", "string").put("description", "Words from the fact to forget")))
                 .put("required", JSONArray(listOf("fact")))))
