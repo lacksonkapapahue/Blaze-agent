@@ -91,13 +91,33 @@ object Designs {
     /** The parts spec inside a 3D page, or null when the page isn't a parts-based 3D design. */
     fun specFrom(html: String): JSONObject? = partsBlock.find(html)?.let { try { JSONObject(it.groupValues[2]) } catch (_: Exception) { null } }
 
-    /** Blaze's additions to every 3D page: phone-sized panel and a message when three.js can't load (no network and no bundled copy). */
-    private const val EXTRA_3D = """
+    /** v0.23.2's additions (kept so pages made then are recognised and upgraded on their next update). */
+    private const val EXTRA_3D_V1 = """
 <style>@media (max-width: 640px) { #panel { max-width: 46vw; font-size: 11px; padding: 6px 8px; } #panel table { font-size: 10px; } }
 #bz-fail { position: fixed; inset: auto 12px 12px 12px; padding: 10px 12px; border-radius: 10px; background: #fff3e0; color: #6d3d00; font: 13px system-ui, sans-serif; display: none; }</style>
 <div id="bz-fail">The 3D engine didn't load, so the scene can't be drawn. Check the connection and tap Reload.</div>
 <script>setTimeout(function () { if (!window.__blazeScene) document.getElementById('bz-fail').style.display = 'block'; }, 8000);</script>
 """
+
+    /**
+     * Blaze's additions to every 3D page: a phone-sized panel, and (for browsers outside Blaze, e.g. "Open")
+     * a message with the real error when three.js doesn't start within 20 s. Inside Blaze the Design view hides
+     * this and shows its own banner, retries with the WebGL1 build and falls back to a native drawing (v0.23.3).
+     */
+    private const val EXTRA_3D = """<!--bz-extra-->
+<style>@media (max-width: 640px) { #panel { max-width: 46vw; font-size: 11px; padding: 6px 8px; } #panel table { font-size: 10px; } }
+#bz-fail { position: fixed; inset: auto 12px 12px 12px; padding: 10px 12px; border-radius: 10px; background: #fff3e0; color: #6d3d00; font: 13px system-ui, sans-serif; display: none; }</style>
+<div id="bz-fail">The 3D engine didn't load, so the scene can't be drawn. Tap Reload to try again.</div>
+<script>(function () { var errs = window.__bzErrors = window.__bzErrors || [];
+addEventListener('error', function (e) { errs.push(e && e.message ? e.message : 'a script or module failed to load'); }, true);
+addEventListener('unhandledrejection', function (e) { errs.push(String(e.reason && (e.reason.message || e.reason))); });
+setTimeout(function () { if (window.__blazeScene) return; var el = document.getElementById('bz-fail'); if (!el) return;
+  if (errs.length) el.textContent = "The 3D engine didn't start: " + errs[0] + ". Tap Reload to try again.";
+  el.style.display = 'block'; }, 20000); })();</script>
+<!--/bz-extra-->
+"""
+
+    private val extraBlock = Regex("<!--bz-extra-->[\\s\\S]*?<!--/bz-extra-->\\n?")
 
     /** A 3D page: the starter with [spec] as its blaze-parts block. */
     fun render3d(template: String, spec: JSONObject): String {
@@ -105,9 +125,22 @@ object Designs {
         var html = if (partsBlock.containsMatchIn(template)) partsBlock.replace(template) { m -> m.groupValues[1] + "\n" + json + "\n" + m.groupValues[3] }
             else template
         html = html.replace(Regex("<title>[\\s\\S]*?</title>"), Regex.escapeReplacement("<title>${esc(spec.optString("name", "3D design"))}</title>"))
+        html = html.replace(EXTRA_3D_V1, "").replace(extraBlock, "")
         if (!html.contains("id=\"bz-fail\"")) html = html.replace("</body>", EXTRA_3D + "</body>")
         return html
     }
+
+    /**
+     * The Design view's last render error (~/designs/.last_error.txt, written by the Design view when a page
+     * fails to draw and removed when one draws), as a note for the model; null when there is none.
+     */
+    fun lastErrorNote(now: Long = System.currentTimeMillis()): String? = try {
+        File(root(), ".last_error.txt").takeIf { it.isFile && now - it.lastModified() < 24 * 3_600_000L }?.readText()?.trim()?.takeIf { it.isNotEmpty() }?.let { t ->
+            val first = t.lines().firstOrNull { it.startsWith("- ") }?.removePrefix("- ")?.take(200) ?: t.lines().first()
+            "\nNote: the Design view reported a render error last time it drew a design: $first (details: ~/designs/.last_error.txt; " +
+                "the phone falls back to a simple native drawing when three.js can't start)."
+        }
+    } catch (_: Exception) { null }
 
     /** Merges part changes by id: [set] entries replace keys of the part with that id (or add a new part); [remove] drops ids (and their children). */
     fun mergeParts(spec: JSONObject, set: JSONArray?, remove: Collection<String>): Pair<JSONObject, String> {
@@ -213,7 +246,16 @@ object Designs {
         else -> "Checking designs"
     }
 
-    fun run(args: JSONObject, now: Long = System.currentTimeMillis()): Outcome = try {
+    fun run(args: JSONObject, now: Long = System.currentTimeMillis()): Outcome = withErrorNote(args, runInner(args, now))
+
+    /** v0.23.3: create / update / open / read results mention ~/designs/.last_error.txt when the Design view left one. */
+    private fun withErrorNote(args: JSONObject, o: Outcome): Outcome {
+        if (args.optString("action").lowercase() !in setOf("create", "update", "edit", "open", "read")) return o
+        val note = lastErrorNote() ?: return o
+        return o.copy(text = o.text + note)
+    }
+
+    private fun runInner(args: JSONObject, now: Long): Outcome = try {
         when (args.optString("action").lowercase()) {
             "create" -> create(args, now)
             "update", "edit" -> update(args, now)

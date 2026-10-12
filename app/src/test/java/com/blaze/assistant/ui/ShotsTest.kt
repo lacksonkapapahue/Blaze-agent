@@ -442,6 +442,32 @@ class ShotsTest {
         com.blaze.assistant.agent.Designs.rootOverride = null
     }
 
+    // v0.23.3: three.js couldn't start (the A12 with WebGL turned off): the same parts drawn natively, the real error, Retry.
+    @Test fun design3dFallback() {
+        val dir = java.nio.file.Files.createTempDirectory("shots-designs").toFile()
+        com.blaze.assistant.agent.Designs.rootOverride = dir
+        com.blaze.assistant.agent.Designs.templateLoader = { File("src/main/assets/skills/three-d-design/assets/mockup.html").readText() }
+        fun part(id: String, shape: String, vararg kv: Pair<String, Any>) = org.json.JSONObject().put("id", id).put("shape", shape).apply { kv.forEach { (k, v) -> put(k, v) } }
+        fun a(vararg n: Number) = org.json.JSONArray(n.toList())
+        val parts = org.json.JSONArray()
+            .put(part("body", "cylinder", "radius" to 0.6, "height" to 6, "position" to a(0, 4, 0), "color" to "#e9e9ec", "material" to "metal"))
+            .put(part("nose", "cone", "radius" to 0.6, "height" to 2, "position" to a(0, 8, 0), "color" to "#d8342c"))
+            .put(part("engine", "cylinder", "radius" to 0.45, "radiusTop" to 0.3, "height" to 0.8, "position" to a(0, 0.6, 0), "color" to "#3a3a40"))
+            .put(part("fin-1", "box", "size" to a(0.08, 1.6, 1.0), "position" to a(0.0, 1.5, 0.8), "rotation" to a(0, 90, 0), "color" to "#d8342c"))
+            .put(part("fin-2", "box", "size" to a(0.08, 1.6, 1.0), "position" to a(0.7, 1.5, -0.4), "rotation" to a(0, -30, 0), "color" to "#d8342c"))
+            .put(part("fin-3", "box", "size" to a(0.08, 1.6, 1.0), "position" to a(-0.7, 1.5, -0.4), "rotation" to a(0, 30, 0), "color" to "#d8342c"))
+        val made = com.blaze.assistant.agent.Designs.run(org.json.JSONObject().put("action", "create").put("kind", "3d").put("title", "Simple Rocket")
+            .put("units", "m").put("parts", parts))
+        shot("37-design-3d-fallback") {
+            Column(Modifier.fillMaxSize()) {
+                ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Design")
+                Box(Modifier.weight(1f)) { DesignView(made.open ?: "", busy = false, status = "", onAsk = {}, onOpenInBrowser = {}, home = null, preview = false,
+                    initialFailure = "WebGL is turned off in this phone's WebView (no WebGL 1 or 2), so three.js can't draw.") }
+            }
+        }
+        com.blaze.assistant.agent.Designs.rootOverride = null
+    }
+
     // v0.21.0: the visible pointer over another app, paused by the user (bar), with a swipe path and a ripple.
     @Test fun pointer() = shot("34-pointer") {
         val c = LocalBlaze.current
