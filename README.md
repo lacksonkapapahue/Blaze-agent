@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.23.2 (versionCode 67) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.23.4 (versionCode 69) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -54,6 +54,9 @@ Blaze always uses its views: flashcards and quizzes go into a **Learn** deck, pa
 
 ## Design
 Design is for anything visual or interactive, like Blaze Desktop's Design tab: 3D scenes and models (three.js with orbit controls, built from a parts list so you can say "show the engine" or "make it taller"), 2D art, sites, UI mockups, diagrams, charts, posters, slides, floor plans and product mockups. The `design` tool (`agent/Designs.kt`) writes `~/designs/<name>/index.html`, keeps the current design and its last 10 versions (undo), and opens the Design view; short follow-on edits change the same design. three.js is bundled in the APK, so 3D works offline. Designs load from a private https origin inside the app (`ui/DesignServe.kt`), so the page and three.js are same-origin; on phones whose WebView has WebGL 2 turned off (like the Galaxy A12's PowerVR GPU) Blaze switches to three.js r162 on WebGL 1, and if WebGL is off altogether it draws the parts natively (drag to turn, pinch to zoom) with the real error and Retry, so a 3D design always shows something. The last render error is kept in `~/designs/.last_error.txt` for Blaze to read.
+
+## Auto (free routing)
+Settings › Brains › Auto spreads turns across every free model your providers offer, not one default per provider. Each provider's model list (OpenAI-compatible `/models`, Gemini's models API, OpenRouter's `:free` / zero-price models, Pollinations' public list) is cached in `filesDir/model_catalog.json` for 24 h and refreshed in the background; only chat-capable text models are kept, tool support is read from the API or a known list, and the curated defaults lead each provider. Providers take turns, each offering its next untried model; a model that failed or hit a limit is remembered in `filesDir/model_state.json` and isn't tried again until its cooldown passes (24 h for a retired model), and tool turns use tool-capable models only. When everything is cooling Auto waits once (≤ 25 s), then says when the next model frees up. The page shows per provider how many models are available and cooling, with **Refresh models**; the chain (provider order and starting model) is still yours to edit. Code: `agent/FreeRouter.kt`, `agent/ProviderCatalog.kt`, `agent/ModelMemory.kt`.
 
 ## Student pack
 Settings › Learn (or `/learn`): flashcards with spaced repetition, Google Classroom (switch on, then reconnect Google once) and low-data mode. Skills: study-planner, tutor, lecture-notes, essay-coach, group-project, classroom-sync.

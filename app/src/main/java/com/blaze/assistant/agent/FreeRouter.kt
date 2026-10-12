@@ -6,12 +6,19 @@ import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
- * "Auto (free routing)": spreads turns across the free tiers the user has keys for, the way
- * OmniRoute's fill-first combos do. Uses the first healthy model in the chain; on a rate limit,
- * server error, timeout or a model that can't use tools it cools that entry down and moves on.
- * Pollinations (keyless) is the last resort, for plain chat only.
+ * "Auto (free routing)": spreads turns across the free tiers the user has keys for.
+ *
+ * v0.23.4: every chat model each provider offers takes part ([ProviderCatalog]), not one default per
+ * provider. Providers take turns (round-robin), each offering its next untried model; a model that
+ * failed or hit a limit is remembered ([ModelMemory]) and not tried again until its cooldown passes,
+ * and hard failures go to the back of their provider's queue. The tried set resets every turn;
+ * cooldowns persist. Tool turns use tool-capable models only. When everything is cooling Auto waits
+ * once (≤ 25 s), then says when the next model frees up. Pollinations (keyless) is the last resort,
+ * for plain chat only.
  */
 object FreeRouter {
 
@@ -21,8 +28,6 @@ object FreeRouter {
     private val health = ConcurrentHashMap<String, Health>()
     private val _status = MutableStateFlow<Map<String, Health>>(emptyMap())
     val status: StateFlow<Map<String, Health>> = _status
-
-    private fun keyOf(t: LlmClient.Target) = t.pid + "|" + t.model
 
     // ---- Smart OpenRouter free pick ----
     // "openrouter/free" hands each turn to a random free model, sometimes a tiny coding model that
@@ -98,131 +103,219 @@ object FreeRouter {
     /** One-tap "free stack": every free-tier provider with a key, in the default order. */
     fun presetFreeStack() { Settings.freeChain = ""; Settings.setStr("free_chain_removed", ""); save(entries()) }
 
-    private fun chain(needTools: Boolean): List<LlmClient.Target> {
-        val now = System.currentTimeMillis()
-        val ts = entries().map { (pid, model) ->
-            // A tiny or coding-only OpenRouter model gets swapped for today's best free pick.
-            val m = if (pid == "openrouter" && (model == "openrouter/free" || weak.containsMatchIn(model))) openRouterPicks().firstOrNull() ?: model else model
-            LlmClient.target(pid, m) }.filter { it.key.isNotBlank() && it.model.isNotBlank() }
-        // Fill-first: keep the user's order, but skip cooled-down entries and push flaky ones back.
-        val (ready, cooling) = ts.partition { (health[keyOf(it)]?.coolUntil ?: 0) <= now }
-        var usable = ready.filterNot { needTools && health[keyOf(it)]?.noTools == true }
-            .sortedBy { (health[keyOf(it)]?.fails ?: 0).coerceAtMost(3) }
-        // Speed plan step 9: among equally healthy models, the one that has been fastest goes first
-        // (an untried model counts as fast so it gets measured). Groq leads short chat turns.
-        if (Settings.bool("fastest_first", true)) {
-            usable = usable.sortedWith(compareBy<LlmClient.Target> { (health[keyOf(it)]?.fails ?: 0).coerceAtMost(3) }
-                .thenBy { health[keyOf(it)]?.avgMs ?: 0L })
-            if (LlmClient.quickTurn) usable = usable.sortedBy { if (it.pid == "groq") 0 else 1 }
+    // ---------------- v0.23.4: every model per provider ----------------
+
+    /** At most this many models are called in one turn (cooling ones are skipped for free). */
+    const val MAX_TRIES = 10
+    /** A turn stops trying new models after this long (not counting the one short wait). */
+    const val TURN_BUDGET_MS = 150_000L
+    /** Auto waits quietly once for a model that frees up within this long. */
+    const val WAIT_MAX_MS = 25_000L
+
+    /** The chain's providers, in order, each with its full model list (the user's picks first). */
+    fun pools(): List<Pair<String, List<RoutePlan.Cand>>> {
+        val e = entries()
+        return e.map { it.first }.distinct().map { pid ->
+            val listed = ProviderCatalog.listing(pid)?.models.orEmpty()
+            // "openrouter/free" hands each turn to a random free model and tiny coding models can't run Blaze:
+            // the catalogue orders OpenRouter's free models instead (they stay in the list, further down).
+            val pinned = e.filter { it.first == pid }.map { it.second }
+                .filter { it.isNotBlank() && !(pid == "openrouter" && (it == "openrouter/free" || weak.containsMatchIn(it))) }
+                // A built-in default the provider no longer lists (e.g. a retired NIM model) is dropped, not pinned.
+                .filter { m -> listed.isEmpty() || listed.any { it.id == m } || !isDefault(pid, m) }
+            pid to ProviderCatalog.models(pid, pinned).map { RoutePlan.Cand(pid, it.id, it.tools || it.id in pinned) }
         }
-        // Chat lane: small fast models first, so the strong ones keep their quota for tool work.
-        // Tool lane: strong models first.
-        if (LlmClient.liteTurn) usable = usable.sortedBy { if (isLight(it)) 0 else 1 }
-        else usable = usable.sortedBy { if (isLight(it) && usable.any { o -> !isLight(o) }) 1 else 0 }
-        val out = (usable + cooling.sortedBy { health[keyOf(it)]?.coolUntil ?: 0 }).toMutableList()
-        if (!needTools || out.isEmpty()) out += LlmClient.target(Providers.keyless.id)
-        return out
     }
 
-    private val light = Regex("(?i)(flash|mini|small|8b|9b|12b|scout|instant|lite|haiku|fast)")
-    private fun isLight(t: LlmClient.Target) = t.pid == "groq" || t.pid == "cerebras" || light.containsMatchIn(t.model)
+    private fun isDefault(pid: String, m: String) =
+        m == Providers.freeDefault[pid] || m == Providers.byId(pid).defaultModel || m in ProviderCatalog.defaults(pid)
+
+    private fun keyOf(c: RoutePlan.Cand) = ModelMemory.key(c.pid, c.model)
+    private fun nameOf(pid: String) = if (pid == Providers.keyless.id) "Keyless" else Providers.byId(pid).name.substringBefore(" (")
 
     /** The first couple of models a turn would try, for connection pre-warming. */
-    fun warmTargets(): List<LlmClient.Target> = try { chain(true).take(2) } catch (_: Exception) { emptyList() }
+    fun warmTargets(): List<LlmClient.Target> = try {
+        RoutePlan.plan(pools(), true, emptySet()).ready.take(2).map { LlmClient.target(it.pid, it.model) }
+    } catch (_: Exception) { emptyList() }
 
     private fun mark(t: LlmClient.Target, f: (Health) -> Health) {
-        health[keyOf(t)] = f(health[keyOf(t)] ?: Health()); _status.value = HashMap(health)
+        val k = t.pid + "|" + t.model
+        health[k] = f(health[k] ?: Health()); _status.value = HashMap(health)
     }
 
     suspend fun complete(messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)?,
-                         onThink: ((String) -> Unit)?, lane: LlmClient.Lane, waited: Boolean = false): JSONObject {
+                         onThink: ((String) -> Unit)?, lane: LlmClient.Lane, waited: Boolean = false,
+                         carried: Set<String> = emptySet()): JSONObject {
         val needTools = tools != null && tools.length() > 0
-        val list = chain(needTools)
-        if (list.isEmpty()) throw LlmClient.LlmException("Auto (free) has nothing to route to yet. Add a free key (Gemini, Groq, OpenRouter…) in Settings → AI.")
+        var pools = pools().filter { it.second.isNotEmpty() }
         // Token meter: what this request costs, so a model without room is skipped before sending.
         val tokens = Budget.estimate(messages.toString().length + (tools?.toString()?.length ?: 0))
-        var lastErr: Exception? = null
+        val tried = carried.toMutableSet()          // this turn only; cooldowns persist in ModelMemory
+        val hard = carried.toMutableSet()           // tried and failed for a reason waiting won't fix
+        val skipPids = mutableSetOf<String>()       // unreachable / rejected key / provider-wide cap
+        val offline = mutableSetOf<String>()
         val failures = mutableListOf<String>()
         val resting = mutableListOf<Triple<String, Long, String>>()   // name, ms until ready, why
-        var allTooLarge = true
-        var tried = 0
-        for (t in list) {
-            val keyless = t.pid == Providers.keyless.id
-            val name = if (keyless) "Keyless" else Providers.byId(t.pid).name.substringBefore(" (")
-            val blocked = if (keyless) null else Budget.wait(keyOf(t), tokens)
+        var tooLarge = 0; var otherErrors = 0
+        var attempts = 0
+        var fetchedMissing = false
+        var lastErr: Exception? = null
+        val started = System.currentTimeMillis()
+        val firstPid = if (LlmClient.quickTurn && Settings.bool("fastest_first", true)) "groq" else null
+
+        while (attempts < MAX_TRIES && System.currentTimeMillis() - started < TURN_BUDGET_MS) {
+            val plan = RoutePlan.plan(pools.filter { it.first !in skipPids }, needTools, tried,
+                lite = LlmClient.liteTurn, firstPid = firstPid)
+            val c = plan.ready.firstOrNull()
+            if (c == null) {
+                // Out of candidates: if a provider's list was never fetched (first run, was offline), fetch it now once.
+                val missing = pools.map { it.first }.filter { it !in skipPids && ProviderCatalog.listing(it)?.models.isNullOrEmpty() }
+                if (!fetchedMissing && missing.isNotEmpty()) {
+                    fetchedMissing = true
+                    withContext(Dispatchers.IO) { missing.forEach { ProviderCatalog.refresh(it) } }
+                    pools = pools().filter { it.second.isNotEmpty() }
+                    continue
+                }
+                break
+            }
+            val k = keyOf(c)
+            tried += k
+            val t = LlmClient.target(c.pid, c.model)
+            if (t.key.isBlank() || t.base.isBlank()) { hard += k; continue }
+            val name = nameOf(c.pid)
+            val blocked = Budget.wait(k, tokens)
             if (blocked != null) {
-                resting += Triple(name, blocked.first, blocked.second)
-                allTooLarge = blocked.second.startsWith("request bigger") && allTooLarge
+                resting += Triple("$name · ${c.model}", blocked.first, blocked.second)
+                if (blocked.second.startsWith("request bigger")) tooLarge++
                 continue
             }
-            tried++
-            val started = System.currentTimeMillis()
+            attempts++
+            val t0 = System.currentTimeMillis()
             try {
-                if (!keyless) Budget.spend(keyOf(t), tokens)
-                val msg = LlmClient.call(t, messages, if (keyless) null else tools, onText,
-                    if (lane == LlmClient.Lane.MAIN) onThink else null, false,
-                    timeoutMs = if (list.size > 1) 45_000 else 120_000)
-                if (!keyless) {
-                    Budget.headers(keyOf(t), LlmClient.lastCallHeaders)
-                    LlmClient.lastUsage?.optInt("completion_tokens")?.takeIf { it > 0 }?.let { Budget.spend(keyOf(t), it) }
-                }
-                val ms = System.currentTimeMillis() - started
+                Budget.spend(k, tokens)
+                val msg = LlmClient.call(t, messages, tools, onText, if (lane == LlmClient.Lane.MAIN) onThink else null, false, timeoutMs = 45_000)
+                Budget.headers(k, LlmClient.lastCallHeaders)
+                LlmClient.lastUsage?.optInt("completion_tokens")?.takeIf { it > 0 }?.let { Budget.spend(k, it) }
+                val ms = System.currentTimeMillis() - t0
+                ModelMemory.ok(c.pid, c.model); ModelMemory.providerOk(c.pid)
                 mark(t) { h -> h.copy(fails = 0, okCount = h.okCount + 1, coolUntil = 0, lastError = "",
                     avgMs = if (h.avgMs == 0L) ms else (h.avgMs * 3 + ms) / 4) }
-                LlmClient.lastRoute = "$name · ${t.model}"
+                LlmClient.lastRoute = "$name · ${c.model}"
                 return msg
             } catch (e: CancellationException) { throw e
             } catch (e: Exception) {
                 lastErr = e
                 val code = (e as? LlmClient.LlmException)?.code ?: 0
                 val text = e.message.orEmpty()
-                if (!keyless) Budget.headers(keyOf(t), LlmClient.lastCallHeaders)
-                if (!LlmClient.tooLarge(e) && !keyless) allTooLarge = false
-                if (LlmClient.tooLarge(e)) { mark(t) { h -> h.copy(lastError = text.take(120)) }; failures += "$name: request too big for its plan"; continue }
-                if (code == 429 || text.contains("quota", true) || text.contains("rate limit", true)) {
-                    Budget.limited(keyOf(t), text, (e as? LlmClient.LlmException)?.retryAfterSec ?: 0)
-                    Budget.wait(keyOf(t), 0)?.let { (ms, why) -> resting += Triple(name, ms, why) }
-                    mark(t) { h -> h.copy(fails = h.fails + 1, coolUntil = System.currentTimeMillis() + (Budget.wait(keyOf(t), 0)?.first ?: 60_000L), lastError = text.take(120)) }
-                    continue
+                Budget.headers(k, LlmClient.lastCallHeaders)
+                val short = text.removePrefix("${Providers.byId(c.pid).name} · ${c.model}: ").take(110)
+                val rateLike = code == 429 || code == 402 || Regex("(?i)rate.?limit|quota|resource_exhausted|too many requests").containsMatchIn(text)
+                if (rateLike) Budget.limited(k, text, (e as? LlmClient.LlmException)?.retryAfterSec ?: 0)
+                val hint = if (rateLike) Budget.wait(k, 0)?.first else null
+                val o = ModelMemory.classify(c.pid, code, text, hint)
+                mark(t) { h -> h.copy(fails = h.fails + 1, coolUntil = System.currentTimeMillis() + o.coolMs, lastError = text.take(120)) }
+                when (o.kind) {
+                    ModelMemory.Kind.TOO_LARGE -> { tooLarge++; failures += "$name: request too big for its plan" }
+                    ModelMemory.Kind.OFFLINE -> {
+                        otherErrors++; offline += c.pid; skipPids += c.pid
+                        if (offline.size >= 2) throw LlmClient.LlmException(
+                            "I can't reach any AI service right now. Check your data or Wi-Fi, then ask again.", 0)
+                    }
+                    ModelMemory.Kind.RATE_LIMIT -> {
+                        ModelMemory.limited(c.pid, c.model, o.coolMs, Budget.wait(k, 0)?.second ?: "rate limit")
+                        resting += Triple("$name · ${c.model}", o.coolMs, "rate limit")
+                    }
+                    ModelMemory.Kind.PROVIDER_LIMIT -> {
+                        ModelMemory.providerLimited(c.pid, o.coolMs, "provider limit: $short")
+                        skipPids += c.pid
+                        resting += Triple(name, o.coolMs, "daily limit")
+                    }
+                    ModelMemory.Kind.KEY -> {
+                        otherErrors++; hard += k; skipPids += c.pid
+                        ModelMemory.providerLimited(c.pid, o.coolMs, "key rejected")
+                        failures += "$name: key rejected"
+                    }
+                    ModelMemory.Kind.NO_TOOLS -> { otherErrors++; hard += k; ModelMemory.cantUseTools(c.pid, c.model) }
+                    ModelMemory.Kind.GONE -> { otherErrors++; hard += k; ModelMemory.failed(c.pid, c.model, o.coolMs, "not available: $short") }
+                    else -> {
+                        otherErrors++; hard += k
+                        ModelMemory.failed(c.pid, c.model, o.coolMs, short)
+                        failures += "$name · ${c.model}: $short"
+                    }
                 }
-                failures += "$name: " + text.removePrefix("$name · ${t.model}: ").removePrefix("${Providers.byId(t.pid).name} · ${t.model}: ").take(110)
-                val cool = when {
-                    code == 401 || code == 403 || code == 404 -> 30 * 60_000L
-                    code >= 500 || code == 0 -> 20_000L
-                    else -> 10_000L
-                }
-                mark(t) { h -> h.copy(fails = h.fails + 1, coolUntil = System.currentTimeMillis() + cool,
-                    lastError = text.take(120), noTools = h.noTools || (code == 400 && (text.contains("tool", true) || text.contains("function", true)))) }
             }
         }
+
         // Every model said the request was too big: trim the conversation once and go round again.
-        if (allTooLarge && (lastErr != null || resting.isNotEmpty())) {
+        if (tooLarge > 0 && otherErrors == 0) {
             val small = LlmClient.shrink(messages, 6)
-            if (small.length() < messages.length()) return complete(small, tools, onText, onThink, lane, waited)
+            if (small.length() < messages.length()) return complete(small, tools, onText, onThink, lane, waited, hard)
         }
-        // Everyone is resting but one is back within ~25 s: wait quietly once instead of failing.
-        val soonest = resting.minByOrNull { it.second }
-        if (!waited && soonest != null && soonest.second <= 25_000 && failures.isEmpty()) {
-            restingNote = "${soonest.first} is cooling down, back in ${(soonest.second / 1000).coerceAtLeast(1)}s"
-            kotlinx.coroutines.delay(soonest.second + 300)
-            restingNote = ""
-            return complete(messages, tools, onText, onThink, lane, true)
+
+        // Keyless last resort: plain chat turns, or any turn when no key is set at all.
+        if (!needTools || pools.isEmpty()) {
+            for (m in ProviderCatalog.models(Providers.keyless.id).map { it.id }.take(2)) {
+                try {
+                    val msg = LlmClient.call(LlmClient.target(Providers.keyless.id, m), messages, null, onText, null, false, timeoutMs = 45_000)
+                    LlmClient.lastRoute = "Keyless · $m"
+                    return msg
+                } catch (e: CancellationException) { throw e
+                } catch (e: Exception) { lastErr = e }
+            }
         }
-        val code0 = (lastErr as? LlmClient.LlmException)?.code ?: if (resting.isNotEmpty()) 429 else 0
+        if (pools.isEmpty()) throw LlmClient.LlmException("Auto (free) has nothing to route to yet. Add a free key (Gemini, Groq, OpenRouter…) in Settings → AI.")
+
+        // Nothing ready: wait quietly once for the soonest model that frees up within ~25 s.
+        val now = System.currentTimeMillis()
+        val cool = RoutePlan.plan(pools.filter { it.first !in skipPids || ModelMemory.providerCoolingUntil(it.first) > now }, needTools, hard).cooling
+        val nextCool = cool.firstOrNull()?.let { (c, until) -> Triple("${nameOf(c.pid)} · ${c.model}", until - now, "") }
+        val soonest = (resting.filter { it.second > 0 } + listOfNotNull(nextCool)).minByOrNull { it.second }
+        val leftReady = RoutePlan.plan(pools.filter { it.first !in skipPids }, needTools, tried).ready.isNotEmpty()
+        if (!waited && !leftReady && soonest != null && soonest.second <= WAIT_MAX_MS) {
+            restingNote = "${soonest.first.substringBefore(" · ")} is cooling down, back in ${(soonest.second / 1000).coerceAtLeast(1)}s"
+            try { kotlinx.coroutines.delay(soonest.second + 300) } finally { restingNote = "" }
+            return complete(messages, tools, onText, onThink, lane, true, hard)
+        }
+        val code0 = if (soonest != null && failures.isEmpty()) 429 else (lastErr as? LlmClient.LlmException)?.code ?: 0
         val ra = ((soonest?.second ?: 0L) / 1000).toInt()
-        val parts = resting.distinctBy { it.first }.sortedBy { it.second }.map { "${it.first} back in ${fmt(it.second)} (${it.third})" } + failures.distinct()
-        throw LlmClient.LlmException(
-            (if (failures.isEmpty()) "All your free models are resting right now:\n" else "No model in your Auto chain could answer:\n") +
-                parts.take(6).joinToString("\n") { "• $it" } +
-                (if (failures.isEmpty()) "\nTry again ${if (soonest != null) "in ${fmt(soonest.second)}" else "soon"}, or add another free key (NVIDIA, OpenRouter, Cerebras, Mistral, GitHub) in Settings → AI so I can switch."
-                 else "\nFix the one with a key problem in Settings → AI, or try again in a minute."),
-            code0, ra)
+        lastFailures = (resting.distinctBy { it.first }.sortedBy { it.second }.map { "${it.first} back in ${fmt(it.second)} (${it.third})" } + failures.distinct()).take(12)
+        throw LlmClient.LlmException(friendly(attempts, leftReady, soonest?.let { it.first to it.second }, failures.isNotEmpty()), code0, ra)
+    }
+
+    /** One provider's line in Settings › Auto: how many models it has, how many are cooling. */
+    data class PoolSummary(val pid: String, val name: String, val models: Int, val cooling: Int, val toolModels: Int,
+                           val fetchedAt: Long, val error: String, val nextFreeMs: Long)
+
+    /** Per provider in the chain (and the keyless last resort): model counts and cooldowns. */
+    fun summary(now: Long = System.currentTimeMillis()): List<PoolSummary> {
+        val ps = try { pools() } catch (_: Exception) { emptyList() }
+        val keyless = Providers.keyless.id to ProviderCatalog.models(Providers.keyless.id).map { RoutePlan.Cand(Providers.keyless.id, it.id, false) }
+        return (ps + keyless).map { (pid, list) ->
+            val ids = list.map { it.model }
+            val (_, cool) = ModelMemory.counts(pid, ids, now)
+            val l = ProviderCatalog.listing(pid)
+            val soon = ModelMemory.soonest(pid, ids, now)
+            PoolSummary(pid, nameOf(pid), ids.size, cool, list.count { it.tools && !ModelMemory.noTools(pid, it.model, now) },
+                l?.at ?: 0, l?.error.orEmpty(), if (soon > 0) soon - now else 0)
+        }
+    }
+
+    /** What the last failed Auto turn ran into, model by model (diagnostics). */
+    @Volatile var lastFailures: List<String> = emptyList()
+
+    /** The message Luke sees when no free model could answer: short, plain, says when the next one frees up. */
+    fun friendly(attempts: Int, moreLeft: Boolean, soonest: Pair<String, Long>?, hadErrors: Boolean): String = when {
+        moreLeft -> "I tried $attempts free models and none answered this time. Say \u201ctry again\u201d and I'll move on to the next ones."
+        soonest != null -> "All your free models are busy right now. The next one (${soonest.first.take(48)}) frees up in ${fmt(soonest.second)}. " +
+            "Ask again then, or add another free key in Settings \u2192 AI."
+        hadErrors -> "None of your free models could answer just now. Say \u201ctry again\u201d in a minute, or check your keys in Settings \u2192 AI."
+        else -> "All your free models are resting right now. Ask again in a minute, or add another free key in Settings \u2192 AI."
     }
 
     /** Shown while Auto waits for a cooling model (empty otherwise). */
     @Volatile var restingNote: String = ""
 
-    private fun fmt(ms: Long): String = when {
+    fun fmt(ms: Long): String = when {
         ms >= 3600_000 -> "${ms / 3600_000}h ${(ms % 3600_000) / 60_000}m"
         ms >= 90_000 -> "${(ms + 59_999) / 60_000} min"
         else -> "${(ms + 999) / 1000}s"
