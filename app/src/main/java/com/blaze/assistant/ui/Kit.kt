@@ -131,13 +131,14 @@ enum class Btn { ACCENT, INK, LINE, GHOST }
 @Composable
 fun KitButton(text: String, kind: Btn = Btn.LINE, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    val bg = when (kind) { Btn.ACCENT -> c.accent; Btn.INK -> c.ink; Btn.LINE -> c.raised; Btn.GHOST -> Color.Transparent }
-    val fg = when (kind) { Btn.ACCENT -> c.onAccent; Btn.INK -> c.paper; Btn.LINE -> c.ink; Btn.GHOST -> c.sub }
+    // Disabled: Desktop's .btn:disabled reads as a quiet hairline button, never a dimmed accent block.
+    val bg = if (!enabled) c.faint else when (kind) { Btn.ACCENT -> c.accent; Btn.INK -> c.ink; Btn.LINE -> c.raised; Btn.GHOST -> Color.Transparent }
+    val fg = if (!enabled) c.weak else when (kind) { Btn.ACCENT -> c.onAccent; Btn.INK -> c.paper; Btn.LINE -> c.ink; Btn.GHOST -> c.sub }
     Box(modifier.height(36.dp).widthIn(min = 64.dp).background(bg).let { if (kind == Btn.LINE) it.hairline(c.hair2) else it }
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center) {
         Text(text, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp,
-            color = if (enabled) fg else fg.copy(alpha = 0.45f)))
+            color = fg))
     }
 }
 

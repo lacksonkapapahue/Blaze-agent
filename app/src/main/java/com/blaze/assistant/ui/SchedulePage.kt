@@ -46,10 +46,9 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
     var days by remember { mutableIntStateOf(31) }
     val at = now ?: System.currentTimeMillis()
     val fmt = remember { java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.getDefault()) }
+    val short = remember { java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()) }
 
-    PageHead("Schedule", "Routines", "Things Blaze does on a schedule, even when the app is closed. Or just ask: \u201cevery weekday at 7, brief me on my calendar\u201d.") {
-        KitButton(if (adding) "Cancel" else "+ New", if (adding) Btn.GHOST else Btn.INK) { adding = !adding }
-    }
+    PageHead("Schedule", "Routines", "Things Blaze does on a schedule, even when the app is closed. Or just ask: \u201cevery weekday at 7, brief me on my calendar\u201d.")
     if (adding) {
         Column(Modifier.fillMaxWidth().background(c.raised).hairline(c.accent).padding(14.dp)) {
             Label("New routine", size = 10.sp, color = c.accent, modifier = Modifier.padding(bottom = 12.dp))
@@ -81,14 +80,16 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
         Spacer(Modifier.height(18.dp))
     }
     if (list.isEmpty()) {
-        if (!adding) Rows { EmptyState("Nothing scheduled yet", "Ask in chat to schedule something, or tap + New.", action = "+ New routine") { adding = true } }
+        if (!adding) Rows { EmptyState("Nothing scheduled yet", "Ask in chat, or add one here.", action = "+ New routine") { adding = true } }
         return
     }
     val onCount = list.count { it.enabled }
-    GroupHead("Scheduled \u00b7 %02d".format(list.size), right = { Label("$onCount on", size = 9.sp, color = c.weak) })
+    GroupHead("Scheduled \u00b7 %02d \u00b7 $onCount on".format(list.size)) {
+        if (!adding) KitButton("+ New", Btn.INK) { adding = true }
+    }
     Rows {
         list.forEachIndexed { i, r ->
-            val whenTxt = if (r.everyMinutes > 0) r.daysLabel() else if (r.at > 0) r.daysLabel() + " " + r.timeLabel() else r.timeLabel()
+            val whenTxt = if (r.everyMinutes > 0) r.daysLabel() else if (r.at > 0) short.format(java.util.Date(r.at)) else r.timeLabel()
             val sub = when {
                 !r.enabled -> "Off" + " \u00b7 " + (if (r.isCommand) "$ " + r.command else r.prompt)
                 else -> "Next " + fmt.format(java.util.Date(runCatching { Routines.next(r, at) }.getOrDefault(at))) +

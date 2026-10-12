@@ -67,7 +67,7 @@ fun SkillLibraryPage(rows0: List<SkillLibrary.Row>? = null, open0: String = "", 
                     if (r.installed) KitSwitch(r.on) { change { SkillLibrary.setOn(r.name, !r.on) } }
                 }
                 if (open == r.name) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
-                    if (r.description.isNotBlank()) Text(r.description, modifier = Modifier.padding(bottom = 10.dp),
+                    if (r.description.isNotBlank() && r.description.trim() != r.description.lineSequence().firstOrNull().orEmpty().trim()) Text(r.description, modifier = Modifier.padding(bottom = 10.dp),
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, lineHeight = 18.sp, color = c.body))
                     Label(when { !r.installed -> "Deleted \u00b7 bundled"; r.edited -> "Bundled \u00b7 edited by you"; r.bundled -> "Bundled"; else -> "Yours" },
                         size = 9.sp, color = c.weak, modifier = Modifier.padding(bottom = 10.dp))

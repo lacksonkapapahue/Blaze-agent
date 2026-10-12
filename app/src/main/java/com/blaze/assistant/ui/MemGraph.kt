@@ -41,6 +41,7 @@ class MemGraph(mems: List<Mind.Mem>) {
     init {
         edges.forEach { nodes[it.a].deg++; nodes[it.b].deg++ }
         // Category anchors on a ring sized by how many nodes there are; big categories get more room.
+        // Taller than wide: a phone is portrait, so the graph fills the stage instead of a strip across it.
         val n = nodes.size
         val r = if (cats.size <= 1) 0f else 70f + sqrt(n.toFloat()) * 24f
         val counts = cats.map { k -> nodes.count { cats[it.cat] == k } }
@@ -48,7 +49,7 @@ class MemGraph(mems: List<Mind.Mem>) {
         var acc = -Math.PI / 2
         anchors = counts.map { cnt ->
             val span = sqrt(cnt.toDouble()) / total * Math.PI * 2; val a = acc + span / 2; acc += span
-            Anchor((cos(a) * r).toFloat(), (sin(a) * r * 0.85).toFloat())
+            Anchor((cos(a) * r * 0.75).toFloat(), (sin(a) * r * 1.35).toFloat())
         }.ifEmpty { listOf(Anchor(0f, 0f)) }
         // Golden-angle spiral around each anchor: a stable start, so the same memories always land the same way.
         nodes.forEachIndexed { k, nd ->

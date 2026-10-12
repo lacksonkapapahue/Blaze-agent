@@ -130,7 +130,7 @@ private fun ForgetAll(n: Int) {
     var armed by remember { mutableStateOf(false) }
     LaunchedEffect(armed) { if (armed) { delay(4000); armed = false } }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Blaze also keeps a copy in your backups, so exporting keeps every memory.", modifier = Modifier.weight(1f),
+        Text("Backups (Settings \u203a Backup) include every memory.", modifier = Modifier.weight(1f),
             style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 17.sp, color = c.sub))
         Spacer(Modifier.width(10.dp))
         KitButton(if (armed) "Forget all $n?" else "Forget all", if (armed) Btn.INK else Btn.GHOST) {
@@ -168,7 +168,7 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
     fun fit() {
         if (size.width == 0) return
         val b = graph.bounds()
-        val pad = 56f
+        val pad = 36f
         val w = size.width / dens; val h = size.height / dens
         val z = min(2.2f, max(0.15f, min((w - pad * 2) / (b[2] - b[0]).coerceAtLeast(1f), (h - pad * 2 - 24f) / (b[3] - b[1]).coerceAtLeast(1f))))
         cam.x = (b[0] + b[2]) / 2; cam.y = (b[1] + b[3]) / 2 + 6f / z; cam.z = z; camTick++
@@ -290,7 +290,7 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
                 if (r <= 0f) continue
                 val X = sx(n.x); val Y = sy(n.y)
                 if (X < -40 || Y < -40 || X > w + 40 || Y > h + 40) continue
-                var s = max(2.5f * d, n.size * z) * (0.4f + 0.6f * r)
+                var s = max(4f * d, n.size * z) * (0.4f + 0.6f * r)
                 val b = 1f + sin(t / 1300f + n.i * 1.7f) * 0.07f
                 val dim = dimmed(n.i)
                 val hot = n.i == selIndex || (matchIdx != null && n.i in matchIdx)
@@ -325,13 +325,14 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
                 if (count >= 40) break
                 val txt = n.label.uppercase().let { if (it.length > 22) it.take(21) + "\u2026" else it }
                 val lay = layout(txt, labelStyle)
-                val X = sx(n.x) - lay.size.width / 2f; val Y = sy(n.y) + max(2.5f * d, n.size * z) / 2f + 5f * d
+                val X = sx(n.x) - lay.size.width / 2f; val Y = sy(n.y) + max(4f * d, n.size * z) / 2f + 5f * d
                 if (X + lay.size.width < 0 || X > w || Y > h || Y < 0) continue
                 val rect = floatArrayOf(X - 4f, Y - 1f, X + lay.size.width + 4f, Y + lay.size.height + 1f)
                 val forced = n.i == selIndex
                 if (!forced && placed.any { p -> rect[0] < p[2] && rect[2] > p[0] && rect[1] < p[3] && rect[3] > p[1] }) continue
                 placed += rect; count++
-                if (forced) drawRect(c.paper.copy(alpha = 0.92f), Offset(rect[0], rect[1]), Size(rect[2] - rect[0], rect[3] - rect[1]))
+                // A paper backing keeps labels readable where they cross links and dots.
+                drawRect(c.paper.copy(alpha = if (forced) 0.95f else 0.82f * reveal), Offset(rect[0], rect[1]), Size(rect[2] - rect[0], rect[3] - rect[1]))
                 drawText(lay, color = if (forced) c.accent else c.ink, topLeft = Offset(X, Y), alpha = reveal * (if (forced) 1f else if (dimmed(n.i)) 0.25f else 0.78f))
             }
         }
@@ -447,12 +448,17 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
             // Meta, as Desktop's two-column rows.
             Column(Modifier.fillMaxWidth().padding(end = 8.dp).hairlineTop(c.hair)) {
                 MetaRow("Kind") {
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Mind.KINDS.forEach { k ->
-                            val on = k == kind
-                            Box(Modifier.background(if (on) c.accentSoft else androidx.compose.ui.graphics.Color.Transparent).clickable { kind = k; note = "" }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)) {
-                                Text(k.uppercase(), style = TextStyle(fontFamily = Type.Mono, fontSize = 9.5.sp, letterSpacing = 0.08.em, color = if (on) c.accent else c.sub))
+                    // Six kinds in two rows of three, so none is cut off on a 360dp phone.
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Mind.KINDS.chunked(3).forEach { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                row.forEach { k ->
+                                    val on = k == kind
+                                    Box(Modifier.weight(1f).background(if (on) c.accentSoft else androidx.compose.ui.graphics.Color.Transparent).clickable { kind = k; note = "" }
+                                        .padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
+                                        Text(k.uppercase(), maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 9.sp, letterSpacing = 0.06.em, color = if (on) c.accent else c.sub))
+                                    }
+                                }
                             }
                         }
                     }
