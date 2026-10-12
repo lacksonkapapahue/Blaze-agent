@@ -15,7 +15,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -44,7 +44,7 @@ import java.io.File
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [33], qualifiers = "w360dp-h780dp-xhdpi", application = android.app.Application::class)
 class ShotsTest {
-    @get:Rule val rule = createComposeRule()
+    @get:Rule val rule = createAndroidComposeRule<androidx.activity.ComponentActivity>()
 
     @Before fun setUp() {
         assumeTrue(System.getProperty("blaze.shots") == "1")
@@ -59,7 +59,10 @@ class ShotsTest {
             }
         }
         rule.mainClock.advanceTimeBy(1200)
-        val bmp = rule.onRoot().captureToImage().asAndroidBitmap()
+        // Draw the window ourselves: captureToImage waits for idle, which never comes with live animations.
+        val root = rule.activity.window.decorView
+        val bmp = Bitmap.createBitmap(root.width.coerceAtLeast(1), root.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        root.draw(android.graphics.Canvas(bmp))
         val dir = File(System.getProperty("blaze.shotsDir") ?: "build/shots").apply { mkdirs() }
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
