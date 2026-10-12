@@ -28,6 +28,9 @@
 - **Notes:** secure values live in `SecureInput` slots (memory only) and `Vault`; the model only handles `{{secret:name}}`. `BrowserEngine.fillSecret/submitSecret` inject; `READ_JS` hides password and `data-bz-secret` values; tool output is scrubbed.
 - **Left (needs a real phone):** confirm on the Galaxy A12 that offscreen tabs lay out and read correctly, and that the banner no longer appears after switching browser ↔ chat (check Settings › Device › crash report for "Phone control: … ->" and "Browser renderer" lines if it does).
 
-## pointer (v0.21.0, versionCode 63)
-- **What:** visible pointer for phone control (`phone/Pointer.kt`, hooks in `BlazeAccessibilityService.aimAt/gestureTap/swipe` and `Agent.Session.pointerGate`), Settings toggle `show_pointer` (on by default), `ui/PointerPreview.kt` for screenshots. See CHANGELOG.md.
-- **Watch on a real phone:** whether ACTION_OUTSIDE from other apps reaches the pointer window on One UI (it should for accessibility overlays); if touches elsewhere don't pause, touching the pointer itself still does.
+## pointer (v0.21.0, versionCode 63) — done
+- **Merged:** PR #24, branch `pointer` head 09198cb, squash merge 0245eff on main; release https://github.com/lacksonkapapahue/Blaze-agent/releases/tag/v0.21.0 (Blaze-v0.21.0.apk). CI green, screenshot `34-pointer` reviewed.
+- **What:** visible pointer for phone control (`phone/Pointer.kt`, hooks in `BlazeAccessibilityService.aimAt/gestureTap/swipe` and `Agent.Session.pointerGate`), Settings › Phone control › Show the pointer (`show_pointer`, on by default), `ui/PointerPreview.kt` for screenshots, `PointerTest`.
+- **Left (needs a real phone, in order):** 1) on the Galaxy A12, check that touching elsewhere on screen pauses Blaze (ACTION_OUTSIDE reaching the accessibility overlay on One UI); touching the pointer itself always pauses; 2) check the pointer size/visibility (44dp window, ~25dp arrow) and enlarge in `Pointer.Dot` if it's hard to see; 3) optional: say "Paused" in the orb panel too.
+- **Next step:** none required; open an issue or a small PR from main if the real-phone checks above show a problem.
+- **Version note:** PR #23 (`life-logs`) still declares v0.20.0 / versionCode 62; it must bump to the next free version (v0.22.0, versionCode 64) before merging.
