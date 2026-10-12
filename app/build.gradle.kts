@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 52
-        versionName = "0.10.0"
+        versionCode = 53
+        versionName = "0.11.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -45,7 +45,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
-            keepDebugSymbols += listOf("**/libneedle.so", "**/libbusybox.so", "**/libproot.so", "**/libproot_loader.so", "**/libproot_loader32.so", "**/libtalloc.so")
+            keepDebugSymbols += listOf("**/libneedle.so", "**/libbusybox.so", "**/libproot.so", "**/libproot_loader.so", "**/libproot_loader32.so", "**/libtalloc.so", "**/libwgproxy.so")
         }
     }
     lint { checkReleaseBuilds = false; abortOnError = false }
@@ -58,6 +58,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0") // QR scan for Blaze Desktop pairing
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.webkit:webkit:1.11.0")   // browser VPN proxy, private-tab profiles, location-mask scripts
     implementation("androidx.fragment:fragment-ktx:1.8.3")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")

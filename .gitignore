@@ -6,3 +6,5 @@ local.properties
 *.iml
 .idea/
 captures/
+# Built by CI from wgproxy/ (see build.yml)
+app/src/main/jniLibs/*/libwgproxy.so

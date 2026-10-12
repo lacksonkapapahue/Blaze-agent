@@ -5,6 +5,8 @@ import android.content.Intent
 import android.graphics.Color as AColor
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.widget.Toast
 import android.view.ViewGroup
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -52,6 +54,23 @@ class BrowserActivity : ComponentActivity() {
         pending?.onReceiveValue(if (r.resultCode == Activity.RESULT_OK) WebChromeClient.FileChooserParams.parseResult(r.resultCode, r.data) else null)
         pending = null
     }
+    /** VPN configs: .conf files or a provider's .zip, several at once. */
+    private val importer = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isEmpty()) return@registerForActivityResult
+        val added = mutableListOf<String>(); val bad = mutableListOf<String>()
+        uris.forEach { u ->
+            try {
+                val name = contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null } ?: "config.conf"
+                val bytes = contentResolver.openInputStream(u)?.use { it.readBytes() } ?: ByteArray(0)
+                if (bytes.size > 5_000_000) { bad += "$name is too big to be a WireGuard config."; return@forEach }
+                val (a, b) = BrowserVpn.import(name, bytes)
+                added += a.map { "${it.flag} ${it.label}" }; bad += b
+            } catch (e: Exception) { bad += e.message ?: "Couldn't read a file." }
+        }
+        val msg = (if (added.isNotEmpty()) "Added ${added.size}: ${added.take(6).joinToString()}${if (added.size > 6) "…" else ""}." else "") +
+            (if (bad.isNotEmpty()) " Skipped ${bad.size}: ${bad.first()}" else "")
+        Toast.makeText(this, msg.trim(), Toast.LENGTH_LONG).show()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,7 +83,7 @@ class BrowserActivity : ComponentActivity() {
         }
         handle(intent)
         if (BrowserEngine.tabs.isEmpty()) BrowserEngine.newTab(this)
-        setContent { BlazeTheme { BrowserScreen(onClose = { finish() }) } }
+        setContent { BlazeTheme { BrowserScreen(onClose = { finish() }, onImport = { try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { } }) } }
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handle(intent) }
@@ -83,10 +102,10 @@ class BrowserActivity : ComponentActivity() {
     }
 }
 
-private enum class Panel { NONE, TABS, MENU, BOOKMARKS, HISTORY }
+private enum class Panel { NONE, TABS, MENU, BOOKMARKS, HISTORY, PRIVACY }
 
 @Composable
-private fun BrowserScreen(onClose: () -> Unit) {
+private fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit) {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
     val focus = LocalFocusManager.current
@@ -111,15 +130,34 @@ private fun BrowserScreen(onClose: () -> Unit) {
         return
     }
 
+    if (panel == Panel.TABS) {
+        Box(Modifier.fillMaxSize().background(if (tab?.isPrivate == true) androidx.compose.ui.graphics.Color(0xFF202124) else c.paper).systemBarsPadding()) {
+            TabGrid(startPrivate = tab?.isPrivate == true, onDone = { panel = Panel.NONE })
+        }
+        return
+    }
+
     Column(Modifier.fillMaxSize().background(c.paper).systemBarsPadding().imePadding()) {
         // Address bar
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconBtn("×") { onClose() }
             Spacer(Modifier.width(6.dp))
-            Box(Modifier.weight(1f).height(40.dp).hairline(c.hair).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-                if (bar.isEmpty()) Text("Search or type a web address", c.weak, 14)
+            // VPN / privacy: the exit country's flag while connected, ! when the kill switch is holding pages back.
+            val vpn = BrowserVpn.status
+            IconBtn(when (vpn) {
+                BrowserVpn.Status.ON -> Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty())
+                BrowserVpn.Status.CONNECTING -> "…"
+                BrowserVpn.Status.FAILED -> "!"
+                BrowserVpn.Status.OFF -> "\uD83D\uDEE1"
+            }) { panel = if (panel == Panel.PRIVACY) Panel.NONE else Panel.PRIVACY }
+            Spacer(Modifier.width(6.dp))
+            val priv = tab?.isPrivate == true
+            Box(Modifier.weight(1f).height(40.dp).hairline(c.hair)
+                .background(if (priv) androidx.compose.ui.graphics.Color(0xFF35363A) else androidx.compose.ui.graphics.Color.Transparent)
+                .padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                if (bar.isEmpty()) Text(if (priv) "\uD83D\uDD76  Private: search or type a web address" else "Search or type a web address", if (priv) androidx.compose.ui.graphics.Color(0xFF9AA0A6) else c.weak, 14)
                 BasicTextField(bar, { bar = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink),
+                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = if (priv) androidx.compose.ui.graphics.Color(0xFFE8EAED) else c.ink),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
                     keyboardActions = KeyboardActions(onGo = { tab?.let { BrowserEngine.load(it, bar) }; focus.clearFocus() }),
                     modifier = Modifier.fillMaxWidth().onFocusChanged { editing = it.isFocused })
@@ -145,29 +183,14 @@ private fun BrowserScreen(onClose: () -> Unit) {
                 if (blank) StartPage(tick) { u -> BrowserEngine.load(tab, u); panel = Panel.NONE }
             }
             when (panel) {
-                Panel.TABS -> Sheet {
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Label("${BrowserEngine.tabs.size} tabs", modifier = Modifier.weight(1f))
-                        Label("+ New tab", color = c.accent, modifier = Modifier.clickable { BrowserEngine.newTab(ctx); panel = Panel.NONE })
-                    }
-                    LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                        items(BrowserEngine.tabs.toList(), key = { it.id }) { t ->
-                            val i = BrowserEngine.tabs.indexOf(t)
-                            Row(Modifier.fillMaxWidth().background(if (i == BrowserEngine.current) c.faint else c.paper).hairlineTop(c.hair)
-                                .clickable { BrowserEngine.current = i; panel = Panel.NONE }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(t.title.ifBlank { "New tab" }, c.ink, 14, maxLines = 1)
-                                    Text(display(t.url).ifBlank { "Start page" }, c.sub, 12, maxLines = 1)
-                                }
-                                Text("×", c.sub, 20, modifier = Modifier.clickable { BrowserEngine.close(i); if (BrowserEngine.tabs.isEmpty()) BrowserEngine.newTab(ctx) }.padding(8.dp))
-                            }
-                        }
-                    }
-                }
+                Panel.TABS -> {}
+                Panel.PRIVACY -> Sheet { PrivacySheet(onImport = onImport, onPrivateTab = { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }) }
                 Panel.MENU -> Sheet {
                     val url = tab?.url.orEmpty()
                     val marked = remember(url, tick) { BrowserData.isBookmarked(ctx, url) }
                     MenuRow("New tab") { BrowserEngine.newTab(ctx); panel = Panel.NONE }
+                    MenuRow("New private tab") { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }
+                    MenuRow("VPN & privacy" + when (BrowserVpn.status) { BrowserVpn.Status.ON -> "  ·  " + Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty()); BrowserVpn.Status.FAILED -> "  ·  not connected"; else -> "" }) { panel = Panel.PRIVACY }
                     if (url.startsWith("http")) MenuRow(if (marked) "Remove bookmark" else "Bookmark this page") { BrowserData.toggleBookmark(ctx, tab?.title.orEmpty(), url); tick++; panel = Panel.NONE }
                     MenuRow("Bookmarks") { panel = Panel.BOOKMARKS }
                     MenuRow("History") { panel = Panel.HISTORY }
@@ -187,7 +210,11 @@ private fun BrowserScreen(onClose: () -> Unit) {
                     MenuRow("Downloads") {
                         try { ctx.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
                         panel = Panel.NONE }
-                    MenuRow("Close all tabs") { BrowserEngine.closeAll(); BrowserEngine.newTab(ctx); panel = Panel.NONE }
+                    MenuRow(if (tab?.isPrivate == true) "Close all private tabs" else "Close all tabs") {
+                        val p = tab?.isPrivate == true
+                        BrowserEngine.closeAll(p); if (BrowserEngine.normalTabs().isEmpty()) BrowserEngine.newTab(ctx)
+                        if (!p || BrowserEngine.tab()?.isPrivate == true) BrowserEngine.current = BrowserEngine.tabs.indexOfLast { !it.isPrivate }
+                        panel = Panel.NONE }
                 }
                 Panel.BOOKMARKS -> Sheet { EntryList("Bookmarks", BrowserData.bookmarks(ctx), "No bookmarks yet.") { tab?.let { t -> BrowserEngine.load(t, it) }; panel = Panel.NONE } }
                 Panel.HISTORY -> Sheet {
@@ -203,8 +230,11 @@ private fun BrowserScreen(onClose: () -> Unit) {
             BarBtn("‹", enabled = tab?.canBack == true, modifier = Modifier.weight(1f)) { tab?.web?.goBack() }
             BarBtn("›", enabled = tab?.canForward == true, modifier = Modifier.weight(1f)) { tab?.web?.goForward() }
             BarBtn("⌂", modifier = Modifier.weight(1f)) { tab?.let { BrowserEngine.load(it, "about:blank") }; panel = Panel.NONE }
-            Box(Modifier.weight(1f).height(44.dp).clickable { panel = if (panel == Panel.TABS) Panel.NONE else Panel.TABS }, contentAlignment = Alignment.Center) {
-                Box(Modifier.size(24.dp).hairline(c.ink), contentAlignment = Alignment.Center) { Text("${BrowserEngine.tabs.size}", c.ink, 12) }
+            Box(Modifier.weight(1f).height(44.dp).clickable { BrowserEngine.snapshot(); panel = Panel.TABS }, contentAlignment = Alignment.Center) {
+                val priv = tab?.isPrivate == true
+                val n = BrowserEngine.tabs.count { it.isPrivate == priv }
+                Box(Modifier.size(24.dp).background(if (priv) c.ink else androidx.compose.ui.graphics.Color.Transparent).hairline(c.ink), contentAlignment = Alignment.Center) {
+                    Text(if (n > 99) ":D" else "$n", if (priv) c.paper else c.ink, 12) }
             }
             BarBtn("⋯", modifier = Modifier.weight(1f)) { panel = if (panel == Panel.MENU) Panel.NONE else Panel.MENU }
         }
