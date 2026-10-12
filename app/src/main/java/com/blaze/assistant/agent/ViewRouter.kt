@@ -98,7 +98,7 @@ object ViewRouter {
     private val wantsCards = r("""\b(flash ?cards?|cards? (?:on|about|for|from)|(?:a |new )?deck|quiz(?:zes)?|test me)\b""")
     fun asksForCards(userText: String) = wantsCards.containsMatchIn(userText)
 
-    private val strip = Regex("""^\s*(?:[-*•>]+\s*|\d{1,3}[.)]\s*|#{1,6}\s*)*""")
+    private val strip = Regex("""^\s*(?:[-*•>]\s+|\d{1,3}[.)]\s+|#{1,6}\s*)*""")
     private fun clean(s: String) = s.replace("**", "").replace("__", "").replace(Regex("""(?<!\w)\*(?!\s)|(?<!\s)\*(?!\w)"""), "").replace("`", "").trim().trim('|').trim()
 
     private val qRe = Regex("""^(?:q(?:uestion)?|front|term|card\s*\d+\s*(?:front)?)\s*\d*\s*[:.\-–—]\s*(.+)$""", RegexOption.IGNORE_CASE)
