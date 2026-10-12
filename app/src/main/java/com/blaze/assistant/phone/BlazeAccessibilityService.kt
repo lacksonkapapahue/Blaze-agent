@@ -92,6 +92,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        Pointer.done()
         com.blaze.assistant.ui.Overlay.hideOrb(this, unpin = false)
         instance = null
         super.onDestroy()
@@ -394,6 +395,8 @@ class BlazeAccessibilityService : AccessibilityService() {
             if (if (long) n.isLongClickable else n.isClickable) { target = n; break }
             n = n.parent
         }
+        // v0.21.0 visible pointer: glide there, re-check the target is still where it was (orient), ripple, then act.
+        aimAt(node, id, long)?.let { return it }
         val before = android.os.SystemClock.uptimeMillis()
         if (target != null && target.isEnabled && target.performAction(action)) {
             if (changedSince(before, 700)) return "Tapped [$id]."
@@ -402,6 +405,27 @@ class BlazeAccessibilityService : AccessibilityService() {
         return if (gestureTap(pt.first, pt.second, if (long) 800 else 60)) "Tapped [$id] by touch."
         else "Couldn't tap [$id]."
     }
+
+    /**
+     * The pointer's part of a tap: null = go ahead; a message = don't tap (the user paused Blaze, or the
+     * target went away or moved during the glide and is aimed at again once).
+     */
+    private suspend fun aimAt(node: AccessibilityNodeInfo, id: Int, long: Boolean): String? {
+        if (!Pointer.enabled) return null
+        val p0 = centerOf(node) ?: return null
+        val paused = "Paused before tapping [$id]: the user took over the pointer. Nothing was tapped."
+        if (!Pointer.aim(this, p0.first, p0.second)) return paused
+        node.refresh()
+        val p1 = if (node.isVisibleToUser) centerOf(node) else null
+        if (p1 == null) return "The target [$id] went away while Blaze was aiming (the screen changed). Nothing was tapped; look again."
+        val d = resources.displayMetrics.density
+        if (Pointer.moved(p0.first, p0.second, p1.first, p1.second, d) && !Pointer.aim(this, p1.first, p1.second)) return paused
+        if (!Pointer.ripple(long)) return paused
+        return null
+    }
+
+    /** A tap the user asked for by double-tapping the pointer (manual mode). */
+    suspend fun tapAt(x: Float, y: Float): Boolean = gestureTap(x, y, 60)
 
     /** Tap a node found outside read_screen (watchers): accessibility click up the parent chain, else a touch. */
     suspend fun tapNode(node: AccessibilityNodeInfo): Boolean {
@@ -543,13 +567,17 @@ class BlazeAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun gestureTap(x: Float, y: Float, durationMs: Long): Boolean {
+        Pointer.ownGesture(durationMs)
         val path = Path().apply { moveTo(x, y) }
         return dispatch(GestureDescription.StrokeDescription(path, 0, durationMs))
     }
 
     private suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
-        return dispatch(GestureDescription.StrokeDescription(path, 0, if (com.blaze.assistant.agent.Settings.bool("speed_mode", false)) 180 else 350))
+        val ms = if (com.blaze.assistant.agent.Settings.bool("speed_mode", false)) 180L else 350L
+        Pointer.showPath(this, x1, y1, x2, y2, ms)
+        Pointer.ownGesture(ms)
+        return dispatch(GestureDescription.StrokeDescription(path, 0, ms))
     }
 
     private suspend fun dispatch(stroke: GestureDescription.StrokeDescription): Boolean =

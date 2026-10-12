@@ -2,6 +2,15 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.21.0: Visible pointer for phone control
+Luke's ask: see where Blaze is about to act, and take over in one touch.
+- **The pointer** (`phone/Pointer.kt`): a small Blaze-blue arrow in an accessibility overlay (no extra permission). Before a tap Blaze glides it to the target (120–420 ms), re-checks that the target is still there and hasn't moved (the orient step: if it moved it aims again, if it went away nothing is tapped and Blaze looks again), shows a short ripple (held longer for a long press), then taps. Swipes are drawn as a path for a moment.
+- **Touch to pause.** Touching the screen or the pointer pauses Blaze at once (manual mode, the pointer turns orange). Drag the pointer anywhere: dragging only moves it, it never clicks. **Double-tap the pointer** and Blaze clicks right there, looks at the screen and carries on with the task. A small bar at the top offers **Resume** (Blaze looks again first) and **Stop**. Blaze's own touches never count as yours.
+- **Light on the A12:** plain Views, no Compose in the overlay; it only animates while gliding or rippling, hides after 3 s idle and leaves the screen when the task ends.
+- **Settings › Phone control › Show the pointer** (on by default).
+- **Screenshot:** `34-pointer` (paused, with the bar, a ripple and a swipe path).
+- **Tests:** `PointerTest` (glide and ripple timing, re-aim threshold, double-tap vs drag, own touches).
+
 ## v0.20.0: Orient loop + background browser with secure forms
 Luke's ask after GitHub said "This account does not support password sign-in" while he typed into Blaze's browser, and phone control dropped on the way back to the chat.
 - **Orient loop for phone control** (`agent/Orient.kt`): context → look → act → look, in code, not just the prompt. A phone-control turn starts with a compact screen summary (app, the fields and buttons that matter, any error line; ≤ 14 lines, never a full dump) sent with the first model call only. Before the first screen action Blaze glances (the compact summary goes in front of the result); a numbered tap or type on a screen Blaze hasn't looked at this turn, or after the app changed under it, is held back and the fresh screen returned instead (at most twice a turn, so it can't loop). After each action the diff re-read verifies the result as before. Accessibility tree first; screenshots only when the model asks.
