@@ -253,8 +253,8 @@ var t0=Date.now();
 var poll=setInterval(function(){var s=window.__blazeScene;if(!s)return;clearInterval(poll);
  var cv=s.renderer&&s.renderer.domElement;
  if(cv)cv.addEventListener("webglcontextlost",function(){err("WebGL context lost");say("fail","The 3D view lost its WebGL context ("+eng+").");});
- setTimeout(function(){var bl=false;try{bl=blank(cv);}catch(e){}
-  if(bl)say("fail","The 3D engine ("+eng+") started but drew nothing.");else{window.__bzReady=true;say("ready",eng);}},1200);},100);
+ var tries=0;(function check(){setTimeout(function(){var bl=false;try{bl=blank(cv);}catch(e){}
+  if(!bl){window.__bzReady=true;say("ready",eng);}else if(++tries<3)check();else say("fail","The 3D engine ("+eng+") started but drew nothing.");},1200);})();},100);
 })();
 """.trim()
 
