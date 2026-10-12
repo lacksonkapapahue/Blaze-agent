@@ -83,15 +83,29 @@ object MindReview {
         var done = 0
         lock.withLock {
             repeat(chunks) {
-                val batch = Mind.chunk(d.unreviewed(200))
+                // v0.19.0: chat turns, chat-app messages and life logs are reviewed in separate batches, each with its own
+                // header; whatever is learned from overheard speech is always marked "(inferred)".
+                val queue = d.unreviewed(200)
+                if (queue.isEmpty()) return@withLock
+                val cls = MindLogs.classOf(queue.first().conv)
+                val batch = Mind.chunk(queue.takeWhile { MindLogs.classOf(it.conv) == cls })
                 if (batch.isEmpty()) return@withLock
-                val raw = call(Mind.extractRequest(Mind.render(batch), Mind.core(Mind.all()))) ?: return@withLock
-                apply(Mind.parseExtract(raw), batch.last().id)
+                val raw = call(Mind.extractRequest(Mind.render(batch) + header(cls), Mind.core(Mind.all()))) ?: return@withLock
+                val items = Mind.parseExtract(raw).let { l -> if (cls == "heard") l.map { it.copy(text = Mind.clean(it.text, inferred = true)) } else l }
+                apply(items, batch.last().id)
                 d.markReviewed(batch.map { it.id })
                 done += batch.size
             }
         }
         return done
+    }
+
+    /** What the review is looking at, for the non-chat journal classes ([MindLogs.classOf]). */
+    fun header(cls: String): String = when (cls) {
+        "heard" -> "\n\nNOTE: the lines above are a LIFE LOG: speech the phone's mic overheard, transcribed on the phone (words may be wrong; speakers are unknown and may be other people). " +
+            "Only keep what clearly matters to the user: people and who they are, plans, ideas, commitments and deadlines. Mark every line \"(inferred)\"."
+        "notif" -> "\n\nNOTE: the lines above are CHAT MESSAGES from the user's messaging apps (role = sender and app; \"You\" = the user). Keep people and who they are to the user, plans and commitments; never codes or bank details."
+        else -> ""
     }
 
     /** The worker's pass: skipped while Blaze is busy, off, or ran less than [THROTTLE_MS] ago. */
