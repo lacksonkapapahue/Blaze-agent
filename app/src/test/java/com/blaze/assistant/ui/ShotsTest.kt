@@ -400,6 +400,19 @@ class ShotsTest {
         shot("28-replies") { SettingsFrame("Notification replies") { RepliesPage(previewAccess = true) } }
     }
 
+    // v0.23.0: views + skills. "Make flashcards" → skills on the work card, a Learn deck, a short reply.
+    @Test fun viewsSkills() = shot("35-views-skills") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                UserBubble("Make me flashcards on CIT102 loops")
+                WorkCard(listOf(step(51, "Skills: study-flashcards, tutor"), step(52, "Making flashcards", "flashcards {\"action\":\"add\",\"deck\":\"CIT102 loops\"}"),
+                    step(53, "Opening Learn")), live = false, startAt = t0, endAt = t0 + 21_000, open0 = true)
+                AnswerBody(54, "Made the **CIT102 loops** deck in Learn: 12 cards. It's open now; cards come back right before you'd forget them.")
+            }
+        }
+    }
+
     // v0.21.0: the visible pointer over another app, paused by the user (bar), with a swipe path and a ripple.
     @Test fun pointer() = shot("34-pointer") {
         val c = LocalBlaze.current

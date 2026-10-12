@@ -296,6 +296,7 @@ fun ChatScreen() {
         when (v.special) {
             "chats" -> { Agent.refreshChats(); showChats = true }
             "gallery" -> GalleryUi.open.value = true
+            "projects" -> { shellMode = "projects"; projectOpen = "" }
             "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx)
             "design" -> { if (target.isNotBlank()) Views.designTarget.value = target; shellMode = "chat"; Views.showing.value = "design" }
             else -> settingsPage = v.page ?: ""
