@@ -196,10 +196,15 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                 }
             } else if (spec3d != null && (!preview || failure != null)) {
                 // No WebGL (screenshots), or three.js couldn't start on this phone: draw the same parts natively.
-                PartsSketchView(spec3d)
-                Label("3D \u00b7 " + spec3d.optString("name") + if (failure != null) " \u00b7 simple view" else "", color = c.sub, size = 9.sp,
-                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
-                if (failure != null) FailBanner(failure, sketch = true, onRetry = { restart(false) }, modifier = Modifier.align(Alignment.BottomCenter))
+                // The banner sits under the drawing (not over it), so the whole model stays visible.
+                Column(Modifier.fillMaxSize()) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        PartsSketchView(spec3d)
+                        Label("3D \u00b7 " + spec3d.optString("name") + if (failure != null) " \u00b7 simple view" else "", color = c.sub, size = 9.sp,
+                            modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
+                    }
+                    if (failure != null) FailBanner(failure, sketch = true, onRetry = { restart(false) })
+                }
             } else if (preview) {
                 androidx.compose.runtime.key(url, wide, reload) {
                     val loadUrl = DesignServe.attemptUrl(url, rs.forceGl1)
