@@ -207,6 +207,56 @@ class ShotsTest {
         }
     }
 
+    // v0.20.0: background browser secure form, password-free sign-in and phone control banner.
+    private val signIn = listOf(
+        com.blaze.assistant.browser.SecureInput.Field("email", "GitHub email or username", com.blaze.assistant.browser.SecureInput.Kind.EMAIL),
+        com.blaze.assistant.browser.SecureInput.Field("password", "GitHub password", com.blaze.assistant.browser.SecureInput.Kind.PASSWORD))
+    @Composable private fun BrowserChat(content: @Composable () -> Unit) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, mood = Mood.ACTING)
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                UserBubble("Star the Blaze-agent repo on GitHub for me")
+                WorkCard(listOf(step(31, "Browsing github.com/login"), step(32, "Reading the page"), step(33, "Waiting for you: Sign in to GitHub")),
+                    live = true, startAt = t0, endAt = 0, status = "Waiting for you", now = t0 + 21_000)
+            }
+            content()
+        }
+    }
+    @Test fun secureForm() = shot("30-secure-form") {
+        BrowserChat { SecureForm("github.com", "Sign in to GitHub", "GitHub needs you signed in to star the repo.", signIn,
+            onSubmit = { _, _ -> }, onCancel = {}, onWatch = {}, preset = mapOf("email" to "lacksonkapapahue", "password" to "not-a-real-one"), notifPrompt = false) }
+    }
+    @Test fun secureFormDark() = shot("31-secure-form-dark", dark = true) {
+        BrowserChat { SecureForm("api.groq.com", "Your Groq API key", "Paste it once; Blaze saves it encrypted on this phone.",
+            listOf(com.blaze.assistant.browser.SecureInput.Field("groq_key", "Groq API key", com.blaze.assistant.browser.SecureInput.Kind.API_KEY)),
+            onSubmit = { _, _ -> }, onCancel = {}, onWatch = {}, notifPrompt = true) }
+    }
+    @Test fun noPasswordChoice() = shot("32-no-password-choice") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                UserBubble("Sign me in to GitHub")
+                WorkCard(listOf(step(41, "Browsing github.com/login"), step(42, "GitHub says this account can't use a password")), live = false, startAt = t0, endAt = t0 + 9_000)
+            }
+            PhoneControlBanner(com.blaze.assistant.phone.PhoneControl.State.OFF) {}
+            QuestionView("GitHub won't take a password for this account. How do you want to sign in?",
+                listOf("Continue with Google", "Use a passkey", "I'll do it in the browser"))
+        }
+    }
+    @Test fun savedLogins() {
+        com.blaze.assistant.browser.Vault.fileOverride = File(System.getProperty("java.io.tmpdir"), "blaze-shots-vault-" + System.nanoTime() + ".json")
+        com.blaze.assistant.browser.Vault.seal = { it }; com.blaze.assistant.browser.Vault.open = { it }
+        com.blaze.assistant.browser.Vault.save("github.com", "email", "lacksonkapapahue@gmail.com")
+        com.blaze.assistant.browser.Vault.save("github.com", "password", "not-a-real-one")
+        com.blaze.assistant.browser.Vault.save("console.groq.com", "groq_key", "gsk_not_real_0000")
+        shot("33-saved-logins") {
+            Column(Modifier.fillMaxSize()) {
+                ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Saved logins")
+                Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) { SavedLoginsPage() }
+            }
+        }
+    }
+
     // ---------------- v0.19.0 visual parity ----------------
 
     /** The settings screen's frame (back arrow + title, then a padded scroll column), without its BackHandler. */

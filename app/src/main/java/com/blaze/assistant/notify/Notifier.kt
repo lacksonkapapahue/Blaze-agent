@@ -21,6 +21,10 @@ import com.blaze.assistant.agent.Agent
 object Notifier {
     private const val CH_WORK = "blaze_work"
     private const val CH_REPLY = "blaze_reply"
+    /** v0.20.0: the background browser needs something only the user has (a sign-in, a code). */
+    const val CH_ACTION = "blaze_action"
+    private const val ID_ACTION = 11
+    const val EXTRA_OPEN_FORM = "open_form"
     private const val ID_WORK = 1
     private const val ID_REPLY = 2
     private const val ID_WAKE = 4
@@ -40,6 +44,9 @@ object Notifier {
             })
             nm.createNotificationChannel(NotificationChannel(CH_REPLY, "Blaze replies", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Blaze's answer when it finishes while you're in another app"
+            })
+            nm.createNotificationChannel(NotificationChannel(CH_ACTION, "Action required", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "When Blaze's background browser needs a sign-in, a code or another detail only you have"
             })
         }
     }
@@ -192,6 +199,31 @@ object Notifier {
     }
 
     fun clearConfirm() = NotificationManagerCompat.from(app).cancel(ID_CONFIRM)
+
+    /** True when Blaze may post notifications (always below Android 13; a granted permission on 13+). */
+    fun canPost(): Boolean = ::app.isInitialized && allowed()
+
+    /**
+     * "Action required": tapping it opens the chat at the secure form. Never carries a value, only what's
+     * needed ("Sign in to github.com"). Returns false when notifications aren't allowed (Android 13+ without
+     * the permission); the form still waits in the chat.
+     */
+    fun actionRequired(title: String, site: String): Boolean {
+        if (!canPost()) return false
+        val open = PendingIntent.getActivity(app, ID_ACTION, Intent(app, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra(EXTRA_OPEN_FORM, true),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val text = "Blaze is waiting for you on $site. Tap to fill it in securely."
+        val n = NotificationCompat.Builder(app, CH_ACTION).setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
+            .setContentTitle("Action required: ${title.take(60)}").setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setContentIntent(open).setAutoCancel(true).build()
+        return try { NotificationManagerCompat.from(app).notify(ID_ACTION, n); true } catch (_: SecurityException) { false }
+    }
+
+    fun clearAction() = try { NotificationManagerCompat.from(app).cancel(ID_ACTION) } catch (_: Exception) { }
 }
 
 class ActionReceiver : BroadcastReceiver() {

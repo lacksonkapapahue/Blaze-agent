@@ -38,6 +38,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        com.blaze.assistant.device.CrashLog.write("Phone control connected")
         com.blaze.assistant.voice.WakeWordService.start(this)
         if (com.blaze.assistant.agent.Settings.orbPinned) com.blaze.assistant.ui.Overlay.showOrb(this)
     }
@@ -97,6 +98,7 @@ class BlazeAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        com.blaze.assistant.device.CrashLog.write("Phone control disconnected (unbound by Android)")
         instance = null
         return super.onUnbind(intent)
     }

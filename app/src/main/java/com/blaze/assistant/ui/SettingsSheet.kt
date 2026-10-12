@@ -83,6 +83,7 @@ val settingsPages = listOf(
     SettingsPage("seller", "Seller", "Brand kit, weekly store digest, replies from your PC"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
     SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
+    SettingsPage("logins", "Saved logins", "Sign-ins from Blaze's secure form, encrypted on this phone"),
     SettingsPage("device", "Device & diagnostics", "Phone health, self-check, crash report"),
     SettingsPage("backup", "Backup", "Export or import everything")
 )
@@ -140,6 +141,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "router" -> RouterPage(onClassic = { page = "ai" })
                 "learn" -> LearnPage()
                 "seller" -> SellerPage()
+                "logins" -> SavedLoginsPage()
             }
             Spacer(Modifier.height(30.dp))
         }

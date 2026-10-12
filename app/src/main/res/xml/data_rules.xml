@@ -8,5 +8,7 @@
     <device-transfer>
         <include domain="sharedpref" path="." />
         <include domain="file" path="." />
+        <!-- Saved logins are sealed with this phone's Keystore key; they can't be opened on another phone. -->
+        <exclude domain="file" path="vault.json" />
     </device-transfer>
 </data-extraction-rules>

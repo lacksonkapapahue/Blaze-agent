@@ -217,9 +217,14 @@ fun ChatScreen() {
     }
 
     var a11yOn by remember { mutableStateOf(BlazeAccessibilityService.isEnabled(ctx)) }
+    var control by remember { mutableStateOf(com.blaze.assistant.phone.PhoneControl.state(ctx)) }
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) { a11yOn = BlazeAccessibilityService.isEnabled(ctx); delay(2500) }
+            while (true) {
+                a11yOn = BlazeAccessibilityService.isEnabled(ctx)
+                control = com.blaze.assistant.phone.PhoneControl.state(ctx).also { com.blaze.assistant.phone.PhoneControl.note(it) }
+                delay(2500)
+            }
         }
     }
 
@@ -393,17 +398,18 @@ fun ChatScreen() {
             if (shellMode == "chat" && showing.isEmpty()) {
                 if (voiceState == Voice.State.LISTENING) ListeningStrip()
                 LaunchedEffect(a11yOn) { if (a11yOn) Settings.setBool("a11y_seen", true) }
-                if (!a11yOn && Settings.phoneControl && Settings.bool("a11y_seen", false)) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent)
-                    .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Label("Blaze lost phone control", size = 10.sp, modifier = Modifier.weight(1f))
-                    Label("Turn it back on", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
-                        ComeBack.watch(ctx) { BlazeAccessibilityService.isEnabled(ctx) }
-                        ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }.padding(8.dp))
-                }
+                LaunchedEffect(control) { if (control == com.blaze.assistant.phone.PhoneControl.State.CONNECTED) Settings.setBool("a11y_seen", true) }
+                // v0.20.0: say which way it dropped and fix it in one tap (Blaze's own switch, not the whole list).
+                if (control != com.blaze.assistant.phone.PhoneControl.State.CONNECTED && Settings.phoneControl && Settings.bool("a11y_seen", false))
+                    PhoneControlBanner(control) {
+                        ComeBack.watch(ctx) { BlazeAccessibilityService.instance != null }
+                        try { ctx.startActivity(com.blaze.assistant.phone.PhoneControl.fixIntent(ctx)) }
+                        catch (_: Exception) { ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    }
             }
             ConfirmCard()
             QuestionCard()
+            SecureFormCard()
             if (shellMode == "chat" && showing.isEmpty()) {
                 val sugg = remember(input.text) { fileSuggestions(input.text).ifEmpty { CommandRunner.suggest(input.text) } }
                 if (sugg.isNotEmpty() && !showViews) SuggestionList(sugg) { s ->

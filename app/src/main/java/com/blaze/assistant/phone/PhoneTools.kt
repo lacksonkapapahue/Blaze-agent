@@ -86,7 +86,8 @@ object PhoneTools {
 
     suspend fun run(ctx: Context, name: String, args: JSONObject): String {
         val svc = BlazeAccessibilityService.instance
-        fun needSvc() = "Phone control is off. Ask the user to turn on 'Blaze phone control' in Accessibility settings (there's a button in Blaze's settings)."
+        fun needSvc() = "Phone control is off right now. Blaze's browser tools (browser_*) and background tools don't need it, so keep going with those if they fit. " +
+            "For the screen itself, the chat shows a one-tap 'Turn on' banner; tell the user to tap it (it opens Blaze's switch in Accessibility settings)."
         return try {
             when (name) {
                 "open_app" -> openApp(ctx, args.getString("app_name"))

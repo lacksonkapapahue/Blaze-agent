@@ -192,8 +192,9 @@ object SkillPacks {
 1. Prefer Blaze's background browser for websites; use the screen only when the site needs the user's own app session.
 2. Before you start, switch on watchers: watch preset=cookies and preset=popups, and preset=google_signin if the site offers Google.
 3. For "Choose an account", ask the user which account with ask_user unless they named one.
-4. Passwords come only from the user's saved logins; never invent or guess one.
-5. Captchas, codes and 2-step prompts: stop and ask the user (ask_user), then continue.
+4. Emails, passwords, phone numbers, API keys and codes come from browser_secure_input (a secure form in the chat; saved logins fill in by themselves). Never ask for them in chat, never invent or guess one; you only see {{secret:...}} placeholders.
+5. Captchas and approvals in another app: ask the user (ask_user) or offer browser_show so they can do that step, then continue.
+7. If the site says the account can't use a password (e.g. GitHub's "does not support password sign-in"), stop asking for it: offer Continue with Google, a passkey or the live browser with ask_user.
 6. Check you are really signed in (an account name, avatar or dashboard) before saying it worked.
 """),
         Triple("research-report", "Researching a question on the web and giving a short, sourced answer", """
