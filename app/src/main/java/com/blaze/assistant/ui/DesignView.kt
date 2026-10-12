@@ -72,7 +72,8 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                 }
                 Spacer(Modifier.width(6.dp))
             }
-            Text(url.ifBlank { "Nothing to preview yet" }, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+            Text(target.trim().ifBlank { "Nothing to preview yet" }.let { if (it.length > 34) "…" + it.takeLast(33) else it }, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
                 style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
             if (url.isNotBlank()) {
                 Label("Reload", color = c.accent, size = 9.sp, modifier = Modifier.clickable { reload++ }.padding(6.dp))

@@ -424,7 +424,7 @@ fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boo
                     Text(if (plusOpen) "×" else "+", style = TextStyle(fontFamily = Type.Display, fontSize = 24.sp, color = if (plusOpen) c.paper else c.ink))
                 }
                 Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 12.dp)) {
-                    if (value.text.isEmpty()) Text(if (listening) "Listening…" else "Message Blaze, or type /", maxLines = 1,
+                    if (value.text.isEmpty()) Text(if (listening) "Listening…" else "Message Blaze, or type /", maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
                     BasicTextField(value = value, onValueChange = onValue,
                         textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink),
