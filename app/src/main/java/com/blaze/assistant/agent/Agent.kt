@@ -1533,7 +1533,7 @@ When you finish, say what you did in one short sentence.
             val fields = S.parseFields(args.optJSONArray("fields"))
             if (fields.isEmpty()) return "Error: give fields, e.g. [{\"name\":\"email\",\"kind\":\"email\"},{\"name\":\"password\",\"kind\":\"password\"}]."
             if (fields.any { S.isCardField(it) }) return "Card details are never collected in the chat. Show the live browser with browser_show so the user types them on the page, or stop before paying."
-            if (fields.any { it.kind == S.Kind.PASSWORD }) B.passwordRefused()?.let { return it }
+            if (fields.any { it.kind == com.blaze.assistant.browser.SecureInput.Kind.PASSWORD }) B.passwordRefused()?.let { return it }
             val asks = (formAsks[host] ?: 0) + 1; formAsks[host] = asks
             if (asks > 3) return "I've already asked for this on $host 3 times. Don't ask again: use ask_user to offer Continue with Google, a passkey, or the user doing it themselves in the live browser (browser_show)."
             val names = fields.map { it.name }
@@ -1541,11 +1541,11 @@ When you finish, say what you did in one short sentence.
             val title = args.optString("title").ifBlank { "Details for $host" }
             val answer = if (fromVault) {
                 add(Role.STEP, "Using your saved details for $host")
-                S.Answer(names.associateWith { V.get(host, it).orEmpty() }, false)
+                com.blaze.assistant.browser.SecureInput.Answer(names.associateWith { V.get(host, it).orEmpty() }, false)
             } else {
                 add(Role.STEP, "Waiting for you: ${title.take(60)}")
                 mood = Mood.IDLE
-                val a = askSecure(S.Request(ids.getAndIncrement(), host, title, args.optString("reason"), fields,
+                val a = askSecure(com.blaze.assistant.browser.SecureInput.Request(ids.getAndIncrement(), host, title, args.optString("reason"), fields,
                     args.optBoolean("submit", true), kotlinx.coroutines.CompletableDeferred()), this)
                 mood = Mood.ACTING
                 a ?: return "The user cancelled the form (or didn't answer). Don't ask again right away: say what you needed, and offer the live browser (browser_show) or another way in."
