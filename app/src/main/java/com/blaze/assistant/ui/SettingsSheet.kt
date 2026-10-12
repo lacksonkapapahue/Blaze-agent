@@ -81,6 +81,8 @@ val settingsPages = listOf(
     SettingsPage("memory", "Memory & learning", "What Blaze remembers and has learned"),
     SettingsPage("learn", "Learn", "Flashcards, Google Classroom, low-data mode"),
     SettingsPage("seller", "Seller", "Brand kit, weekly store digest, replies from your PC"),
+    SettingsPage("logs", "Life logs", "Transcribe what the mic hears into memory, brainstorms"),
+    SettingsPage("replies", "Notification replies", "Chat logs and replies from notifications, auto-reply"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
     SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
     SettingsPage("logins", "Saved logins", "Sign-ins from Blaze's secure form, encrypted on this phone"),
@@ -141,6 +143,8 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "router" -> RouterPage(onClassic = { page = "ai" })
                 "learn" -> LearnPage()
                 "seller" -> SellerPage()
+                "logs" -> LifeLogsPage()
+                "replies" -> RepliesPage()
                 "logins" -> SavedLoginsPage()
             }
             Spacer(Modifier.height(30.dp))
