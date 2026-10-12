@@ -163,6 +163,11 @@
             android:name=".voice.WakeWordService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <!-- Life logs (v0.19.0): on-device transcription while the user has it on; persistent notification, no audio kept. -->
+        <service
+            android:name=".life.LifeLogService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <service
             android:name=".assist.BlazeTile"
             android:exported="true"

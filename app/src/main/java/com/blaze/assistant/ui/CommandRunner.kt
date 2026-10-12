@@ -90,6 +90,8 @@ object CommandRunner {
             "think", "reasoning" -> { Settings.showReasoning = !Settings.showReasoning; toast("Reasoning " + if (Settings.showReasoning) "shown" else "hidden") }
             "voice", "listen" -> listen()
             "orb" -> if (!Overlay.showOrb(ctx)) Overlay.requestOverlayPermission(ctx)
+            "logs", "livelogs", "lifelogs" -> com.blaze.assistant.life.LifeLogs.toggleFromCommand(ctx, arg)
+            "brainstorm" -> com.blaze.assistant.life.LifeLogs.toggleFromCommand(ctx, if (com.blaze.assistant.life.LifeLogs.active && arg.isBlank()) "stop" else "brainstorm")
             "copy" -> {
                 val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("Blaze chat", Agent.transcript())); toast("Chat copied")

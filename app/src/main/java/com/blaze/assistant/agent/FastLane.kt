@@ -250,6 +250,7 @@ object FastLane {
             "Directions to ${a.optString("place")} are open."
         }
         "blaze_self" -> SelfSetup.open(ctx, a.optString("target"))
+        "life_logs" -> com.blaze.assistant.life.LifeLogs.run(ctx, a)
         else -> null
     }
 }

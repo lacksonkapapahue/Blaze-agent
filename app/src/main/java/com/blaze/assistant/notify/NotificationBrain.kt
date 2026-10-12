@@ -107,8 +107,10 @@ class NotificationBrain : NotificationListenerService() {
         val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
         var text = (ex.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: ex.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty()
         if (title.isBlank() && text.isBlank()) return
-        if (otp.containsMatchIn(title + " " + text)) text = "(a verification code, hidden)"
+        if (otp.containsMatchIn(title + " " + text) || Sensitive.isSensitive(text, title)) text = Sensitive.HIDDEN
         val app = try { packageManager.getApplicationLabel(packageManager.getApplicationInfo(sbn.packageName, 0)).toString() } catch (_: Exception) { sbn.packageName }
+        // Notification replies (v0.19.0): chat apps keep a per-conversation log (codes and bank messages never stored).
+        try { Conversations.onPosted(this, sbn.packageName, app, n) } catch (_: Throwable) { }
         val reply = n.actions?.firstOrNull { a -> a.remoteInputs?.isNotEmpty() == true }
         synchronized(items) {
             items.removeAll { it.key == sbn.key && it.text == text }

@@ -34,6 +34,9 @@ object QuickRules {
         val t = clean(text)
         if (t.isEmpty() || t.length > 70) return null
 
+        // Life logs (v0.19.0): "start logs", "live logs", "activate life logs", "stop logs", "brainstorm with me".
+        lifeLogs(t)?.let { return "life_logs" to JSONObject().put("action", it) }
+
         // Timer: "set a timer for 5 minutes", "timer 10 min", "5 minute timer", "half an hour timer"
         Regex("""^(?:set |start )?(?:a |an )?(?:timer|countdown)(?: for)? (.+)$|^(.+?) (?:timer|countdown)$""").matchEntire(t)?.let { m ->
             val d = (m.groupValues[1].ifBlank { m.groupValues[2] }).trim()
@@ -134,6 +137,22 @@ object QuickRules {
     }
 
     /** "5 minutes", "1 hour 30 minutes", "90 seconds", "half an hour", "an hour and a half". */
+    /** The life_logs action a short spoken or typed command asks for, or null. */
+    fun lifeLogs(t0: String): String? {
+        val t = t0.lowercase().trim().replace(Regex("[?!.,]+$"), "")
+        val logs = "(?:the |my )?(?:live |life )?(?:logs?|logging)"
+        return when {
+            Regex("^(?:start|begin|activate|turn on|switch on|enable|resume|go) $logs$|^(?:live|life) logs?(?: on)?$|^$logs on$|^start (?:live |life )?logging$").matches(t) ->
+                if (t.startsWith("resume")) "resume" else "start"
+            Regex("^(?:stop|end|deactivate|turn off|switch off|disable|kill) $logs$|^$logs off$").matches(t) -> "stop"
+            Regex("^(?:pause|hold) $logs$").matches(t) -> "pause"
+            Regex("^(?:is|are) $logs (?:on|running)$|^$logs status$").matches(t) -> "status"
+            Regex("^(?:let'?s |lets |i want to |can we )?brainstorm(?: with me| together)?$|^start (?:a )?brainstorm(?:ing)?(?: session)?$").matches(t) -> "brainstorm"
+            Regex("^(?:stop|end|finish) (?:the )?brainstorm(?:ing)?(?: session)?$").matches(t) -> "stop"
+            else -> null
+        }
+    }
+
     fun duration(d: String): Int? {
         val s = d.trim().removePrefix("for ")
         if (Regex("^half an? hour$").matches(s)) return 1800

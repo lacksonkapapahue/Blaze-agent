@@ -37,6 +37,7 @@ class WakeWordService : Service() {
         /** Start, or (when already running) re-promote from the foreground so Android gives the mic back. */
         fun start(ctx: Context) {
             if (!Settings.wakeWord || !WakeModel.ready(ctx)) return
+            if (com.blaze.assistant.life.LifeLogs.active) return   // life logs hold the mic (v0.19.0)
             try { ContextCompat.startForegroundService(ctx, Intent(ctx, WakeWordService::class.java).setAction(if (running) ACT_REFRESH else null)) } catch (_: Exception) { }
         }
         fun stop(ctx: Context) { ctx.stopService(Intent(ctx, WakeWordService::class.java)) }
