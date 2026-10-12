@@ -33,8 +33,8 @@ object PhoneControl {
     /** Banner words for each state ("" = no banner). */
     fun banner(s: State): Pair<String, String> = when (s) {
         State.CONNECTED -> "" to ""
-        State.RECONNECTING -> "Phone control is reconnecting…" to "Fix"
-        State.OFF -> "Android switched off Blaze phone control" to "Turn on"
+        State.RECONNECTING -> "Phone control reconnecting…" to "Fix"
+        State.OFF -> "Phone control is off" to "Turn on"
     }
 
     /** Straight to Blaze's own switch where Android allows it (Android 11+), else the accessibility list. */
