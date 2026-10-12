@@ -1,6 +1,6 @@
 # Blaze Android status
 
-- **Now:** v0.19.0 (versionCode 61): visual parity, PR #21 (branch `visual-parity`, head 9ea7de3), squash-merged as b963d74; release v0.19.0 published by the main Build APK run. Before that v0.18.0 one mind (PR #20, merge fc5f3f3). See CHANGELOG.md.
+- **Now:** v0.22.0 (versionCode 64): notification replies + life logs, PR #23 (branch `life-logs`), squash-merged on green. Before that v0.21.0 visible pointer (PR #24, merge 0245eff), v0.20.0 orient loop + background browser (PR #22, merge d15e6e2), v0.19.0 visual parity (PR #21, merge b963d74). See CHANGELOG.md.
 - **Shipped:** v0.15.0 long chats, PR #17, merge 2a86aaf. v0.16.0 student pack, PR #18, merge a499beb. v0.17.0 marketer & seller pack, PR #19, merge 2be6525. v0.18.0 one mind, PR #20, merge fc5f3f3. v0.19.0 visual parity, PR #21, merge b963d74.
 - **Needs Luke (Google Cloud project blaze-511220):** enable the Classroom API and add the scopes `classroom.courses.readonly` + `classroom.coursework.me.readonly` to the OAuth consent screen (Testing mode), and make sure the blaze-auth Worker passes them through.
 - **Plan (Luke, 2026-10-12: "build the rest", merge on green, don't ask between steps):** each its own PR, version bump, tests, screenshots.
@@ -9,6 +9,7 @@
   3. v0.17.0 marketer & seller pack: shipped (#19).
   4. v0.18.0 one mind: shipped (#20). Spec: spec in Blaze-dekstop `docs/plans/plan-one-mind.md` (shared schema + prompt text).
   5. v0.19.0 visual parity: shipped (#21).
+  6. v0.22.0 notification replies + life logs: PR #23.
 - **One mind notes for the next PR:** memories live in `filesDir/mind.db` (`Mind.Db`: tables journal, memories, meta + FTS4 `journal_fts`, `memories_fts`); the graph should read `Mind.all()` (kind, subject, related). `Memory` is a view of the table and mirrors it to prefs `memory`. Old chats are Archive (`Agent.isLive(id)` false). Idle review = WorkManager unique works `mind_review_power` / `mind_review_wifi`.
 - **Screenshots:** CI pushes PNGs + logs to the `shots` branch on every build (`ui/ShotsTest`, BLAZE_SHOTS=1). Review them after every build.
 - **Hard rules:** never change applicationId or signing; never touch keystore/ or the CI "Rotate signing key" step; never force-push main; prefs stay backward compatible; free providers only.
@@ -33,4 +34,11 @@
 - **What:** visible pointer for phone control (`phone/Pointer.kt`, hooks in `BlazeAccessibilityService.aimAt/gestureTap/swipe` and `Agent.Session.pointerGate`), Settings › Phone control › Show the pointer (`show_pointer`, on by default), `ui/PointerPreview.kt` for screenshots, `PointerTest`.
 - **Left (needs a real phone, in order):** 1) on the Galaxy A12, check that touching elsewhere on screen pauses Blaze (ACTION_OUTSIDE reaching the accessibility overlay on One UI); touching the pointer itself always pauses; 2) check the pointer size/visibility (44dp window, ~25dp arrow) and enlarge in `Pointer.Dot` if it's hard to see; 3) optional: say "Paused" in the orb panel too.
 - **Next step:** none required; open an issue or a small PR from main if the real-phone checks above show a problem.
-- **Version note:** PR #23 (`life-logs`) still declares v0.20.0 / versionCode 62; it must bump to the next free version (v0.22.0, versionCode 64) before merging.
+- **Version note:** PR #23 (`life-logs`) took v0.22.0 / versionCode 64.
+
+## life-logs (v0.22.0, versionCode 64)
+- **Merged:** PR #23 (https://github.com/lacksonkapapahue/Blaze-agent/pull/23), branch `life-logs`, squash-merged to main on green. CI green on the branch; screenshots 26-life-logs, 27-life-logs-paused, 28-replies reviewed.
+- **What it added:** `notify/Conversations.kt` (MessagingStyle reading, per-conversation rolling log in the journal as kind `notif`, people-memory links, RemoteInput replies behind a confirm card unless auto-reply is on, tools `notif_conversations` / `notif_read` / `notif_reply`), `notify/Sensitive.kt` (OTP / bank / mobile-money filter), `agent/MindLogs.kt` (journal `kind` column added with ALTER TABLE, no DB version bump; append / recent / delete by kind), `life/` (`LifeLogService` mic foreground service with Pause/Stop, Vosk small model shared with the wake word + SpeechRecognizer fallback, sound gate, auto-pause on call / other recorder / Blaze voice / battery < 15%; `LogChunker`; `LifeLogs` controller, `life_logs` tool, brainstorm summary), `ui/LifeLogsPage.kt` (Settings › Life logs and Settings › Notification replies), quick rules ("start logs", "stop logs", "brainstorm with me"), `/logs`, `/brainstorm`. Idle review now batches chat / notif / life-log rows separately and marks life-log memories "(inferred)".
+- **Not verified on a device (needs Luke on the A12):** Vosk CPU and battery with the sound gate over an hour; that `isClientSilenced` really pauses when WhatsApp records a voice note; that WhatsApp's RemoteInput reply sends from the notification; Samsung's beep on every SpeechRecognizer restart (fallback only, until the model is downloaded).
+- **Left (optional, in order):** 1) restyle Life logs / Notification replies pages with `ui/Kit.kt` like the visual-parity pages; 2) "Hey Blaze" during logs (the wake word sleeps while logs hold the mic; only "stop logs" / "pause logs" are heard from the transcript); 3) Desktop parity for the journal `kind` column and kinds `notif` / `life_log`.
+- **Next step:** install v0.22.0 on the A12, turn on notification access, try "start logs" and "reply to <name>"; file anything that misbehaves.
