@@ -377,4 +377,25 @@ class ShotsTest {
             }
         }
     }
+
+    // v0.21.0: the visible pointer over another app, paused by the user (bar), with a swipe path and a ripple.
+    @Test fun pointer() = shot("34-pointer") {
+        val c = LocalBlaze.current
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFFF4F4F4))) {
+            Column(Modifier.fillMaxSize().padding(top = 90.dp, start = 18.dp, end = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("Wi-Fi", "Bluetooth", "Mobile data", "Airplane mode", "Hotspot").forEach {
+                    Box(Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color.White).padding(18.dp)) {
+                        androidx.compose.material3.Text(it, style = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, color = androidx.compose.ui.graphics.Color(0xFF1D1A16)))
+                    }
+                }
+            }
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                drawLine(androidx.compose.ui.graphics.Color(0xFF1F4BD8).copy(alpha = 0.66f), androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.78f),
+                    androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.55f), strokeWidth = 5 * density, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                drawCircle(androidx.compose.ui.graphics.Color(0xFF1F4BD8).copy(alpha = 0.8f), 6 * density, androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.78f))
+            }
+            PointerGlyph(paused = true, ripple = 0.35f, modifier = Modifier.padding(start = 230.dp, top = 166.dp))
+            Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = androidx.compose.ui.Alignment.TopCenter) { PointerBar() }
+        }
+    }
 }

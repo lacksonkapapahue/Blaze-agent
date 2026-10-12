@@ -1440,6 +1440,7 @@ When you finish, say what you did in one short sentence.
                 // Low-data mode: how much this task used (Blaze's own traffic: models, web, browser).
                 if (Settings.lowData) try { DataMeter.chip(bytes0)?.let { chip -> msgs.lastOrNull { it.role == Role.BLAZE }?.let { addMeta(it.id, chip) } } } catch (_: Exception) { }
                 LlmClient.liteTurn = false
+                if (agentId == null) com.blaze.assistant.phone.Pointer.done()
                 thinking = ""
                 mood = Mood.IDLE
                 currentStep = 0
@@ -1565,6 +1566,8 @@ When you finish, say what you did in one short sentence.
             // Plan mode is enforced here, at dispatch, not only in the prompt.
             Modes.block(name, args, agentPlan).takeIf { it.isNotEmpty() }?.let { add(Role.STEP, "Plan mode: skipped ${name.replace('_', ' ')}"); return it }
             if (agentId != null && name in BgAgents.leadOnly) return "Error: background agents can't start or steer other agents. Do the work yourself."
+            // Visible pointer (v0.21.0): while the user has the pointer, screen actions wait for them.
+            if (name in Orient.acting && com.blaze.assistant.phone.Pointer.enabled) pointerGate(name)?.let { return it }
             // Orient loop (v0.20.0): know where we are before acting on the screen.
             val (held, glance) = try { orientFirst(name, args) } catch (e: CancellationException) { throw e } catch (_: Throwable) { null to "" }
             if (held != null) return held
@@ -1597,6 +1600,27 @@ When you finish, say what you did in one short sentence.
                     orient.saw(now)
                     null to Orient.glanceNote(Orient.compact(screen))
                 }
+            }
+        }
+
+        /** Paused → wait for the user: Resume goes on (and looks again), a double-tap clicks there, Stop ends the task. */
+        private suspend fun pointerGate(name: String): String? {
+            val P = com.blaze.assistant.phone.Pointer
+            val wasPaused = P.mode == com.blaze.assistant.phone.Pointer.Mode.PAUSED
+            if (wasPaused) { add(Role.STEP, "Paused: you have the pointer"); mood = Mood.IDLE }
+            val e = P.gate()
+            if (wasPaused) mood = Mood.ACTING
+            return when (e) {
+                null -> { if (wasPaused) orient.pkg = ""; null }
+                is com.blaze.assistant.phone.Pointer.Event.Click -> {
+                    add(Role.STEP, "Clicking where you pointed")
+                    val ok = com.blaze.assistant.phone.BlazeAccessibilityService.instance?.tapAt(e.x, e.y) ?: false
+                    orient.pkg = ""
+                    "The user paused Blaze, moved the pointer and double-tapped it, so Blaze clicked there (x=${e.x.toInt()}, y=${e.y.toInt()})" +
+                        (if (ok) "" else " but the click didn't go through") + ". Your planned $name was NOT done. Look at the screen below and carry on with the task from here."
+                }
+                com.blaze.assistant.phone.Pointer.Event.Stop -> { add(Role.STEP, "You stopped me"); job?.cancel(); "Stopped by the user." }
+                else -> null
             }
         }
 
