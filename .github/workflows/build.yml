@@ -66,6 +66,28 @@ jobs:
           set -o pipefail
           ./gradlew testReleaseUnitTest assembleRelease --stacktrace 2>&1 | tee build.log
 
+      # Preview screenshots (Robolectric, ui/ShotsTest). Never blocks a release; the PNGs and the log go to the `shots` branch.
+      - name: Screenshots
+        id: shots
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          BLAZE_SHOTS=1 ./gradlew testDebugUnitTest --tests 'com.blaze.assistant.ui.ShotsTest' --stacktrace 2>&1 | tee shots.log
+          ls -la app/build/shots
+
+      - name: Publish screenshots
+        if: always() && github.repository == 'lacksonkapapahue/Blaze-agent' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: |
+          mkdir -p /tmp/shots
+          cp app/build/shots/*.png /tmp/shots/ 2>/dev/null || true
+          { grep -E "^e: |error:|FAILURE|What went wrong" -A3 build.log 2>/dev/null | head -120; echo '----- tail -----'; tail -40 build.log 2>/dev/null; } > /tmp/shots/build.log
+          { echo "outcome: ${{ steps.shots.outcome }}  sha: ${{ github.sha }}  ref: ${{ github.head_ref || github.ref_name }}"; grep -E "^e: |FAILED|Exception|What went wrong" -A4 shots.log 2>/dev/null | head -80; echo '----- tail -----'; tail -60 shots.log 2>/dev/null; } > /tmp/shots/shots.log
+          cd /tmp/shots
+          git init -q -b shots
+          git config user.name "Blaze CI"; git config user.email "ci@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git add -A && git commit -qm "Screenshots ${{ github.sha }}" && git push -q origin shots --force
+
       # Key rotation (v1.14.2+): v1/v2 stay on the old key for Android 8, v3 moves to the new key with a lineage
       # for Android 9+. The old key keeps installed-data (so current installs update) but loses rollback,
       # permission, shared-uid and auth, so an APK signed only with the old (public) key can't replace a rotated install.

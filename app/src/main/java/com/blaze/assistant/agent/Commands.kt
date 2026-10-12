@@ -36,6 +36,18 @@ object Commands {
         Command("voice", "", "Start listening"),
         Command("orb", "", "Pin the floating orb"),
         Command("copy", "", "Copy this whole chat"),
+        Command("views", "", "Open any view: memory, jobs, design, accounts…"),
+        Command("search", "", "Search chats and views"),
+        Command("projects", "", "Your projects"),
+        Command("design", "", "Design: live preview"),
+        Command("jobs", "", "Jobs and the terminal"),
+        Command("schedule", "", "Routines and timed tasks"),
+        Command("accounts", "", "Connected apps"),
+        Command("doctor", "", "Phone health and self-check"),
+        Command("router", "", "BlazeRouter: models and keys"),
+        Command("skills", "", "Skill library"),
+        Command("gallery", "", "Things Blaze made"),
+        Command("browser", "", "Blaze's browser"),
         Command("help", "", "List all commands")
     )
 

@@ -119,14 +119,15 @@ import java.util.Calendar
 /** What the message list draws: a message, or a folded run of steps. */
 private sealed class Item(val key: String) {
     class Msg(val m: ChatMessage) : Item("m${m.id}")
-    class Steps(val steps: List<ChatMessage>, val live: Boolean, val endAt: Long) : Item("s${steps.first().id}")
+    class Steps(val steps: List<ChatMessage>, val live: Boolean, val endAt: Long, val startAt: Long) : Item("s${steps.first().id}")
 }
 
 private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item> {
     val out = mutableListOf<Item>()
     var run = mutableListOf<ChatMessage>()
-    fun flush(live: Boolean, endAt: Long) { if (run.isNotEmpty()) { out += Item.Steps(run, live, endAt); run = mutableListOf() } }
-    messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false, m.at); out += Item.Msg(m) } }
+    var prevAt = 0L
+    fun flush(live: Boolean, endAt: Long) { if (run.isNotEmpty()) { out += Item.Steps(run, live, endAt, prevAt.takeIf { it > 0 } ?: run.first().at); run = mutableListOf() } }
+    messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false, m.at); out += Item.Msg(m); prevAt = m.at } }
     flush(working, 0L)
     return out
 }
@@ -262,17 +263,74 @@ fun ChatScreen() {
     val callReq by Voice.callRequests.collectAsState()
     LaunchedEffect(callReq) { if (callReq > 0) startCall() }
 
+    // ---- 0.12 shell state ----
+    var shellMode by rememberSaveable { mutableStateOf("chat") }
+    var projectOpen by rememberSaveable { mutableStateOf("") }
+    var showViews by remember { mutableStateOf(false) }
+    var showSearch by remember { mutableStateOf(false) }
+    var avatarMenu by remember { mutableStateOf(false) }
+    var plusOpen by remember { mutableStateOf(false) }
+    val showing by Views.showing.collectAsState()
+    val designTarget by Views.designTarget.collectAsState()
+    val work by com.blaze.assistant.agent.Modes.work.collectAsState()
+    val approval by com.blaze.assistant.agent.Modes.approval.collectAsState()
+    val bgAgents by com.blaze.assistant.agent.BgAgents.all.collectAsState()
+    val account by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
+    val projects by com.blaze.assistant.agent.Projects.all.collectAsState()
+    val allChats by Agent.chats.collectAsState()
+    val busyChats by Agent.busyChats.collectAsState()
+    val question by Agent.pendingQuestion.collectAsState()
+    val currentChat by Agent.chatId.collectAsState()
+    val liveStatus by Agent.status.collectAsState()
+
+    fun exitView() { Views.showing.value = "" }
+    fun openView(v: BlazeView, target: String = "") {
+        showViews = false; showSearch = false; plusOpen = false; avatarMenu = false
+        when (v.special) {
+            "chats" -> { Agent.refreshChats(); showChats = true }
+            "gallery" -> GalleryUi.open.value = true
+            "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx)
+            "design" -> { if (target.isNotBlank()) Views.designTarget.value = target; shellMode = "chat"; Views.showing.value = "design" }
+            else -> settingsPage = v.page ?: ""
+        }
+    }
+    val viewReq by Views.request.collectAsState()
+    LaunchedEffect(viewReq) {
+        val r = viewReq ?: return@LaunchedEffect
+        Views.request.value = null
+        Views.find(r.id)?.let { openView(it, r.target) }
+    }
+
     fun send(raw: String) {
         val text = raw.trim()
         if (callWords.matches(text)) { input = TextFieldValue(""); startCall(); return }
+        val cmdName = text.removePrefix("/").substringBefore(' ').lowercase()
+        if (text.startsWith("/") && !text.startsWith("//")) {
+            if (cmdName == "views") { input = TextFieldValue(""); showViews = true; return }
+            if (cmdName == "search") { input = TextFieldValue(""); showSearch = true; return }
+            if (cmdName == "projects") { input = TextFieldValue(""); shellMode = "projects"; return }
+            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser") && !text.contains(' ')) {
+                input = TextFieldValue(""); Views.find(cmdName)?.let { openView(it) }; return
+            }
+        }
         val cmd = CommandRunner.run(ctx, text, openSettings = { settingsPage = it }, openChats = { Agent.refreshChats(); showChats = true }, listen = { onMic() })
         if (cmd == "") { input = TextFieldValue(""); return }
         val body = cmd ?: text
         val full = if (quote.isNotBlank()) quote.lines().joinToString("\n") { "> $it" } + "\n\n" + body else body
         if (full.isBlank() && pending.isEmpty()) return
         if (mood != Mood.IDLE) return
+        val pid = com.blaze.assistant.agent.Projects.current.value
+        if (pid.isNotBlank() && com.blaze.assistant.agent.Projects.of(Agent.chatId.value) == null) com.blaze.assistant.agent.Projects.assign(Agent.chatId.value, pid)
         Agent.send(full, attachments = pending)
         pending = emptyList(); quote = ""; input = TextFieldValue("")
+    }
+    fun newChat(projectId: String = "") {
+        Agent.clear(); quote = ""; com.blaze.assistant.agent.Projects.current.value = projectId
+        exitView(); shellMode = "chat"
+    }
+    fun openChat(id: String) {
+        Agent.open(id); com.blaze.assistant.agent.Projects.current.value = com.blaze.assistant.agent.Projects.of(id)?.id.orEmpty()
+        drawer = false; showSearch = false; exitView(); shellMode = "chat"
     }
 
     // Selection toolbar state.
@@ -285,9 +343,35 @@ fun ChatScreen() {
     Box(Modifier.fillMaxSize().background(c.paper)) {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            TopBar(mood, controlOn = Settings.phoneControl && a11yOn, onMenu = { drawer = true }, onNew = { Agent.clear(); quote = "" }, onCall = { startCall() })
+            val me = account.user
+            ShellTopBar(mode = shellMode,
+                onMode = { m -> if (m == "chat" && shellMode == "chat" && showing.isEmpty()) { Agent.refreshChats(); drawer = true } else { shellMode = m; if (m == "projects") projectOpen = "" } },
+                onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
+                onSearch = { Agent.refreshChats(); showSearch = true },
+                routerOk = com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
+                onRouter = { settingsPage = "ai" },
+                avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
+                onAvatar = { avatarMenu = true }, mood = mood,
+                viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
+                onExit = { exitView() })
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (!hasMessages) {
+                if (shellMode == "projects") {
+                    val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
+                    ProjectsPane(projects, allChats, busyChats, needs, projectOpen,
+                        onOpen = { projectOpen = it }, onBack = { projectOpen = "" },
+                        onCreate = { projectOpen = com.blaze.assistant.agent.Projects.create(it).id },
+                        onChat = { openChat(it) }, onNewChat = { newChat(it) },
+                        onInstructions = { id, t -> com.blaze.assistant.agent.Projects.setInstructions(id, t) },
+                        onDelete = { com.blaze.assistant.agent.Projects.delete(it); projectOpen = "" })
+                    LaunchedEffect(Unit) { Agent.refreshChats() }
+                } else if (showing == "design") {
+                    DesignView(designTarget, busy = mood != Mood.IDLE, status = liveStatus,
+                        onAsk = { send(it) }, onOpenInBrowser = { u ->
+                            try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            catch (_: Exception) { com.blaze.assistant.browser.BrowserTools.show(ctx) } },
+                        home = try { com.blaze.assistant.terminal.Terminal.home() } catch (_: Exception) { null })
+                    BackHandler { exitView() }
+                } else if (!hasMessages) {
                     Welcome(needsSetup = !com.blaze.assistant.agent.Brains.hasAny(), onSetup = { setupPage = 0; onboard = true }) { Agent.send(it) }
                 } else {
                     val dens = LocalDensity.current
@@ -299,37 +383,66 @@ fun ChatScreen() {
                     }
                 }
             }
-            if (voiceState == Voice.State.LISTENING) ListeningStrip()
-            LaunchedEffect(a11yOn) { if (a11yOn) Settings.setBool("a11y_seen", true) }
-            if (!a11yOn && Settings.phoneControl && Settings.bool("a11y_seen", false)) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent)
-                .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Label("Blaze lost phone control", size = 10.sp, modifier = Modifier.weight(1f))
-                Label("Turn it back on", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
-                    ComeBack.watch(ctx) { BlazeAccessibilityService.isEnabled(ctx) }
-                    ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                }.padding(8.dp))
+            if (shellMode == "chat" && showing.isEmpty()) {
+                if (voiceState == Voice.State.LISTENING) ListeningStrip()
+                LaunchedEffect(a11yOn) { if (a11yOn) Settings.setBool("a11y_seen", true) }
+                if (!a11yOn && Settings.phoneControl && Settings.bool("a11y_seen", false)) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent)
+                    .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Label("Blaze lost phone control", size = 10.sp, modifier = Modifier.weight(1f))
+                    Label("Turn it back on", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+                        ComeBack.watch(ctx) { BlazeAccessibilityService.isEnabled(ctx) }
+                        ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.padding(8.dp))
+                }
             }
             ConfirmCard()
             QuestionCard()
-            val sugg = remember(input.text) { CommandRunner.suggest(input.text) }
-            if (sugg.isNotEmpty()) SuggestionList(sugg) { s ->
-                if (s.runNow) send(s.fill) else input = TextFieldValue(s.fill, TextRange(s.fill.length))
+            if (shellMode == "chat" && showing.isEmpty()) {
+                val sugg = remember(input.text) { fileSuggestions(input.text).ifEmpty { CommandRunner.suggest(input.text) } }
+                if (sugg.isNotEmpty() && !showViews) SuggestionList(sugg) { s ->
+                    if (s.runNow) send(s.fill) else input = TextFieldValue(s.fill, TextRange(s.fill.length))
+                }
+                if (quote.isNotBlank()) QuoteStrip(quote) { quote = "" }
+                if (pending.isNotEmpty() || loadingFiles) AttachmentStrip(pending, loadingFiles) { a -> pending = pending - a }
+                if (clipHasImage && pending.isEmpty() && !plusOpen) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.hair)
+                    .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Label("Image on your clipboard", size = 10.sp, modifier = Modifier.weight(1f))
+                    Label("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
+                    Label("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
+                }
+                if (showViews) {
+                    val badges = mapOf("agents" to bgAgents.count { it.live }.let { if (it > 0) "$it LIVE" else "" },
+                        "chats" to busyChats.size.let { if (it > 0) "$it WORKING" else "" })
+                    ViewsSheet(badges, onPick = { openView(it) }, onDismiss = { showViews = false })
+                    BackHandler { showViews = false }
+                }
+                if (plusOpen) {
+                    val model = if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "Auto (free)" else Settings.model.substringAfterLast('/').take(28)
+                    PlusMenu(plusItems(work, approval, model, clipHasImage)) { id ->
+                        plusOpen = false
+                        when (id) {
+                            "camera" -> openCamera()
+                            "photos" -> photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            "files" -> files.launch(arrayOf("image/*", "application/pdf", "text/*"))
+                            "atfile" -> { val t = input.text.let { if (it.isEmpty() || it.endsWith(" ")) it else "$it " } + "@"; input = TextFieldValue(t, TextRange(t.length)) }
+                            "paste" -> pasteImage()
+                            "voice" -> onMic()
+                            "call" -> startCall()
+                            "plan" -> com.blaze.assistant.agent.Modes.toggleWork()
+                            "approval" -> com.blaze.assistant.agent.Modes.toggleApproval()
+                            "model" -> settingsPage = "ai"
+                            "views" -> showViews = true
+                            "new" -> newChat()
+                        }
+                    }
+                    BackHandler { plusOpen = false }
+                }
+                Composer(input, { input = it }, busy = mood != Mood.IDLE, canSend = input.text.isNotBlank() || pending.isNotEmpty(),
+                    plusOpen = plusOpen, chip = modeChip(work, approval), agents = bgAgents.count { it.live },
+                    listening = voiceState == Voice.State.LISTENING, speaking = voiceState == Voice.State.SPEAKING,
+                    onPlus = { plusOpen = !plusOpen; showViews = false }, onMic = { onMic() }, onSend = { send(input.text) }, onStop = { Agent.stop() },
+                    onChip = { plusOpen = true })
             }
-            if (quote.isNotBlank()) QuoteStrip(quote) { quote = "" }
-            if (pending.isNotEmpty() || loadingFiles) AttachmentStrip(pending, loadingFiles) { a -> pending = pending - a }
-            if (clipHasImage && pending.isEmpty()) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.hair)
-                .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Label("Image on your clipboard", size = 10.sp, modifier = Modifier.weight(1f))
-                Label("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
-                Label("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
-            }
-            if (com.blaze.assistant.agent.Settings.bool("mode_bar", true)) ModeBar()
-            InputBar(input, { input = it }, busy = mood != Mood.IDLE, voice = voiceState, hasFiles = pending.isNotEmpty(),
-                onCamera = { openCamera() },
-                onPhotos = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onFiles = { files.launch(arrayOf("image/*", "application/pdf", "text/*")) },
-                onPasteImage = if (clipHasImage) ({ pasteImage() }) else null,
-                onMic = { onMic() }, onSend = { send(input.text) }, onStop = { Agent.stop() })
         }
 
         // Copy · Quote · Select all, above the selected words.
@@ -351,21 +464,53 @@ fun ChatScreen() {
             }
         }
 
-        // Sidebar
+        // Recent chats rail (tap "Chat" again).
         AnimatedVisibility(drawer, enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable(remember { MutableInteractionSource() }, null) { drawer = false })
         }
         AnimatedVisibility(drawer, enter = slideInHorizontally(tween(220)) { -it }, exit = slideOutHorizontally(tween(200)) { -it }) {
-            Sidebar(
-                onClose = { drawer = false },
-                onNew = { Agent.clear(); quote = ""; drawer = false },
-                onAllChats = { Agent.refreshChats(); showChats = true; drawer = false },
-                onPage = { settingsPage = it; drawer = false },
-                onOpenChat = { Agent.open(it); drawer = false }
-            )
+            Box(Modifier.statusBarsPadding().navigationBarsPadding()) {
+                RecentRail(allChats, busyChats, currentChat, onNew = { newChat(); drawer = false }, onChat = { openChat(it) },
+                    onAll = { Agent.refreshChats(); showChats = true; drawer = false }, onClose = { drawer = false })
+            }
         }
         if (drawer) BackHandler { drawer = false }
 
+        if (avatarMenu) {
+            val dark = c.dark
+            val themeSub = when (ThemeMode.mode.value) { "dark" -> "Dark"; "light" -> "Light"; else -> "System" }
+            val items = buildList {
+                add(MenuItem("account", "Account", if (me != null) "Signed in" else "Sign in"))
+                add(MenuItem("settings", "Settings"))
+                add(MenuItem("router", "BlazeRouter", if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "AUTO" else Settings.model.substringAfterLast('/').take(14)))
+                add(MenuItem("views", "All views", "/VIEWS"))
+                add(MenuItem("control", "Phone control", if (Settings.phoneControl && a11yOn) "ON" else "OFF"))
+                add(MenuItem("theme", if (dark) "Light theme" else "Dark theme", themeSub))
+                add(MenuItem("update", "Check for updates", "v" + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault("")))
+                if (me != null) add(MenuItem("signout", "Sign out"))
+            }
+            AvatarMenu(me?.name.orEmpty().ifBlank { Settings.userName }, me?.email.orEmpty(), items,
+                onPick = { id ->
+                    avatarMenu = false
+                    when (id) {
+                        "account" -> settingsPage = "account"
+                        "settings" -> settingsPage = ""
+                        "router" -> settingsPage = "ai"
+                        "views" -> showViews = true
+                        "control" -> settingsPage = "control"
+                        "theme" -> ThemeMode.set(if (dark) "light" else "dark")
+                        "update" -> com.blaze.assistant.update.Updater.start(ctx)
+                        "signout" -> scope.launch { com.blaze.assistant.connect.BlazeAccount.signOut() }
+                    }
+                },
+                onLongPick = { id -> if (id == "theme") { avatarMenu = false; ThemeMode.set("system"); Toast.makeText(ctx, "Following your phone's theme", Toast.LENGTH_SHORT).show() } },
+                onDismiss = { avatarMenu = false })
+            BackHandler { avatarMenu = false }
+        }
+        if (showSearch) {
+            SearchScreen(allChats, onChat = { openChat(it) }, onView = { openView(it) }, onDismiss = { showSearch = false })
+            BackHandler { showSearch = false }
+        }
         if (showChats) ChatsSheet(onDismiss = { showChats = false })
         if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
         if (onboard) SetupFlow(setupPage) { prompt ->
@@ -386,113 +531,19 @@ fun ChatScreen() {
     }
 }
 
-@Composable
-private fun TopBar(mood: Mood, controlOn: Boolean, onMenu: () -> Unit, onNew: () -> Unit, onCall: () -> Unit = {}) {
-    val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().background(c.paper).hairlineBottom(c.hair)) {
-        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable(onClick = onMenu), contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(18.dp, 14.dp)) {
-                    val h = 2.dp.toPx()
-                    listOf(0f, size.height / 2 - h / 2, size.height - h).forEachIndexed { i, y ->
-                        drawRect(c.ink, Offset(0f, y), Size(if (i == 1) size.width * 0.7f else size.width, h))
-                    }
-                }
-            }
-            BrandMark(mood, 26.dp)
-            Spacer(Modifier.width(10.dp))
-            Text("Blaze", modifier = Modifier.weight(1f),
-                style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, letterSpacing = (-0.015).em, color = c.ink))
-            ThemeButton(Modifier.padding(end = 8.dp))
-            Box(Modifier.padding(end = 8.dp).size(38.dp).hairline(c.hair).clickable(onClick = onCall), contentAlignment = Alignment.Center) {
-                PhoneGlyph(c.ink, 16.dp)
-            }
-            Row(Modifier.hairline(c.hair).clickable(onClick = onNew).padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("+", style = TextStyle(fontFamily = Type.Display, fontSize = 15.sp, color = c.ink))
-                Spacer(Modifier.width(6.dp))
-                Label("New", color = c.ink, size = 11.sp)
-            }
-        }
-        Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 20.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(if (controlOn) c.accent else c.weak))
-            Spacer(Modifier.width(8.dp))
-            val status by Agent.status.collectAsState()
-            Label(when (mood) {
-                Mood.IDLE -> if (controlOn) "Phone control on" else "Chat only"
-                else -> status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) }
-            }, size = 10.sp, modifier = Modifier.weight(1f), maxLines = 1)
-            // Show what really answers: Auto, the picked model, and a separate steps model if one is set.
-            val main = if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "AUTO (FREE)" else Settings.model.substringAfterLast('/').take(24)
-            val steps = Settings.stepsProvider.takeIf { it.isNotBlank() && it != Settings.providerId }
-                ?.let { if (it == com.blaze.assistant.agent.Providers.AUTO) " + steps: auto" else " + steps: " + Settings.stepsModel.substringAfterLast('/').take(12) }.orEmpty()
-            Label(main + steps, color = c.weak, size = 9.sp)
-        }
-    }
-}
-
-@Composable
-private fun Sidebar(onClose: () -> Unit, onNew: () -> Unit, onAllChats: () -> Unit, onPage: (String) -> Unit, onOpenChat: (String) -> Unit) {
-    val c = LocalBlaze.current
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val chats by Agent.chats.collectAsState()
-    val busy by Agent.busyChats.collectAsState()
-    val current by Agent.chatId.collectAsState()
-    var q by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) { Agent.refreshChats() }
-    Column(Modifier.fillMaxHeight().width(304.dp).background(c.paper).hairline(c.hair)
-        .clickable(remember { MutableInteractionSource() }, null) { }
-        .statusBarsPadding().navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            BrandMark(Mood.IDLE, 26.dp)
-            Spacer(Modifier.width(10.dp))
-            Text("Blaze", modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = c.ink))
-            Label("×", size = 16.sp, modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
-        }
-        Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(48.dp).background(c.ink).clickable(onClick = onNew),
-            contentAlignment = Alignment.Center) { Label("+  New chat", color = c.paper, size = 11.sp) }
-        Spacer(Modifier.height(10.dp))
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            val nav = listOf("chats" to "Chats", "gallery" to "Gallery", "browser" to "Browser", "routines" to "Routines", "memory" to "Memory", "commands" to "Slash commands",
-                "usage" to "Usage", "" to "Settings")
-            nav.forEach { (id, label) ->
-                Row(Modifier.fillMaxWidth().clickable { when (id) { "chats" -> onAllChats(); "gallery" -> { GalleryUi.open.value = true; onClose() }; "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx); else -> onPage(id) } }.padding(horizontal = 20.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(5.dp).background(c.weak))
-                    Spacer(Modifier.width(14.dp))
-                    Text(label, style = TextStyle(fontFamily = Type.Display, fontSize = 16.sp, color = c.ink))
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(c.hair))
-            Spacer(Modifier.height(10.dp))
-            Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().hairline(c.hair).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                if (q.isEmpty()) Text("Search chats", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.weak))
-                BasicTextField(q, { q = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
-            }
-            Spacer(Modifier.height(6.dp))
-            Label("Recent", size = 9.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            val shown = (if (q.isBlank()) chats else chats.filter { it.title.contains(q, true) || it.preview.contains(q, true) }).take(40)
-            shown.forEach { ch ->
-                Row(Modifier.fillMaxWidth().background(if (ch.id == current) c.faint else Color.Transparent)
-                    .clickable { onOpenChat(ch.id) }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (ch.pinned) { Box(Modifier.size(5.dp).background(c.accent)); Spacer(Modifier.width(8.dp)) }
-                    Text(ch.title.ifBlank { "Untitled" }, maxLines = 1, modifier = Modifier.weight(1f),
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.body))
-                    if (ch.id in busy) Label("Working", color = c.accent, size = 9.sp)
-                }
-            }
-            if (shown.isEmpty()) Text("No chats yet", modifier = Modifier.padding(20.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
-        }
-        Row(Modifier.fillMaxWidth().hairlineTop(c.hair).clickable { onPage("ai") }.padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Label(Settings.provider.name, size = 9.sp)
-                Text(Settings.model, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
-            }
-            Label("Change", color = c.accent, size = 10.sp)
-        }
-    }
+/** "@ind" → files in Blaze's home whose path matches, to mention in the message. */
+private fun fileSuggestions(text: String): List<Suggestion> {
+    val tok = text.substringAfterLast(' ').substringAfterLast('\n')
+    if (!tok.startsWith("@") || text.startsWith("/")) return emptyList()
+    val q = tok.removePrefix("@").lowercase()
+    val home = try { com.blaze.assistant.terminal.Terminal.home() } catch (_: Exception) { return emptyList() }
+    val found = home.walkTopDown().maxDepth(3).onEnter { !it.name.startsWith(".") || it == home }
+        .filter { it.isFile && !it.name.startsWith(".") }
+        .map { it.relativeTo(home).path }
+        .filter { q.isEmpty() || it.lowercase().contains(q) }
+        .take(12).toList()
+    val head = text.removeSuffix(tok)
+    return found.map { p -> Suggestion("@$p", "file in ~/", "$head@~/$p ", runNow = false) }
 }
 
 @Composable
@@ -533,7 +584,10 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
             items(items, key = { it.key }) { item ->
                 when (item) {
-                    is Item.Steps -> if (Settings.showSteps) StepsGroup(item.steps, item.live) else CalmSteps(item.steps, item.live, item.endAt)
+                    is Item.Steps -> {
+                        val st by Agent.status.collectAsState()
+                        WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps)
+                    }
                     is Item.Msg -> Entry(item.m, canAct = mood == Mood.IDLE, onQuote = onQuote,
                         followups = if (item.m.id == lastBlazeId && mood == Mood.IDLE && Settings.followups) item.m.followups else emptyList(),
                         onFollowup = onFollowup)
@@ -542,13 +596,13 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
             item(key = "working") {
                 val live by Agent.thinking.collectAsState()
                 val status by Agent.status.collectAsState()
+                // One live card per turn: before the first step it's an empty "Working · 3s" card.
+                val hasLiveSteps = (items.lastOrNull() as? Item.Steps)?.live == true
                 AnimatedVisibility(mood != Mood.IDLE, enter = fadeIn(), exit = fadeOut()) {
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
-                            BrandMark(mood, 22.dp)
-                            Spacer(Modifier.width(10.dp))
-                            BlinkLabel(status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) })
-                        }
+                        if (!hasLiveSteps) WorkCard(emptyList(), live = true,
+                            startAt = messages.lastOrNull { it.role == Role.USER }?.at ?: 0L, endAt = 0L,
+                            status = status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) })
                         if (live.isNotBlank() && Settings.showReasoning) ReasoningBlock(live, liveNow = true)
                     }
                 }
@@ -653,10 +707,8 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
     val c = LocalBlaze.current
     when (m.role) {
         Role.USER -> SwipeToQuote(true, onQuote = { onQuote(splitQuote(m.text).second) }) { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-            Label("You", color = c.weak, size = 10.sp)
-            Spacer(Modifier.height(6.dp))
             val (quoted, body) = splitQuote(m.text)
-            Column(Modifier.widthIn(max = 310.dp).background(c.ink).padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Column(Modifier.widthIn(max = 300.dp).background(c.ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
                 if (quoted.isNotEmpty()) {
                     Text(quoted, maxLines = 4, modifier = Modifier.hairlineStart(c.paper.copy(alpha = 0.5f)).padding(start = 10.dp, bottom = 2.dp),
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.paper.copy(alpha = 0.65f)))
@@ -674,10 +726,9 @@ private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, fo
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
         else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
         else SwipeToQuote(true, onQuote = { onQuote(m.text) }) { Column(Modifier.fillMaxWidth()) {
-            Label("Blaze", color = c.accent, size = 10.sp)
             if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
-            Spacer(Modifier.height(6.dp))
-            Box(Modifier.widthIn(max = 330.dp).background(c.paper).hairline(c.hair).padding(horizontal = 16.dp, vertical = 12.dp)) {
+            // Blaze answers in plain text, no bubble; cards inside stay square hairline boxes.
+            Box(Modifier.fillMaxWidth().padding(top = 2.dp)) {
                 AnswerBody(m.id, m.text)
             }
             if (m.media.isNotEmpty()) MediaStrip(m.media)
@@ -772,86 +823,6 @@ private fun SuggestionList(list: List<Suggestion>, onPick: (Suggestion) -> Unit)
                 Text(s.title, maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 13.sp, color = c.ink))
                 Spacer(Modifier.width(12.dp))
                 Text(s.sub, maxLines = 1, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-            }
-        }
-    }
-}
-
-@Composable
-private fun InputBar(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boolean, voice: Voice.State, hasFiles: Boolean,
-                     onCamera: () -> Unit, onPhotos: () -> Unit, onFiles: () -> Unit, onPasteImage: (() -> Unit)?,
-                     onMic: () -> Unit, onSend: () -> Unit, onStop: () -> Unit) {
-    val c = LocalBlaze.current
-    var menu by remember { mutableStateOf(false) }
-    fun submit() { if ((value.text.isNotBlank() || hasFiles) && !busy) onSend() }
-    Column(Modifier.fillMaxWidth().background(c.paper)) {
-        AnimatedVisibility(menu, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 14.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val opts = buildList {
-                    add("Camera" to onCamera); add("Photos" to onPhotos); add("Files" to onFiles)
-                    onPasteImage?.let { add("Paste" to it) }
-                }
-                opts.forEach { (label, act) ->
-                    Column(Modifier.weight(1f).hairline(c.hair).clickable { menu = false; act() }.padding(vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally) {
-                        AttachGlyph(label, c.ink)
-                        Spacer(Modifier.height(6.dp))
-                        Label(label, color = c.ink, size = 10.sp)
-                    }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(14.dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.size(50.dp).background(if (menu) c.ink else c.paper).hairline(if (menu) c.ink else c.hair).clickable { menu = !menu },
-                contentAlignment = Alignment.Center) {
-                Text(if (menu) "×" else "+", style = TextStyle(fontFamily = Type.Display, fontSize = 24.sp, color = if (menu) c.paper else c.ink))
-            }
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 14.dp, vertical = 14.dp)) {
-                if (value.text.isEmpty()) Text("Ask Blaze, or type /", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
-                BasicTextField(value = value, onValueChange = onValue,
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink),
-                    cursorBrush = SolidColor(c.accent), maxLines = 6,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { submit() }),
-                    modifier = Modifier.fillMaxWidth())
-            }
-            Spacer(Modifier.width(8.dp))
-            val micOn = voice != Voice.State.IDLE
-            Box(Modifier.size(50.dp).background(if (micOn) c.accent else c.paper).hairline(if (micOn) c.accent else c.hair).clickable(onClick = onMic),
-                contentAlignment = Alignment.Center) { MicGlyph(if (micOn) c.paper else c.ink, speaking = voice == Voice.State.SPEAKING) }
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.height(50.dp).background(if (busy) c.accent else c.ink).clickable { if (busy) onStop() else submit() }.padding(horizontal = 18.dp),
-                contentAlignment = Alignment.Center) { Label(if (busy) "Stop" else "Send", color = c.paper, size = 12.sp) }
-        }
-    }
-}
-
-/** Square-edged icons for the attach menu. */
-@Composable
-private fun AttachGlyph(kind: String, color: Color) {
-    Canvas(Modifier.size(20.dp)) {
-        val u = size.width / 10f
-        val st = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.4f * u)
-        when (kind) {
-            "Camera" -> {
-                drawRect(color, Offset(0.5f * u, 2.5f * u), Size(9f * u, 6.5f * u), style = st)
-                drawRect(color, Offset(3f * u, 1f * u), Size(4f * u, 1.5f * u))
-                drawCircle(color, 1.8f * u, Offset(5f * u, 5.8f * u), style = st)
-            }
-            "Photos" -> {
-                drawRect(color, Offset(0.5f * u, 1f * u), Size(9f * u, 8f * u), style = st)
-                drawCircle(color, 0.9f * u, Offset(3f * u, 3.5f * u))
-                val p = androidx.compose.ui.graphics.Path().apply { moveTo(1f * u, 8.5f * u); lineTo(4f * u, 5f * u); lineTo(6f * u, 7f * u); lineTo(7.5f * u, 5.5f * u); lineTo(9f * u, 8.5f * u); close() }
-                drawPath(p, color)
-            }
-            "Files" -> {
-                val p = androidx.compose.ui.graphics.Path().apply { moveTo(0.5f * u, 2f * u); lineTo(4f * u, 2f * u); lineTo(5f * u, 3.2f * u); lineTo(9.5f * u, 3.2f * u); lineTo(9.5f * u, 9f * u); lineTo(0.5f * u, 9f * u); close() }
-                drawPath(p, color, style = st)
-            }
-            else -> {
-                drawRect(color, Offset(1.5f * u, 1.5f * u), Size(7f * u, 8f * u), style = st)
-                drawRect(color, Offset(3.5f * u, 0.5f * u), Size(3f * u, 2f * u))
             }
         }
     }
@@ -963,25 +934,6 @@ private fun AttachmentStrip(files: List<com.blaze.assistant.agent.Attachment>, l
         if (loading) Label("Reading…", color = c.accent, size = 10.sp)
     }
 }
-
-/** Square-edged mic drawn on canvas (or a stop square while speaking). */
-@Composable
-private fun MicGlyph(color: androidx.compose.ui.graphics.Color, speaking: Boolean) {
-    androidx.compose.foundation.Canvas(Modifier.size(20.dp)) {
-        val u = size.width / 10f
-        if (speaking) {
-            drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(3 * u, 3 * u), size = androidx.compose.ui.geometry.Size(4 * u, 4 * u))
-            return@Canvas
-        }
-        drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(3.5f * u, 0f), size = androidx.compose.ui.geometry.Size(3 * u, 6 * u))
-        val st = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2f * u)
-        drawArc(color, 0f, 180f, false, topLeft = androidx.compose.ui.geometry.Offset(1.8f * u, 1.5f * u),
-            size = androidx.compose.ui.geometry.Size(6.4f * u, 6.4f * u), style = st)
-        drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(4.4f * u, 7.9f * u), size = androidx.compose.ui.geometry.Size(1.2f * u, 1.6f * u))
-        drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(3f * u, 9f * u), size = androidx.compose.ui.geometry.Size(4f * u, 1f * u))
-    }
-}
-
 
 /**
  * Shown under "credits used up": pick another provider + model in two taps, then Blaze carries on.
