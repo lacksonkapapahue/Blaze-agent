@@ -17,7 +17,7 @@ object Views {
     val all = listOf(
         BlazeView("chats", "Archive", "Chats from before one mind, read-only", special = "chats", aliases = listOf("history", "archive")),
         BlazeView("projects", "Projects", "Ongoing efforts with their own threads, brief and instructions", special = "projects", aliases = listOf("project")),
-        BlazeView("design", "Design", "Live preview of pages Blaze builds", special = "design", aliases = listOf("preview", "studio")),
+        BlazeView("design", "Design", "Live preview of anything visual: 3D scenes, art, sites, UI mockups, diagrams, charts, posters, slides", special = "design", aliases = listOf("preview", "studio", "3d", "designs")),
         BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learning")),
         BlazeView("learn", "Learn", "Flashcards with spaced repetition, Classroom, low-data mode", page = "learn", aliases = listOf("flashcards", "study", "student", "classroom")),
         BlazeView("seller", "Seller", "Brand kit, store digest, posts, ads and listings", page = "seller", aliases = listOf("store", "shop", "marketing", "marketer", "brand")),
@@ -70,10 +70,10 @@ object Views {
     const val TOOL = "open_view"
 
     fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", TOOL)
-        .put("description", "Switch Blaze's own screen to one of its views: design (live preview of a web page, HTML file or local server you built), " +
+        .put("description", "Switch Blaze's own screen to one of its views: design (live preview of anything visual: a 3D scene, art, a site, UI mockup, diagram, chart, poster or slides; with no target it shows the current design; make or change designs with the design tool), " +
             "learn (flashcard decks; open it after flashcards add), memory, jobs, schedule, projects, agents, accounts, router (models/keys), skills, gallery, browser, doctor, usage, settings, chats (Archive). " +
             "Output that fits a view is made there and the view opened, never dumped in chat. " +
-            "The user can always tap Exit to come back to the chat. For design pass target = the file path (e.g. ~/site/index.html) or URL to preview.")
+            "The user can always tap Exit to come back to the chat. For design pass target = the file path (e.g. ~/site/index.html) or URL to preview, or nothing for the current design.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("view", JSONObject().put("type", "string").put("enum", JSONArray(all.map { it.id })))
             .put("target", JSONObject().put("type", "string").put("description", "design: file path or URL to preview"))
@@ -82,7 +82,7 @@ object Views {
             .put("required", JSONArray(listOf("view")))))
 
     /** Kept for older callers; the full VIEWS block is agent/ViewRouter.PROMPT since v0.23.0. */
-    const val PROMPT_LINE = "\nVIEWS: when a task is visual (a website, page, design, poster, 3D), call open_view view=design with the file or URL as target, without asking. " +
+    const val PROMPT_LINE = "\nVIEWS: when a task is visual (a 3D scene, website, page, UI mockup, diagram, chart, poster, art), make it with the design tool (it opens Design), or call open_view view=design with the file or URL as target, without asking. " +
         "For other views, set ask=true unless the user asked for that view."
 
     /** Plain-words step line for the tool. */

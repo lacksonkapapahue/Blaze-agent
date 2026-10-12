@@ -11,7 +11,7 @@ object Friendly {
     private val installRe = Regex("""(?i)\b(npm|pnpm|yarn|bun) (i|install|add)\b|\bpip3? install\b|\b(apt|apt-get|apk|pkg|pacman|cargo|go) (install|add|-S|get)\b""")
 
     /** Tools that write their own step line, so no second one is added. */
-    val selfNarrating = setOf("find_tool", "load_tools", "remember", "forget", "generate_image", "ask_user")
+    val selfNarrating = setOf("find_tool", "load_tools", "remember", "forget", "generate_image", "ask_user", "design")
 
     fun say(name: String, a: JSONObject): String {
         fun v(k: String) = a.optString(k).lineSequence().firstOrNull().orEmpty().trim()

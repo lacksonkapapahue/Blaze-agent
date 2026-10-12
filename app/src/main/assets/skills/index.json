@@ -163,8 +163,8 @@
   },
   {
    "name": "three-d-design",
-   "version": 1,
-   "sha256": "2944743887a931f710347c5c7c232f1a231d7385bed69a16773439e59b30078e",
+   "version": 2,
+   "sha256": "72797b795022cb9bf917ded5b46d9f40039fd1ca7b6fd478f170b9ab3bee6f2f",
    "files": [
     "SKILL.md",
     "assets/mockup.html"
