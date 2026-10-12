@@ -121,7 +121,7 @@ class DesignRenderTest {
         val page = Designs.render3d(template, rocket())
         val out = DesignServe.prepareHtml(page, is3d = true)
         val hookAt = out.indexOf("window.BlazeDesign")
-        assertTrue(hookAt in 0 until out.indexOf("blaze-parts"))
+        assertTrue(hookAt in 0 until out.indexOf("id=\"blaze-parts\""))
         assertTrue("hook sits right after <head>", out.indexOf("<head>") < hookAt && hookAt < out.indexOf("<title>"))
         assertTrue(out.contains("IS3D=true"))
         assertFalse("the static CDN importmap is gone", out.contains("<script type=\"importmap\">"))
