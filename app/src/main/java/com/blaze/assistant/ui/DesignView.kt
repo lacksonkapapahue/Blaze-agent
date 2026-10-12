@@ -49,6 +49,30 @@ fun designUrl(target: String, home: File?): String {
 }
 
 /**
+ * v0.23.2: three.js works offline. 3D designs import three.js from a CDN (importmap); the Design view
+ * serves those requests from copies bundled in the APK (assets/design/three, three.js r170, MIT), so a
+ * scene opens with no network and never waits on the CDN. Returns the asset name for [url], or null.
+ */
+fun bundledThree(url: String): String? {
+    val u = url.substringBefore('?').substringBefore('#')
+    if (!Regex("^https?://(cdn\\.jsdelivr\\.net|unpkg\\.com|cdnjs\\.cloudflare\\.com|esm\\.sh|ga\\.jspm\\.io)/", RegexOption.IGNORE_CASE).containsMatchIn(u)) return null
+    if (!u.contains("three", ignoreCase = true)) return null
+    return when {
+        Regex("/build/three\\.module(\\.min)?\\.js$").containsMatchIn(u) || Regex("/three\\.js/r?[\\d.]+/three\\.module(\\.min)?\\.js$").containsMatchIn(u) -> "three.module.min.js"
+        u.endsWith("/examples/jsm/controls/OrbitControls.js") || u.endsWith("/addons/controls/OrbitControls.js") -> "OrbitControls.js"
+        u.endsWith("/examples/jsm/exporters/GLTFExporter.js") || u.endsWith("/addons/exporters/GLTFExporter.js") -> "GLTFExporter.js"
+        else -> null
+    }
+}
+
+/** The blaze-parts spec of a 3D design file, or null (not a parts-based 3D design, or unreadable). */
+fun designSpec(target: String, home: File?): org.json.JSONObject? = try {
+    val u = designUrl(target, home)
+    if (!u.startsWith("file://")) null else File(u.removePrefix("file://")).takeIf { it.isFile && it.length() < 2_000_000 }
+        ?.let { com.blaze.assistant.agent.Designs.specFrom(it.readText()) }
+} catch (_: Exception) { null }
+
+/**
  * Design view: a live preview of what Blaze builds (HTML files, local servers, URLs), phone or
  * desktop width, with a one-line box to ask for changes without leaving. Exit is in the top bar.
  */
@@ -57,6 +81,7 @@ fun designUrl(target: String, home: File?): String {
 fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) -> Unit, onOpenInBrowser: (String) -> Unit, home: File?, preview: Boolean = true) {
     val c = LocalBlaze.current
     val url = remember(target) { designUrl(target, home) }
+    val spec3d = remember(target, preview) { if (preview) null else designSpec(target, home) }
     var wide by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     var ask by remember { mutableStateOf("") }
@@ -85,9 +110,13 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                 Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Label("Design")
                     Spacer(Modifier.padding(4.dp))
-                    Text("Ask Blaze for a page, poster or app screen and it opens here.",
+                    Text("Ask Blaze for anything visual: a 3D model, a site, an app screen, a diagram, a chart, a poster. It opens here.",
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.sub))
                 }
+            } else if (!preview && spec3d != null) {
+                // No WebGL here (screenshots): draw the same parts natively.
+                PartsSketchView(spec3d)
+                Label("3D \u00b7 " + spec3d.optString("name"), color = c.sub, size = 9.sp, modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
             } else if (preview) {
                 androidx.compose.runtime.key(url, wide, reload) {
                     AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
@@ -100,6 +129,13 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                             settings.builtInZoomControls = true
                             settings.displayZoomControls = false
                             webViewClient = object : WebViewClient() {
+                                override fun shouldInterceptRequest(view: WebView, req: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? {
+                                    val name = bundledThree(req.url.toString()) ?: return null
+                                    return try {
+                                        android.webkit.WebResourceResponse("text/javascript", "utf-8", 200, "OK",
+                                            mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "max-age=86400"), ctx.assets.open("design/three/$name"))
+                                    } catch (_: Exception) { null }
+                                }
                                 override fun onPageFinished(view: WebView, u: String?) {
                                     if (wide) view.evaluateJavascript("(function(){var m=document.querySelector('meta[name=viewport]');" +
                                         "if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}m.content='width=1280';})()", null)

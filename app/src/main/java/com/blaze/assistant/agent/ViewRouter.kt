@@ -16,6 +16,16 @@ package com.blaze.assistant.agent
  */
 object ViewRouter {
 
+    /** Design cues that are clearly visual work on their own (v0.23.2: Design is for anything visual, not only pages). */
+    const val DESIGN_STRONG = """\b(3-?d|three\.?js|webgl|render(?:ing)?|mock-?ups?|wire-?frames?|prototypes?|diagrams?|flow ?charts?|charts?|graphs? (?:of|for|showing)|""" +
+        """infographics?|floor ?plans?|blueprints?|3d scenes?|scene of|ui|ux|app screens?|user interface|website|web ?site|web ?page|landing page|html|css|poster|flyer|portfolio|""" +
+        """slides?|slide deck|presentation|(?:make|build|create) (?:a |an |me a )?model of|design (?:a|an|me|my|the|this))\b"""
+
+    /** A thing to make or show ("make a rocket", "show me a car"): Design, unless picture words make it Gallery. */
+    const val DESIGN_OBJECT = """\b(?:make|build|create|design|draw|model|sketch|visuali[sz]e|show me)\b.{0,40}\b(?:rockets?|spaceships?|space ?shuttles?|cars?|trucks?|bikes?|motorbikes?|""" +
+        """planes?|aeroplanes?|airplanes?|jets?|drones?|ships?|boats?|buildings?|houses?|towers?|bridges?|rooms?|kitchens?|bedrooms?|offices?|robots?|chairs?|tables?|desks?|""" +
+        """products?|games?|engines?|machines?)\b"""
+
     /** A view the agent writes to. [tools] = the tools that put things there; [groups] = ToolRouter groups to switch on. */
     data class Spec(val id: String, val name: String, val holds: String, val tools: List<String>, val groups: List<String>, val cue: Regex)
 
@@ -29,9 +39,10 @@ object ViewRouter {
         Spec("schedule", "Schedule", "reminders, routines, repeating tasks, timed jobs and triggers",
             listOf("create_routine", "schedule_command", "create_trigger", "set_alarm", "add_calendar_event", "open_view"), listOf("schedule", "device"),
             r("""\b(remind(?:er|ers)? ?(?:me)?|every (?:day|morning|evening|night|week|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|hour|\d+)|daily|weekly|routine|schedule (?:a|this|it|my)|wake me)\b""")),
-        Spec("design", "Design", "web pages, sites, landing pages, posters, slides and other visual layouts (live preview)",
-            listOf("file_write", "open_view"), listOf("terminal", "media"),
-            r("""\b(website|web ?site|web ?page|landing page|html|css|poster|flyer|mock-?up|wireframe|portfolio|slides?|slide deck|presentation|design (?:a|an|me|my|the|this))\b""")),
+        Spec("design", "Design", "anything visual or interactive, live preview: 3D scenes and models (three.js, orbit to look around), 2D art, websites and landing pages, " +
+            "UI mockups and app screens, diagrams, charts, posters, flyers, slides, floor plans, product mockups, simple games",
+            listOf(Designs.TOOL, "file_write", "open_view"), listOf("terminal", "media"),
+            r(DESIGN_STRONG + "|" + DESIGN_OBJECT)),
         Spec("gallery", "Gallery", "images, pictures, logos, wallpapers, beats, music and other media Blaze makes",
             listOf("generate_image", "gallery"), listOf("media"),
             r("""\b(?:(?:make|generate|draw|create|paint|produce)\b.{0,40}\b(?:image|picture|pic|photo|logo|icon|wallpaper|art|artwork|illustration|beat|beats|song|instrumental|sticker|avatar)s?|my gallery|in (?:the|my) gallery)\b""")),
@@ -54,12 +65,41 @@ object ViewRouter {
 
     fun byId(id: String): Spec? = specs.firstOrNull { it.id == id }
 
-    /** The view a request needs, or null (plain chat). Slash commands and routines are left alone. */
-    fun route(text: String): Spec? {
+    /**
+     * The view a request needs, or null (plain chat). Slash commands and routines are left alone.
+     * [followOn] = the last turn touched a design (v0.23.2): a short edit ("show engine", "add fins",
+     * "make it taller", "open it so I can see") then goes to Design to change that same design.
+     */
+    fun route(text: String, followOn: Boolean = false): Spec? {
         val t = text.trim()
         if (t.isEmpty() || t.startsWith("/") || t.startsWith("[Scheduled routine")) return null
-        return specs.firstOrNull { it.cue.containsMatchIn(t) }
+        var first = specs.firstOrNull { it.cue.containsMatchIn(t) }
+        // "make a picture of a car": a thing to draw, with picture words, is Gallery unless it's clearly a design (3D, mockup, page…).
+        if (first?.id == "design" && !designStrong.containsMatchIn(t) && byId("gallery")!!.cue.containsMatchIn(t)) first = byId("gallery")
+        if (followOn && (first == null || first.id == "design") && isFollowOnEdit(t)) return byId("design")
+        return first
     }
+
+    private val designStrong = r(DESIGN_STRONG)
+    private val editLead = r("""^(?:(?:ok(?:ay)?|now|and|also|please|pls|then|great|nice|cool|good|perfect|can you|could you|would you|will you|just|yeah|yes|hey blaze|blaze)[,!.]?\s+)*""" +
+        """(?:show|hide|add|remove|delete|drop|make|change|turn|rotate|spin|move|put|give|use|swap|replace|resize|scale|zoom|colou?r|paint|fix|undo|redo|open|let me see|see|view|""" +
+        """bigger|smaller|taller|shorter|wider|narrower|thinner|thicker|longer|more|less|darker|lighter|brighter|try|flip|mirror|cent(?:er|re)|align|increase|decrease|raise|lower|lift|""" +
+        """extend|shrink|enlarge|attach|include|without|with|no|switch|set|label|animate|place)\b""")
+    private val notDesign = r("""\b(calendar|e-?mails?|inbox|messages?|whatsapp|sms|texts?|calls?|alarms?|timers?|weather|news|battery|notifications?|music|songs?|playlist|volume|wi-?fi|bluetooth|reminders?|flash ?cards?|memory|contacts?|torch|brightness)\b""")
+
+    /** A short change to what was just designed ("show engine", "make it taller", "add fins", "open it for me so I can see"). */
+    fun isFollowOnEdit(text: String): Boolean {
+        val t = text.trim().trimEnd('.', '!', '?')
+        if (t.isEmpty() || t.startsWith("/") || t.split(Regex("\\s+")).size > 14) return false
+        return editLead.containsMatchIn(t) && !notDesign.containsMatchIn(t)
+    }
+
+    /** The hint for a follow-on edit of the current design. */
+    fun followOnHint(title: String, kind: String, path: String): String =
+        "\nREQUIRED VIEW THIS TURN: Design, a follow-on edit of the current design \u201c" + title + "\u201d (" + kind + ", " + path + "). Change THAT design with design action=update " +
+            (if (kind == "3d") "(set_parts = the parts to add or change, by id, only the keys that change; remove_parts = ids to drop; read it first with action=read to see the part ids) "
+            else "(edits=[{find, replace}] or a new html; read it first with action=read) ") +
+            "and keep everything else as it was. For \"open it\" / \"show me\" use design action=open. Don't start a new design, and don't just describe the change."
 
     /** All views a request touches, first = required. */
     fun routeAll(text: String): List<Spec> = if (route(text) == null) emptyList() else specs.filter { it.cue.containsMatchIn(text) }
@@ -71,7 +111,10 @@ object ViewRouter {
         append("You don't need the user to say \"use the view\": every turn, pick the view that fits.\n")
         for (s in specs) append("- ${s.name} (/${s.id}): ${s.holds}. Write with ${s.tools.filter { it != "open_view" }.ifEmpty { listOf("open_view") }.joinToString(" / ")}.\n")
         append("- Flashcards, \"quiz me\", \"test me\", study or revision → Learn: flashcards action=add (deck, cards=[{front, back}]), then open_view view=learn. Never write Q: / A: lists in chat.\n")
-        append("- Pages and visual work → Design: write the file, then open_view view=design target=<path or URL>, without asking.\n")
+        append("- Anything visual or interactive → Design (it is not only for art and sites): 3D models and scenes (design action=create kind=3d parts=[…], three.js with orbit controls), " +
+            "2D art (svg), sites, UI mockups, diagrams, charts, posters, slides, floor plans, product mockups, games (html). The Design view opens by itself. " +
+            "Follow-ons (\"show the engine\", \"make it taller\", \"add fins\") change the CURRENT design with design action=update, never a new one or a text answer.\n")
+        append("- Never say you created, updated or opened something in a view (\"I've updated the design\", \"view it in the design section\") unless that view's tool succeeded this turn; Blaze checks.\n")
         append("- \"Remind me\" or anything repeating → Schedule (create_routine / schedule_command / create_trigger). Pictures and beats → Gallery. A method to reuse → Skills (write_skill).\n")
         append("- Other views (Jobs, Accounts, Agents, Usage, Settings…): open with open_view ask=true unless the user asked for that view.")
     }
@@ -81,7 +124,10 @@ object ViewRouter {
         "learn" -> "\nREQUIRED VIEW THIS TURN: Learn. Put the cards in a Learn deck with flashcards action=add (deck = topic or course code + topic, " +
             "cards = [{front, back}], 10-25 cards, one fact each), then open_view view=learn, then reply in one or two lines (deck name, card count). " +
             "Do NOT write the questions and answers in chat. To quiz from an existing deck: flashcards action=due and ask one card at a time."
-        "design" -> "\nREQUIRED VIEW THIS TURN: Design. Build the page as a file (file_write), then open_view view=design target=<the file or URL>; reply briefly. Don't paste the HTML in chat."
+        "design" -> "\nREQUIRED VIEW THIS TURN: Design. Make it for real with the design tool: 3D (a rocket, car, building, product…) → design action=create kind=3d " +
+            "title=… parts=[…] (8-40 parts, real proportions, y up, parts that should touch do); pages, UI mockups, posters, slides, charts, diagrams, floor plans, games → " +
+            "design action=create html=<one complete document>; 2D art → svg. The Design view opens by itself. Then reply in one or two lines (what you made, how to look around). " +
+            "Don't paste the code in chat, and never say it's made unless the tool succeeded."
         "schedule" -> "\nREQUIRED VIEW THIS TURN: Schedule. Create it with create_routine / schedule_command / create_trigger (or set_alarm / add_calendar_event for one-off times) and say when it will run in one line."
         "gallery" -> "\nREQUIRED VIEW THIS TURN: Gallery. Make it with generate_image (art/photos) or run_code (beats, charts) saved under /root/phone/ so it lands in the Gallery; reply briefly."
         "skills" -> "\nREQUIRED VIEW THIS TURN: Skills. Save or install it with write_skill / install_skill; say its name in one line."

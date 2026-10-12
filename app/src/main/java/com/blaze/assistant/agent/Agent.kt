@@ -40,8 +40,11 @@ object ReplyParts {
 
     data class Parts(val text: String, val thinking: String, val followups: List<String>)
 
-    fun split(raw: String, final: Boolean = false): Parts {
-        val thinking = thinkRe.findAll(raw).joinToString("\n\n") { it.groupValues[2].trim() }
+    fun split(raw0: String, final: Boolean = false): Parts {
+        // v0.23.2: leaked channel / template tokens and reasoning leads go first (shared with streaming and storage).
+        val clean = ReplyClean.clean(raw0, final)
+        val raw = clean.text
+        val thinking = (listOf(clean.thinking) + thinkRe.findAll(raw).map { it.groupValues[2].trim() }).filter { it.isNotBlank() }.joinToString("\n\n")
         var text = thinkRe.replace(raw, "")
         val fu = fuRe.find(text)
         val followups = fu?.takeIf { it.groupValues[2].isNotEmpty() || (final && it.groupValues[1].contains('|')) }?.groupValues?.get(1)
@@ -672,6 +675,8 @@ When you finish, say what you did in one short sentence.
         t.put(BlazeRouter.tool())
         if (Settings.longChat || Mind.ready) LongChat.tools().forEach { t.put(it) }
         t.put(Flashcards.tool())
+        if (Designs.templateLoader == null) Designs.templateLoader = { app.assets.open("skills/three-d-design/assets/mockup.html").bufferedReader().use { it.readText() } }
+        t.put(Designs.tool())
         t.put(Seller.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
@@ -763,6 +768,12 @@ When you finish, say what you did in one short sentence.
         /** v0.23.0: the view this turn must use (keyword classifier) and the skills looked up for it. */
         @Volatile var turnView: ViewRouter.Spec? = null
         @Volatile var turnSkills: SkillMatch.Result = SkillMatch.Result.NONE
+        /** v0.23.2: tool calls that succeeded this turn (the claim guard checks replies against them). */
+        val turnOk = java.util.Collections.synchronizedList(mutableListOf<ClaimGuard.Call>())
+        /** v0.23.2: the last turn made, changed or opened a design (so a short edit next is a follow-on). */
+        @Volatile var lastTurnDesign = false
+        /** v0.23.2: the follow-on hint for this turn ("" = none). */
+        @Volatile var turnDesignNote = ""
         val history = JSONArray()
         val historyMark = HashMap<Long, Int>()
         val trace = JSONArray()
@@ -1071,7 +1082,7 @@ When you finish, say what you did in one short sentence.
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
-                (turnView?.let { ViewRouter.hint(it) } ?: "") + SkillMatch.block(turnSkills)
+                (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills)
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
@@ -1199,7 +1210,15 @@ When you finish, say what you did in one short sentence.
                 // v0.23.0 views + skills: the view this request needs (its tools on) and the skills that match it,
                 // looked up before the first model call with no extra model call. Shown on the work card.
                 val userNow = lastUserText()
-                turnView = if (routine) null else ViewRouter.route(userNow)
+                // v0.23.2 follow-on edits: right after a design (or from the Design view's own box), "show engine" edits that design.
+                val curDesign = if (routine) null else try { Designs.current() } catch (_: Exception) { null }
+                val followOn = !routine && agentId == null && curDesign != null &&
+                    (lastTurnDesign || com.blaze.assistant.ui.Views.showing.value == "design" || Designs.recent())
+                turnView = if (routine) null else ViewRouter.route(userNow, followOn)
+                turnDesignNote = if (followOn && curDesign != null && turnView?.id == "design" && ViewRouter.route(userNow)?.id != "design")
+                    ViewRouter.followOnHint(curDesign.title, curDesign.kind, curDesign.path) else ""
+                turnOk.clear()
+                var claimNudged = false
                 turnView?.let { groupsOn += it.groups }
                 turnSkills = SkillMatch.forTurn(userNow)
                 SkillMatch.cardLine(turnSkills).takeIf { it.isNotBlank() }?.let { add(Role.STEP, it) }
@@ -1351,6 +1370,7 @@ When you finish, say what you did in one short sentence.
                                 val n = kotlinx.coroutines.withContext(Dispatchers.IO) { Flashcards.add(deck, cards) }
                                 add(Role.STEP, "Made the \u201c$deck\u201d deck in Learn")
                                 turnTools.add(Flashcards.TOOL)
+                                turnOk += ClaimGuard.Call(Flashcards.TOOL)
                                 textOut = ViewRouter.converted(deck, n, cards.size)
                                 reply.put("content", textOut)
                                 if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open("learn") }
@@ -1363,6 +1383,25 @@ When you finish, say what you did in one short sentence.
                                 continue
                             }
                             ViewRouter.Fix.NONE -> {}
+                        }
+                    }
+                    // v0.23.2 no fake claims: "I've updated the design" / "view it in the design section" with no
+                    // design or open_view call that succeeded this turn → one re-prompt, then an honest line instead.
+                    if ((calls == null || calls.length() == 0) && !routine) {
+                        val shown = ReplyParts.split(textOut, final = true).text
+                        val bad = synchronized(turnOk) { ClaimGuard.unbacked(shown, turnOk.toList()) }
+                        if (bad != null) {
+                            if (!claimNudged && step < maxSteps - 3) {
+                                claimNudged = true
+                                groupsOn += bad.groups
+                                if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                                add(Role.STEP, "Doing it for real in ${bad.name}")
+                                history.put(JSONObject().put("role", "user").put("content", ClaimGuard.nudge(bad, if (bad.id == "design") Designs.current() else null)))
+                                continue
+                            }
+                            textOut = ClaimGuard.honest(shown, bad)
+                            reply.put("content", textOut)
+                            pendingFollowups = emptyList()
                         }
                     }
                     if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && !routine) {
@@ -1448,6 +1487,7 @@ When you finish, say what you did in one short sentence.
                         ToolRouter.groupOf(name)?.let { groupsOn += it }
                         if (name !in parallelSafe && name !in setOf("find_tool", "load_tools", "goal", "processes")) actedThisTurn = true
                         lastResults += result
+                        if (ClaimGuard.succeeded(result)) turnOk += ClaimGuard.Call(name, args)
                         if (name == "run_plan" || name == "read_screen") groupsOn += "screen"
                         if (name in screenActions && !result.startsWith("Error") && !result.startsWith("Couldn't")) com.blaze.assistant.device.Haptics.tick(app)
                         if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
@@ -1481,6 +1521,7 @@ When you finish, say what you did in one short sentence.
                 // Low-data mode: how much this task used (Blaze's own traffic: models, web, browser).
                 if (Settings.lowData) try { DataMeter.chip(bytes0)?.let { chip -> msgs.lastOrNull { it.role == Role.BLAZE }?.let { addMeta(it.id, chip) } } } catch (_: Exception) { }
                 LlmClient.liteTurn = false
+                lastTurnDesign = ViewRouter.byId("design")?.let { d -> synchronized(turnOk) { turnOk.any { ClaimGuard.backs(d, it) } } } == true
                 if (agentId == null) com.blaze.assistant.phone.Pointer.done()
                 thinking = ""
                 mood = Mood.IDLE
@@ -1777,10 +1818,19 @@ When you finish, say what you did in one short sentence.
                         } else true
                         if (!go) "The user chose to stay in the chat."
                         else {
-                            kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open(v.id, args.optString("target")) }
-                            "Opened ${v.name}. The user can tap Exit to come back to the chat."
+                            // v0.23.2: Design with no target shows the current design (not an empty preview).
+                            val tgt = args.optString("target").ifBlank { if (v.id == "design") kotlinx.coroutines.withContext(Dispatchers.IO) { Designs.current()?.path }.orEmpty() else "" }
+                            kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open(v.id, tgt) }
+                            if (v.id == "design" && tgt.isBlank()) "Opened Design, but there is no design to show yet: make one with the design tool (action=create)."
+                            else "Opened ${v.name}" + (if (v.id == "design") " showing $tgt" else "") + ". The user can tap Exit to come back to the chat."
                         }
                     }
+                }
+                Designs.TOOL -> {
+                    add(Role.STEP, Designs.step(args))
+                    val out = kotlinx.coroutines.withContext(Dispatchers.IO) { Designs.run(args) }
+                    out.open?.let { path -> if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open("design", path) } }
+                    out.text
                 }
                 "ask_user" -> {
                     val opts = args.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()

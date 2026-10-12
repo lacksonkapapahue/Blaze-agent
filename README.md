@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.23.0 (versionCode 65) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.23.2 (versionCode 67) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -50,7 +50,10 @@ Settings › Notification replies: with notification access on, Blaze reads chat
 Say "start logs" / "live logs" (or `/logs`, Settings › Life logs): a foreground service with a persistent notification (Pause, Stop) transcribes what the mic hears on the phone for free (Vosk small English model, shared with the wake word and downloaded once; Android's SpeechRecognizer until then). Only text is saved, as journal chunks (kind `life_log`) split by silence or topic; the idle review turns them into memories marked "(inferred)". "Brainstorm with me" (`/brainstorm`) writes ideas, decisions and next steps to the chat and memory when it stops. Pauses during calls, while another app records, while Blaze listens or speaks, and below 15% battery unless charging.
 
 ## Views + skills
-Blaze always uses its views: flashcards and quizzes go into a **Learn** deck, pages into **Design**, reminders into **Schedule**, pictures and beats into the **Gallery**, methods into **Skills**, facts into **Memory**; the view opens and the chat gets a short answer. Each request is matched to its view on the phone (no extra model call), and to the skills that fit it (bundled, your own and learned; switched-off skills are skipped); the best 1-3 are read in full and shown as "Skills: …" on the work card. Code: `agent/ViewRouter.kt`, `agent/SkillMatch.kt`.
+Blaze always uses its views: flashcards and quizzes go into a **Learn** deck, pages into **Design**, reminders into **Schedule**, pictures and beats into the **Gallery**, methods into **Skills**, facts into **Memory**; the view opens and the chat gets a short answer. Each request is matched to its view on the phone (no extra model call), and to the skills that fit it (bundled, your own and learned; switched-off skills are skipped); the best 1-3 are read in full and shown as "Skills: …" on the work card. Code: `agent/ViewRouter.kt`, `agent/SkillMatch.kt`. Blaze never claims it made, changed or opened something in a view unless that view's tool actually worked this turn (`agent/ClaimGuard.kt`), and leaked reasoning tokens from some free models are stripped from replies (`agent/ReplyClean.kt`).
+
+## Design
+Design is for anything visual or interactive, like Blaze Desktop's Design tab: 3D scenes and models (three.js with orbit controls, built from a parts list so you can say "show the engine" or "make it taller"), 2D art, sites, UI mockups, diagrams, charts, posters, slides, floor plans and product mockups. The `design` tool (`agent/Designs.kt`) writes `~/designs/<name>/index.html`, keeps the current design and its last 10 versions (undo), and opens the Design view; short follow-on edits change the same design. three.js is bundled in the APK, so 3D works offline.
 
 ## Student pack
 Settings › Learn (or `/learn`): flashcards with spaced repetition, Google Classroom (switch on, then reconnect Google once) and low-data mode. Skills: study-planner, tutor, lecture-notes, essay-coach, group-project, classroom-sync.

@@ -1,15 +1,15 @@
 ---
 name: three-d-design
-description: Design anything 3D (a product, furniture, a printable part, a building, a character) as a Three.js mockup in the preview (preview_server) that the user can orbit, pick and edit part by part, then build it in the program they named (Blender, FreeCAD, OpenSCAD, Fusion 360, Unity) from the same parts. Use for any 3D model, 3D design, CAD or 3D printing request.
+description: Design anything 3D (a product, furniture, a printable part, a building, a character) as a Three.js mockup in the Design view that the user can orbit, pick and edit part by part, then build it in the program they named (Blender, FreeCAD, OpenSCAD, Fusion 360, Unity) from the same parts. Use for any 3D model, 3D design, CAD or 3D printing request.
 tags: [3d, design, threejs, cad, blender, modeling, mockup]
 version: 1
 ---
 
-> **On the phone:** the mockup opens with `preview_server` and can be orbited, but part picking and write-back are Desktop-only: the user names the part to change in chat. Building in Blender/FreeCAD needs a PC (`ask_pc` if paired); OpenSCAD and Python exports can run in Blaze's Alpine Linux (`apk add openscad`).
+> **On the phone:** make the mockup with the `design` tool: `design action=create kind=3d title=… units=… parts=[…]` (the same part entries as the blaze-parts JSON below). Blaze generates this starter page from the parts, opens it in the Design view (orbit with one finger, zoom with two) and makes it the current design. Every follow-on ("show the engine", "make it taller") is `design action=update` with `set_parts` (by id, only the keys that change) / `remove_parts` on that same design; `design action=read` shows the current parts. Part picking and write-back are Desktop-only: the user names the part to change in chat. Building in Blender/FreeCAD needs a PC (`ask_pc` if paired); OpenSCAD and Python exports can run in Blaze's Alpine Linux (`apk add openscad`).
 
 # 3D design: mockup first, then the real program
 
-Every 3D request goes through the preview (preview_server) first. The mockup is the blueprint: one Three.js
+Every 3D request goes through the Design view first. The mockup is the blueprint: one Three.js
 page built from a JSON list of parts, which the user can orbit, click part by part and edit
 (colour, size, position, rotation) with the edits written straight back to the file. Only when
 the mockup is right do you build it in the program the user asked for, from the same numbers.
@@ -27,7 +27,7 @@ structure, and replace the example parts.
   Fusion 360, SketchUp, Unity, Godot, Onshape, Rhino, Maya, Cinema 4D, a slicer for 3D printing).
   None named: the mockup (plus its .glb export) is the deliverable.
 
-## 2. Build the mockup in the preview
+## 2. Build the mockup in Design
 
 1. Copy the starter to `design/<thing>-3d.html` in the project folder (no project: the current folder).
 2. Fill the `blaze-parts` JSON: `name`, `units`, `scale` (scene units per unit: 0.001 for mm, 1 for m),
@@ -40,15 +40,15 @@ structure, and replace the example parts.
    - Use `parent` + `group` for assemblies (legs, a drawer and its handle) so they move together.
 3. Shapes the presets can't express go in `CUSTOM` (extrusions, lathes, tubes along curves) as one
    builder per part id. Keep their dimensions in the part's JSON entry and read them from `p`, so the
-   numbers stay editable in the preview.
+   numbers stay editable in Design.
 4. Never hard-code a part's numbers in the script. The JSON is the single source of truth; Design
    edits it, and step 4 reads it.
 5. **Annotate the code**: every block starts with a `// ---- N. What this block does ----` comment and
    a line on why, like the starter. When you add custom builders, comment what each one makes and
    which JSON keys drive it.
-6. Keep the contract the preview (preview_server) relies on: each part's root `Object3D` has `userData.part = id`,
+6. Keep the contract the Design view relies on: each part's root `Object3D` has `userData.part = id`,
    and the page sets `window.__blazeScene = { THREE, scene, camera, renderer, controls, parts, spec }`.
-7. Save. The app sees a 3D mockup and opens it in the preview. Say in one or two lines what you built,
+7. Save. The app sees a 3D mockup and opens it in Design. Say in one or two lines what you built,
    the overall size, and how to edit: click a part, then Adjust (colour, scale, turn), arrow keys to
    move it, or Change to describe anything else.
 
@@ -57,7 +57,7 @@ structure, and replace the example parts.
 - A `[Design edit]` naming `Part: <id>` changes that part only: edit its JSON entry, and its custom
   builder only when the shape itself changes. Keep every other part identical.
 - Bigger changes ("make it foldable", "add a drawer") add or replace parts in the JSON. Keep ids stable
-  so earlier versions stay comparable in the preview's history.
+  so earlier versions stay comparable in Design's history.
 - Check proportions after each change: parts that should touch must touch (a leg's top at the seat's
   underside), nothing floats or intersects unless it should.
 

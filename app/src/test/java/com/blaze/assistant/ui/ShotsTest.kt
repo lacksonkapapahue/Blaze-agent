@@ -413,6 +413,35 @@ class ShotsTest {
         }
     }
 
+    // v0.23.2: Design is for anything visual. A 3D rocket made by the design tool (parts JSON), drawn natively
+    // here because Robolectric has no WebGL; on the phone the same parts render in three.js with orbit controls.
+    @Test fun design3d() {
+        val dir = java.nio.file.Files.createTempDirectory("shots-designs").toFile()
+        com.blaze.assistant.agent.Designs.rootOverride = dir
+        com.blaze.assistant.agent.Designs.templateLoader = { File("src/main/assets/skills/three-d-design/assets/mockup.html").readText() }
+        fun part(id: String, shape: String, vararg kv: Pair<String, Any>) = org.json.JSONObject().put("id", id).put("shape", shape).apply { kv.forEach { (k, v) -> put(k, v) } }
+        fun a(vararg n: Number) = org.json.JSONArray(n.toList())
+        val parts = org.json.JSONArray()
+            .put(part("body", "cylinder", "radius" to 0.6, "height" to 7, "position" to a(0, 4.5, 0), "color" to "#e9e9ec", "material" to "metal"))
+            .put(part("band", "cylinder", "radius" to 0.62, "height" to 0.4, "position" to a(0, 6.4, 0), "color" to "#1f4fd8"))
+            .put(part("window", "cylinder", "radius" to 0.22, "height" to 0.1, "position" to a(0, 5.6, 0.6), "rotation" to a(90, 0, 0), "color" to "#7fc4ff", "material" to "glass"))
+            .put(part("nose", "cone", "radius" to 0.6, "height" to 2.2, "position" to a(0, 9.1, 0), "color" to "#d8342c"))
+            .put(part("engine", "cylinder", "radius" to 0.45, "radiusTop" to 0.3, "height" to 0.8, "position" to a(0, 0.6, 0), "color" to "#3a3a40", "material" to "metal"))
+            .put(part("flame", "cone", "radius" to 0.35, "height" to 1.0, "position" to a(0, -0.3, 0), "rotation" to a(180, 0, 0), "color" to "#ff9a1f"))
+            .put(part("fin-1", "box", "size" to a(0.08, 1.8, 1.1), "position" to a(0.0, 1.6, 0.85), "rotation" to a(0, 90, 0), "color" to "#d8342c"))
+            .put(part("fin-2", "box", "size" to a(0.08, 1.8, 1.1), "position" to a(0.74, 1.6, -0.43), "rotation" to a(0, -30, 0), "color" to "#d8342c"))
+            .put(part("fin-3", "box", "size" to a(0.08, 1.8, 1.1), "position" to a(-0.74, 1.6, -0.43), "rotation" to a(0, 30, 0), "color" to "#d8342c"))
+        val made = com.blaze.assistant.agent.Designs.run(org.json.JSONObject().put("action", "create").put("kind", "3d").put("title", "Tall modern rocket")
+            .put("units", "m").put("parts", parts))
+        shot("36-design-3d") {
+            Column(Modifier.fillMaxSize()) {
+                ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Design")
+                Box(Modifier.weight(1f)) { DesignView(made.open ?: "", busy = false, status = "", onAsk = {}, onOpenInBrowser = {}, home = null, preview = false) }
+            }
+        }
+        com.blaze.assistant.agent.Designs.rootOverride = null
+    }
+
     // v0.21.0: the visible pointer over another app, paused by the user (bar), with a swipe path and a ripple.
     @Test fun pointer() = shot("34-pointer") {
         val c = LocalBlaze.current

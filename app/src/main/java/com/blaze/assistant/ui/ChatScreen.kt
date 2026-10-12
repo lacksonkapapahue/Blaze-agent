@@ -298,7 +298,11 @@ fun ChatScreen() {
             "gallery" -> GalleryUi.open.value = true
             "projects" -> { shellMode = "projects"; projectOpen = "" }
             "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx)
-            "design" -> { if (target.isNotBlank()) Views.designTarget.value = target; shellMode = "chat"; Views.showing.value = "design" }
+            "design" -> {
+                if (target.isNotBlank()) Views.designTarget.value = target
+                else if (Views.designTarget.value.isBlank()) try { com.blaze.assistant.agent.Designs.current()?.path?.let { Views.designTarget.value = it } } catch (_: Exception) { }
+                shellMode = "chat"; Views.showing.value = "design"
+            }
             else -> settingsPage = v.page ?: ""
         }
     }
