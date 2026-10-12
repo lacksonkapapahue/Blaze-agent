@@ -673,6 +673,8 @@ When you finish, say what you did in one short sentence.
         t.put(Seller.tool())
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
+        if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.Conversations.tools().forEach { t.put(it) }
+        t.put(com.blaze.assistant.life.LifeLogs.tool())
         t.put(com.blaze.assistant.phone.CallControl.tool())
         if (Settings.bool("bg_agents", true)) BgAgents.tools().forEach { t.put(it) }
         if (com.blaze.assistant.link.DesktopLink.paired) t.put(com.blaze.assistant.link.DesktopLink.tool())
@@ -1930,6 +1932,12 @@ When you finish, say what you did in one short sentence.
                 }
                 else -> when {
                     name in LongChat.names -> longChatTool(name, args)
+                    name == "notif_reply" -> { add(Role.STEP, "Replying to ${args.optString("conversation").take(40)}")
+                        com.blaze.assistant.notify.Conversations.reply(app, args.optString("conversation"), args.optString("text")) }
+                    name in com.blaze.assistant.notify.Conversations.toolNames -> { add(Role.STEP, if (name == "notif_read") "Reading the chat with ${args.optString("conversation").take(40)}" else "Checking your chats")
+                        kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.notify.Conversations.run(app, name, args) } }
+                    name == com.blaze.assistant.life.LifeLogs.TOOL -> { add(Role.STEP, com.blaze.assistant.life.LifeLogs.describe(args))
+                        com.blaze.assistant.life.LifeLogs.run(app, args) }
                     name == Seller.TOOL -> { add(Role.STEP, if (args.optString("action") == "set") "Saving the brand kit" else "Reading the brand kit")
                         kotlinx.coroutines.withContext(Dispatchers.IO) { Seller.run(args) } }
                     name == Flashcards.TOOL -> { add(Role.STEP, if (args.optString("action") == "add") "Making flashcards" else "Checking your flashcards")
