@@ -17,7 +17,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 ## Layout
 - `agent/` – Agent loop, LlmClient (OpenAI-compatible), Providers, Settings, Memory, ChatStore, Secrets (Keystore encryption), LongChat (rolling summary, FTS chat search, artifacts), Mind + MindReview (one mind: journal, memories, context ladder, idle review)
 - `phone/` – BlazeAccessibilityService (read/tap/type), PhoneTools, Skills (SMS, calls, calendar, contacts)
-- `ui/` – Compose screens (ChatScreen, SettingsSheet, Overlay orb, Theme)
+- `ui/` – Compose screens (ChatScreen, SettingsSheet, Overlay orb, Theme, Kit: Desktop's page/rows/empty-state pieces, MemoryPage + MemGraph: the memory graph)
 - `connect/` – Blaze account, OAuth connectors (incl. Google Classroom), key sync, MCP client
 - `browser/` – built-in browser and its agent tools
 - `terminal/` – shell, Alpine Linux (proot), git, background jobs
@@ -38,6 +38,9 @@ One continuous conversation instead of separate chats (projects keep their own t
 
 ## Background browser and phone control
 Blaze's browser works in the background (offscreen tabs). When a page needs something only you have, an **Action required** card appears in the chat (and a notification if you're away); what you type goes straight into the page, the AI only sees `{{secret:…}}` placeholders, and it's saved per site in **Settings › Saved logins** (Keystore-encrypted; one-time codes never). Sites that refuse passwords get Google/passkey options instead. Phone control follows an orient loop: a compact look at the screen before acting and a check after each step.
+
+## Memory graph
+Settings › Memory & learning (or `/memory`): an animated graph of everything Blaze remembers, after Blaze Desktop's Memory view. Tap a dot to view, edit or forget a memory; Graph | List and search. It draws only while you look at it (≤ 20 fps, stops after 12 s idle or when the app is in the background).
 
 ## Student pack
 Settings › Learn (or `/learn`): flashcards with spaced repetition, Google Classroom (switch on, then reconnect Google once) and low-data mode. Skills: study-planner, tutor, lecture-notes, essay-coach, group-project, classroom-sync.

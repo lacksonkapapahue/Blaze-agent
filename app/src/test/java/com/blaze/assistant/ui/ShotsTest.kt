@@ -8,6 +8,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -214,16 +222,16 @@ class ShotsTest {
             content()
         }
     }
-    @Test fun secureForm() = shot("20-secure-form") {
+    @Test fun secureForm() = shot("30-secure-form") {
         BrowserChat { SecureForm("github.com", "Sign in to GitHub", "GitHub needs you signed in to star the repo.", signIn,
             onSubmit = { _, _ -> }, onCancel = {}, onWatch = {}, preset = mapOf("email" to "lacksonkapapahue", "password" to "not-a-real-one"), notifPrompt = false) }
     }
-    @Test fun secureFormDark() = shot("21-secure-form-dark", dark = true) {
+    @Test fun secureFormDark() = shot("31-secure-form-dark", dark = true) {
         BrowserChat { SecureForm("api.groq.com", "Your Groq API key", "Paste it once; Blaze saves it encrypted on this phone.",
             listOf(com.blaze.assistant.browser.SecureInput.Field("groq_key", "Groq API key", com.blaze.assistant.browser.SecureInput.Kind.API_KEY)),
             onSubmit = { _, _ -> }, onCancel = {}, onWatch = {}, notifPrompt = true) }
     }
-    @Test fun noPasswordChoice() = shot("22-no-password-choice") {
+    @Test fun noPasswordChoice() = shot("32-no-password-choice") {
         Column(Modifier.fillMaxSize()) {
             ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
             Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -241,10 +249,127 @@ class ShotsTest {
         com.blaze.assistant.browser.Vault.save("github.com", "email", "lacksonkapapahue@gmail.com")
         com.blaze.assistant.browser.Vault.save("github.com", "password", "not-a-real-one")
         com.blaze.assistant.browser.Vault.save("console.groq.com", "groq_key", "gsk_not_real_0000")
-        shot("23-saved-logins") {
+        shot("33-saved-logins") {
             Column(Modifier.fillMaxSize()) {
                 ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, viewChip = "Saved logins")
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) { SavedLoginsPage() }
+    // ---------------- v0.19.0 visual parity ----------------
+
+    /** The settings screen's frame (back arrow + title, then a padded scroll column), without its BackHandler. */
+    @Composable
+    private fun SettingsFrame(title: String, scroll: Boolean = true, content: @Composable () -> Unit) {
+        val c = LocalBlaze.current
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                    Text("\u2190", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
+                }
+                Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = c.ink))
+            }
+            Column(Modifier.weight(1f).fillMaxWidth().let { if (scroll) it.verticalScroll(rememberScrollState()) else it }.padding(horizontal = 20.dp)) { content() }
+        }
+    }
+
+    private val day = 86_400_000L
+    private fun mem(id: Long, kind: String, subject: String, text: String, related: String = "", turn: Long = 0, ago: Int = 40 - id.toInt()) =
+        com.blaze.assistant.agent.Mind.Mem(id, kind, subject, text, related, turn, t0 - ago * day, t0 - ago * day)
+    private val mems = listOf(
+        mem(1, "profile", "You", "Luke: Computer Science student at Northrise University, Ndola"),
+        mem(2, "profile", "You", "From Chingola, Zambia; finished school at Amano Christian School in 2025"),
+        mem(3, "profile", "You", "Phone is a Samsung A12; data is expensive, prefers low-data answers (inferred)"),
+        mem(4, "preference", "Replies", "Short, friendly replies; no long lists unless asked"),
+        mem(5, "preference", "Money", "Picks the free or cheapest option first (inferred)"),
+        mem(6, "preference", "Study", "Studies at night, 21:00 to 23:00, on weekdays", related = "Northrise University"),
+        mem(7, "preference", "Music", "Lofi or afro beats while studying", related = "Study"),
+        mem(8, "person", "Gloria", "Gloria Gozza is Luke's cousin; he sends her his school documents", related = "Northrise University"),
+        mem(9, "person", "Gloria", "Gloria's birthday is on 3 March"),
+        mem(10, "person", "Mutale", "Mutale is Luke's CIT102 lecturer", related = "CIT102"),
+        mem(11, "person", "Chanda", "Chanda is in Luke's NET103 group project", related = "NET103 group project"),
+        mem(12, "project", "HomeGlow store", "Shopify dropshipping store selling lamps and home decor", related = "Gloria"),
+        mem(13, "project", "HomeGlow store", "Goal: 20 orders a week by December"),
+        mem(14, "project", "Portfolio", "One-page portfolio site in ~/site, hosted free on GitHub Pages"),
+        mem(15, "project", "NET103 group project", "Network design report due 30 October; Luke owns the diagrams", related = "Chanda"),
+        mem(16, "project", "Blaze", "Building Blaze, an AI assistant for Android, Desktop and CLI"),
+        mem(17, "decision", "Lamp prices", "Moon lamp at $24.99 and the mini at $19.99 for the HomeGlow store, free shipping over $35", turn = 41),
+        mem(18, "decision", "Ads", "TikTok first for the HomeGlow store; no paid ads until 10 organic orders", turn = 41),
+        mem(19, "decision", "Hosting", "GitHub Pages for the portfolio: free and no card needed", related = "Portfolio"),
+        mem(20, "fact", "CIT102", "CIT102 Programming exam on 14 November", related = "Mutale"),
+        mem(21, "fact", "CIT102", "Weak spot: nested loops and while-else"),
+        mem(22, "fact", "Northrise University", "On-campus housing for semester 1, 2026"),
+        mem(23, "fact", "Data", "Buys a 2 GB bundle every Monday"),
+        mem(24, "fact", "Exam week", "Exam week starts 10 November", related = "CIT102", ago = 0))
+
+    @Test fun memoryGraph() = shot("15-memory-graph") { SettingsFrame("Memory & learning") { MemoryPage(mems, mode0 = "graph") } }
+    @Test fun memoryDetail() = shot("16-memory-detail", dark = true) {
+        SettingsFrame("Memory & learning") { MemoryPage(mems, mode0 = "graph", select0 = 8) }
+    }
+    @Test fun memoryList() = shot("17-memory-list") { SettingsFrame("Memory & learning") { MemoryPage(mems, mode0 = "list", select0 = 12, query0 = "") } }
+
+    @Test fun skills() = shot("18-skills") {
+        fun r(n: String, d: String, bundled: Boolean = true, on: Boolean = true, edited: Boolean = false, installed: Boolean = true, update: Boolean = false) =
+            com.blaze.assistant.agent.SkillLibrary.Row(n, d, bundled, on, edited, installed, update)
+        SettingsFrame("Skill library") {
+            SkillLibraryPage(listOf(
+                r("homeglow-weekly", "Monday numbers for the HomeGlow store: orders, revenue, top post.", bundled = false),
+                r("deep-research", "Search widely, read the sources, cite every claim with a link."),
+                r("study-planner", "Exam date and topics in, a day-by-day plan in Schedule out.", update = true),
+                r("essay-coach", "Outline, scored feedback and APA 7 or Harvard citations; never writes graded work.", edited = true),
+                r("content-calendar", "A week of posts in your brand kit, each saved as a reminder to publish."),
+                r("ad-lab", "Five ad angles scored on hook, clarity and call to action.", on = false),
+                r("lecture-notes", "Recording to notes, summary, key terms and tasks with free Whisper.", installed = false)), open0 = "deep-research")
+        }
+    }
+
+    @Test fun schedule() = shot("19-schedule") {
+        SettingsFrame("Routines") {
+            SchedulePage(listOf(
+                com.blaze.assistant.routine.Routine(1, "Morning brief", "Summarise today's calendar and unread texts", 7, 0, 31),
+                com.blaze.assistant.routine.Routine(2, "Weekly store digest", "Run the weekly-digest skill", 8, 0, 1),
+                com.blaze.assistant.routine.Routine(3, "CIT102 lab 3 due", "Remind me: CIT102 lab 3 is due tomorrow", 9, 0, 0, at = t0 + 3 * day),
+                com.blaze.assistant.routine.Routine(4, "Back up notes", "", 22, 30, 127, enabled = false, command = "tar czf ~/backup/notes.tgz ~/notes", linux = true)),
+                now = t0)
+        }
+    }
+
+    @Test fun settingsList() = shot("20-settings") { SettingsFrame("Settings") { SettingsList {} } }
+
+    @Test fun modelPicker() = shot("21-model-picker") {
+        SettingsFrame("Brain (classic editor)") {
+            Spacer(Modifier.height(18.dp))
+            Label("Model", modifier = Modifier.padding(bottom = 8.dp))
+            ModelField("meta-llama/llama-3.3-70b-instruct:free", open = true) {}
+            ModelList(listOf(
+                com.blaze.assistant.agent.ModelCatalog.Model("meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B Instruct", "free"),
+                com.blaze.assistant.agent.ModelCatalog.Model("google/gemini-2.0-flash-exp:free", "Gemini 2.0 Flash", "free"),
+                com.blaze.assistant.agent.ModelCatalog.Model("deepseek/deepseek-chat-v3-0324:free", "DeepSeek V3", "free"),
+                com.blaze.assistant.agent.ModelCatalog.Model("qwen/qwen-2.5-coder-32b-instruct:free", "Qwen 2.5 Coder 32B", "free"),
+                com.blaze.assistant.agent.ModelCatalog.Model("mistralai/mistral-small-3.1-24b-instruct", "Mistral Small 3.1", "128k context")),
+                selected = "meta-llama/llama-3.3-70b-instruct:free", query = "", onQuery = {}, onPick = {})
+        }
+    }
+
+    @Test fun onboarding() = shot("22-onboarding") { SetupFlow(startPage = 1) {} }
+
+    @Test fun accounts() = shot("23-accounts") {
+        SettingsFrame("Connected accounts") { ConnectionsPage(connected0 = setOf("google", "github"), online0 = true, open0 = "spotify") }
+    }
+
+    @Test fun emptyStates() = shot("24-empty-states") {
+        SettingsFrame("Empty states") {
+            MemoryPage(emptyList())
+            SchedulePage(emptyList(), now = t0)
+        }
+    }
+
+    @Test fun workCard() = shot("25-work-card", dark = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, mood = Mood.ACTING)
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                UserBubble("Make me a one-page portfolio site and show it to me")
+                WorkCard(doneSteps, live = false, startAt = t0 + 9_000, endAt = t0 + 9_000 + 191_000, open0 = true)
+                UserBubble("What's on Friday?")
+                WorkCard(liveSteps + step(13, "Checking WhatsApp for plans with Chanda"), live = true, startAt = t0 + 90_000, endAt = 0,
+                    status = "Checking WhatsApp for plans with Chanda", now = t0 + 140_000, meter = "in 4.2k \u00b7 out 0.6k", open0 = true)
             }
         }
     }
