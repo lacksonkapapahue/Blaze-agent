@@ -15,7 +15,7 @@ Actions secrets (`BLAZE_SIGNING_P12`, `BLAZE_SIGNING_PASS`); see v1.14.2 in [CHA
 Phones already on a rotated build won't accept an APK signed only with the local key.
 
 ## Layout
-- `agent/` – Agent loop, LlmClient (OpenAI-compatible), Providers, Settings, Memory, ChatStore, Secrets (Keystore encryption)
+- `agent/` – Agent loop, LlmClient (OpenAI-compatible), Providers, Settings, Memory, ChatStore, Secrets (Keystore encryption), LongChat (rolling summary, FTS chat search, artifacts)
 - `phone/` – BlazeAccessibilityService (read/tap/type), PhoneTools, Skills (SMS, calls, calendar, contacts)
 - `ui/` – Compose screens (ChatScreen, SettingsSheet, Overlay orb, Theme)
 - `connect/` – Blaze account, OAuth connectors, key sync, MCP client
@@ -25,7 +25,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.14.0 (versionCode 56) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.15.0 (versionCode 57) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds

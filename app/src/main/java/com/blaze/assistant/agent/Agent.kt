@@ -101,6 +101,14 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
+    /** Token meter of the chat on screen (v0.15.0): what the last model call sent and got back. */
+    data class Meter(val inTok: Int, val outTok: Int, val limit: Int) {
+        val text get() = LongChat.meter(inTok, outTok)
+        val high get() = LongChat.high(inTok, limit)
+    }
+    private val _meter = MutableStateFlow<Meter?>(null)
+    val meter: StateFlow<Meter?> = _meter
+
     /** Ids of chats that are working right now (shown as a live dot in the chat list). */
     private val _busy = MutableStateFlow<Set<String>>(emptySet())
     val busyChats: StateFlow<Set<String>> = _busy
@@ -187,6 +195,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         _mood.value = s.mood
         _thinking.value = s.thinking
         _status.value = s.status
+        _meter.value = s.meter
         Settings.lastChatId = s.id
         // Forget idle chats in the background; working ones stay until they finish.
         sessions.values.removeAll { it !== s && !it.busy }
@@ -195,6 +204,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     fun init(ctx: Context) {
         app = ctx.applicationContext
         ChatStore.init(app)
+        LongChat.init(app)
         try { com.blaze.assistant.media.Media.init(app) } catch (_: Exception) { }
         refreshChats()
         // Reopen the chat you were in.
@@ -279,6 +289,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         val o = ChatStore.load(id) ?: return null
         val s = Session(id)
         s.title = o.optString("title"); s.pinned = o.optBoolean("pinned"); s.summary = o.optString("summary")
+        s.lcSummary = o.optString("lc_summary"); s.lcUpto = o.optInt("lc_upto")
+        if (o.has("meter_in")) s.meter = Meter(o.optInt("meter_in"), o.optInt("meter_out"), o.optInt("meter_limit", 32_768))
         s.titleSource = o.optString("title_source"); s.titleTurns = o.optInt("title_turns"); s.keep = o.optBoolean("keep")
         o.optJSONArray("tips_pending")?.let { a -> for (i in 0 until a.length()) s.unseenTips += a.getString(i) }
         val h = o.optJSONArray("history") ?: JSONArray()
@@ -321,7 +333,42 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         show(Session(newId()))
     }
 
+    /** The model's context window (Settings › context_tokens, else a guess from its name; 0 = unknown). */
+    fun ctxWindow(): Int = LongChat.contextWindow(Settings.model, Settings.str("context_tokens", "0").toIntOrNull() ?: 0)
+    /** When older turns fold into the rolling summary. */
+    fun budget(): Int = LongChat.budget(ctxWindow())
+
+    /**
+     * "Start a fresh chat with a summary" (offered past 80% of the meter): a new chat that opens with
+     * the state note of this one, in the same project. The old chat stays as it was.
+     */
+    fun freshChat() {
+        val s = cur
+        if (s.busy || s.history.length() == 0) return
+        scope.launch {
+            s.status = "Summarising this chat"
+            val h = JSONArray(s.history.toString())
+            var note = s.lcSummary
+            if (s.lcUpto < h.length()) try {
+                val r = LlmClient.complete(LongChat.summariseRequest(note, h, s.lcUpto.coerceAtMost(h.length()), h.length()), null, null, null, LlmClient.Lane.BACKGROUND)
+                r.optString("content").substringAfterLast("</think>").trim().takeIf { it.isNotBlank() }?.let { note = it }
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+            s.status = ""
+            if (note.isBlank()) note = LongChat.transcript(h, maxOf(0, h.length() - 6), h.length())
+            val ns = Session(newId())
+            ns.title = (s.title.ifBlank { "Chat" } + " (continued)").take(60)
+            ns.keep = true
+            val intro = "Picking up from your previous chat. Here's where we are:\n\n" + note.take(LongChat.SUMMARY_MAX)
+            ns.add(Role.BLAZE, intro)
+            ns.history.put(JSONObject().put("role", "assistant").put("content", intro))
+            Projects.of(s.id)?.let { Projects.assign(ns.id, it.id) }
+            s.persist()
+            show(ns); ns.persist(); refreshChats()
+        }
+    }
+
     fun deleteChat(id: String) {
+        io.launch { try { LongChat.db()?.forget(id) } catch (_: Exception) { } }
         sessions[id]?.stop()
         sessions.remove(id)
         ChatStore.delete(id)
@@ -562,6 +609,7 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.ui.Views.tool())
         t.put(SelfKnowledge.tool())
         t.put(BlazeRouter.tool())
+        if (Settings.longChat) LongChat.tools().forEach { t.put(it) }
         if (Settings.screenMemory) t.put(ScreenMemory.tool())
         if (com.blaze.assistant.notify.NotificationBrain.instance != null) com.blaze.assistant.notify.NotificationBrain.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.phone.CallControl.tool())
@@ -630,6 +678,13 @@ When you finish, say what you did in one short sentence.
         var pinned = false
         /** One-line summary written with the title (used by search_past_chats). */
         var summary = ""
+        /** Long-chat rolling summary and the first history index it doesn't cover (v0.15.0). */
+        var lcSummary = ""
+        var lcUpto = 0
+        private var _meterV: Meter? = null
+        var meter: Meter?
+            get() = _meterV
+            set(v) { _meterV = v; if (this === cur) _meter.value = v }
         /** Heads-ups posted into this chat as notifications that the model hasn't been told about yet. */
         val unseenTips = java.util.Collections.synchronizedList(mutableListOf<String>())
         /** Saved even before the user writes in it (the Heads-ups chat). */
@@ -749,10 +804,16 @@ When you finish, say what you did in one short sentence.
             val doc = JSONObject().put("id", id).put("title", title).put("pinned", pinned)
                 .put("updated", System.currentTimeMillis()).put("preview", preview.take(90))
                 .put("messages", arr).put("history", hist).put("summary", summary)
+                .put("lc_summary", lcSummary).put("lc_upto", lcUpto)
+                .apply { meter?.let { m -> put("meter_in", m.inTok).put("meter_out", m.outTok).put("meter_limit", m.limit) } }
                 .put("title_source", titleSource).put("title_turns", titleTurns).put("keep", keep)
                 .put("tips_pending", JSONArray(synchronized(unseenTips) { unseenTips.toList() }))
             if (this === cur) Settings.lastChatId = id
-            io.launch { ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list() }
+            val cid = id
+            io.launch {
+                ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list()
+                try { LongChat.db()?.sync(cid, hist) } catch (_: Exception) { }
+            }
         }
 
         /** Images become a short note in saved history; the words stay. */
@@ -900,15 +961,21 @@ When you finish, say what you did in one short sentence.
 
         /** Only the newest screenshot is sent as an image; older ones become a note. */
         fun requestMessages(): JSONArray {
+            val st = LongChat.State(lcSummary, lcUpto)
             val sys = systemPrompt(lastUserText()) + Modes.promptLine(agentPlan) +
+                (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + LongChat.summaryBlock(st) else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine())
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
             // Speed plan step 3 (sliding window): long chats send only the recent part. The cut moves
             // in big jumps, not every turn, so the cached prefix stays the same for many turns.
-            val from = windowStart()
-            if (from > 0) msgs.put(JSONObject().put("role", "user").put("content",
+            val from = when {
+                Settings.longChat && lcSummary.isNotBlank() -> LongChat.sendFrom(history, st)
+                Settings.longChat && LongChat.tokens(history) <= budget() -> 0
+                else -> windowStart()
+            }
+            if (from > 0 && lcSummary.isBlank()) msgs.put(JSONObject().put("role", "user").put("content",
                 "[Earlier in this chat (older messages not shown): ${summary.ifBlank { "use search_past_chats if you need them" }}]"))
                 .also { msgs.put(JSONObject().put("role", "assistant").put("content", "Got it.")) }
             var lastScreen = -1
@@ -940,6 +1007,47 @@ When you finish, say what you did in one short sentence.
             Voice.speakPart(text.substring(spokenPrefix.length, end))
             spokenPrefix = text.substring(0, end)
             streamedVoice = true
+        }
+
+        /**
+         * Long chats (v0.15.0): when the un-summarised part is over the budget, everything before the last
+         * 12 messages folds into the rolling summary with one background call. On failure nothing changes
+         * and the old sliding window applies.
+         */
+        suspend fun compact() {
+            if (!Settings.longChat) return
+            if (lcUpto > history.length()) { lcUpto = 0; lcSummary = "" }
+            val st = LongChat.State(lcSummary, lcUpto)
+            if (!LongChat.needsCompaction(history, st, budget())) return
+            val to = LongChat.tailStart(history)
+            val req = LongChat.summariseRequest(lcSummary, history, lcUpto, to)
+            status = "Summarising older turns"
+            val txt = try {
+                LlmClient.complete(req, null, null, null, LlmClient.Lane.BACKGROUND).optString("content").substringAfterLast("</think>").trim()
+            } catch (e: CancellationException) { throw e } catch (_: Exception) { "" }
+            if (txt.isBlank()) return
+            val ns = LongChat.folded(history, txt)
+            lcSummary = ns.summary; lcUpto = ns.upto
+            persist()
+        }
+
+        private suspend fun longChatTool(name: String, args: JSONObject): String {
+            val snap = JSONArray(history.toString())
+            val me = id
+            val load: (String) -> JSONArray? = { c -> if (c == me) snap else ChatStore.load(c)?.optJSONArray("history") }
+            return when (name) {
+                "search_chat" -> { add(Role.STEP, "Looking back through ${if (args.optBoolean("all_chats")) "your chats" else "this chat"} for “${args.optString("query").take(40)}”")
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { LongChat.searchText(args.optString("query"), me, args.optBoolean("all_chats"), args.optInt("limit", 8), load) { ChatStore.list().map { it.id } } } }
+                "read_turn" -> { add(Role.STEP, "Reading an earlier message"); kotlinx.coroutines.withContext(Dispatchers.IO) { LongChat.readTurn(args.optString("id"), me, load) } }
+                "read_artifact" -> { add(Role.STEP, "Reading the saved output"); kotlinx.coroutines.withContext(Dispatchers.IO) { LongChat.readArtifact(args.optString("id"), args.optInt("from", 1), args.optInt("lines", 200)) } }
+                "update_brief" -> {
+                    val p = Projects.of(me) ?: return "This chat isn't in a project, so there's no brief to update. Keep going without it."
+                    add(Role.STEP, "Updating the project brief")
+                    Projects.setBrief(p.id, args.optString("brief"))
+                    "Brief for ${p.name} updated; it's sent with every turn in this project."
+                }
+                else -> "Unknown tool"
+            }
         }
 
         /** First history index to send: 0 for short chats, else a user message 24 to 48 messages back. */
@@ -1035,6 +1143,7 @@ When you finish, say what you did in one short sentence.
                     } else null
                     val onThink: (String) -> Unit = { t -> scope.launch { thinking = listOf(before, t).filter { it.isNotBlank() }.joinToString("\n\n") } }
 
+                    if (!lite) compact()
                     LlmClient.liteTurn = lite
                     val req = if (lite) ChatLane.messages(requestMessages(), lastUserText(), personaText(), Settings.userName.ifBlank { null }) else requestMessages()
                     tools = if (lite) JSONArray() else ToolRouter.select(allTools, groupsOn)
@@ -1053,6 +1162,12 @@ When you finish, say what you did in one short sentence.
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
                     reply.remove("_reasoning")
                     try { Usage.record(req, reply, LlmClient.lastUsage) } catch (_: Exception) { }
+                    try {
+                        val u = LlmClient.lastUsage
+                        val inT = u?.optInt("prompt_tokens")?.takeIf { it > 0 } ?: (LongChat.tokens(req) + tools.toString().length / 4)
+                        val outT = u?.optInt("completion_tokens")?.takeIf { it > 0 } ?: (LongChat.text(reply).length / 4)
+                        meter = Meter(inT, outT, LongChat.meterLimit(ctxWindow()))
+                    } catch (_: Exception) { }
                     if (lite) {
                         lite = false
                         LlmClient.liteTurn = false
@@ -1198,7 +1313,7 @@ When you finish, say what you did in one short sentence.
                             JSONObject().put("role", "tool")
                                 .put("tool_call_id", call.optString("id", "call_$step$i"))
                                 .put("name", name)
-                                .put("content", result)
+                                .put("content", if (!Settings.longChat || name in LongChat.keepWhole || result.contains(SCREEN_MARK)) result else LongChat.aside(result))
                         )
                     }
                     shots.lastOrNull()?.let { url ->
@@ -1598,6 +1713,7 @@ When you finish, say what you did in one short sentence.
                     else PhoneTools.run(app, name, args)
                 }
                 else -> when {
+                    name in LongChat.names -> longChatTool(name, args)
                     com.blaze.assistant.connect.Mcp.handles(name) -> mcpCall(name, args)
                     com.blaze.assistant.connect.Connectors.handles(name) -> { add(Role.STEP, com.blaze.assistant.connect.Connectors.describe(name)); com.blaze.assistant.connect.Connectors.run(app, name, args) }
                     else -> { add(Role.STEP, PhoneTools.describe(name, args)); PhoneTools.run(app, name, args) }

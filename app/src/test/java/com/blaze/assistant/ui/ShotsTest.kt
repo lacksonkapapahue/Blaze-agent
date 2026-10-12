@@ -19,6 +19,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.blaze.assistant.agent.ChatMessage
@@ -83,14 +84,18 @@ class ShotsTest {
     private fun Chat(plus: Boolean = false, views: Boolean = false, chip: String = "", input: String = "") {
         Column(Modifier.fillMaxSize()) {
             ShellTopBar("chat", {}, {}, {}, routerOk = true, onRouter = {}, avatar = "Luke", onAvatar = {}, mood = Mood.ACTING)
-            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp),
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 UserBubble("Make me a one-page portfolio site and show it to me")
                 WorkCard(doneSteps, live = false, startAt = t0 + 9_000, endAt = t0 + 9_000 + 191_000)
                 AnswerBody(1, "Done. Your portfolio is in **~/site/index.html** with a hero, three project cards and a contact form.\n\n" +
                     "| Section | What's in it |\n|---|---|\n| Hero | Name, one line, photo |\n| Projects | 3 cards |\n| Contact | Email form |")
                 UserBubble("What's on Friday?")
-                WorkCard(liveSteps, live = true, startAt = t0 + 90_000, endAt = 0, status = "Reading 3 new emails", now = t0 + 90_000 + 72_000)
+                WorkCard(liveSteps, live = true, startAt = t0 + 90_000, endAt = 0, status = "Reading 3 new emails", now = t0 + 90_000 + 72_000,
+                    meter = "in 4.2k · out 0.6k")
+            }
+            if (plus || views) SheetScrim {}
             }
             if (views) ViewsSheet(mapOf("agents" to "1 LIVE"), onPick = {}, onDismiss = {}, autoFocus = false)
             if (plus) PlusMenu(plusItems("plan", "autopilot", "Auto (free)", false)) {}
@@ -108,7 +113,7 @@ class ShotsTest {
         AvatarMenu("Luke", "lacksonkapapahue@gmail.com", listOf(
             MenuItem("account", "Account", "Signed in"), MenuItem("settings", "Settings"), MenuItem("router", "BlazeRouter", "AUTO"),
             MenuItem("views", "All views", "/VIEWS"), MenuItem("control", "Phone control", "ON"), MenuItem("theme", "Dark theme", "System"),
-            MenuItem("update", "Check for updates", "v0.12.0"), MenuItem("signout", "Sign out")), onPick = {}, onDismiss = {})
+            MenuItem("update", "Check for updates", "v0.15.0"), MenuItem("signout", "Sign out")), onPick = {}, onDismiss = {})
     }
     @Test fun projects() = shot("06-projects") {
         Column(Modifier.fillMaxSize()) {
@@ -125,4 +130,36 @@ class ShotsTest {
         }
     }
     @Test fun search() = shot("08-search") { SearchScreen(chats, onChat = {}, onView = {}, onDismiss = {}, initial = "me", autoFocus = false) }
+
+    @Test fun router() = shot("09-router") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+                Label("Settings \u203a BlazeRouter", size = 10.sp, modifier = Modifier.padding(top = 18.dp))
+                RouterPage(onClassic = {})
+            }
+        }
+    }
+    @Test fun projectBrief() = shot("10-project-brief") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("projects", {}, {}, {}, true, {}, "Luke", {})
+            ProjectsPane(listOf(Project("p2", "HomeGlow store", "Friendly, short replies. Prices in USD.", chats = listOf("c3", "c4"),
+                brief = "Purpose: grow the HomeGlow Shopify store to 20 orders a week.\nRules: free tools only; every customer message needs Luke's OK.\n" +
+                    "Key files: ~/homeglow/products.csv, ~/homeglow/brand.md\nIn progress: 5 new lamp listings, TikTok week 3.")),
+                chats, busy = setOf("c3"), needsYou = emptySet(), openId = "p2",
+                onOpen = {}, onBack = {}, onCreate = {}, onChat = {}, onNewChat = {}, onInstructions = { _, _ -> }, onDelete = {})
+        }
+    }
+    @Test fun longChat() = shot("11-long-chat", dark = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                UserBubble("Where did we land on the lamp prices?")
+                WorkCard(listOf(step(21, "Looking back through this chat for \u201clamp prices\u201d"), step(22, "Reading an earlier message")), live = false,
+                    startAt = t0, endAt = t0 + 14_000, meter = "in 26.9k · out 0.4k", meterHigh = true)
+                AnswerBody(23, "On turn 41 we set **$24.99** for the moon lamp and **$19.99** for the mini, with free shipping over $35.")
+                FreshChatOffer {}
+            }
+        }
+    }
 }
