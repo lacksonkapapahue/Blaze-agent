@@ -144,7 +144,17 @@ object Linux {
         File(fake, "version").writeText("Linux version 5.10.0 (blaze@android) #1 SMP\n")
         val lib = File(base(), "lib").apply { mkdirs() }
         val talloc = File(lib, "libtalloc.so.2")
-        if (!talloc.exists()) try { Os.symlink(nat("libtalloc.so").absolutePath, talloc.absolutePath) } catch (_: Exception) { }
+        // An app update moves nativeLibraryDir (/data/app/~~random/...), leaving this link dangling: exists() is false
+        // but the link itself is still there, so a plain symlink() failed with EEXIST and proot couldn't start.
+        // Always point it at the current install.
+        val target = nat("libtalloc.so").absolutePath
+        val current = try { Os.readlink(talloc.absolutePath) } catch (_: Exception) { null }
+        if (current != target || !talloc.exists()) {
+            try { Os.remove(talloc.absolutePath) } catch (_: Exception) { talloc.delete() }
+            try { Os.symlink(target, talloc.absolutePath) } catch (_: Exception) {
+                try { File(target).copyTo(talloc, overwrite = true) } catch (_: Exception) { }
+            }
+        }
     }
 
     /** The command line that runs [cmd] (or a login shell) inside Alpine. */
