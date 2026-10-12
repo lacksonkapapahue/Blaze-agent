@@ -363,6 +363,7 @@ fun ChatScreen() {
                         onCreate = { projectOpen = com.blaze.assistant.agent.Projects.create(it).id },
                         onChat = { openChat(it) }, onNewChat = { newChat(it) },
                         onInstructions = { id, t -> com.blaze.assistant.agent.Projects.setInstructions(id, t) },
+                        onBrief = { id, t -> com.blaze.assistant.agent.Projects.setBrief(id, t) },
                         onDelete = { com.blaze.assistant.agent.Projects.delete(it); projectOpen = "" })
                     LaunchedEffect(Unit) { Agent.refreshChats() }
                 } else if (showing == "design") {
@@ -383,6 +384,8 @@ fun ChatScreen() {
                             onFollowup = { send(it) })
                     }
                 }
+                // Dim the chat while a sheet (+ menu, /views) is open, so half-cut lines at its edge read as background.
+                if (shellMode == "chat" && showing.isEmpty() && (plusOpen || showViews)) SheetScrim { plusOpen = false; showViews = false }
             }
             if (shellMode == "chat" && showing.isEmpty()) {
                 if (voiceState == Voice.State.LISTENING) ListeningStrip()
@@ -579,6 +582,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
     LaunchedEffect(lastUser) { if (lastUser != null) { follow = true; toEnd(true) } }
 
     val lastBlazeId = messages.lastOrNull()?.takeIf { it.role == Role.BLAZE }?.id
+    val meter by Agent.meter.collectAsState()
+    val lastStepsKey = items.lastOrNull { it is Item.Steps }?.key
     Box(Modifier.fillMaxSize()) {
         LazyColumn(state = state, modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
@@ -587,7 +592,9 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                 when (item) {
                     is Item.Steps -> {
                         val st by Agent.status.collectAsState()
-                        WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps)
+                        val m = if (Settings.longChat && (item.live || item.key == lastStepsKey)) meter else null
+                        WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
+                            meter = m?.text.orEmpty(), meterHigh = m?.high == true)
                     }
                     is Item.Msg -> Entry(item.m, canAct = mood == Mood.IDLE, onQuote = onQuote,
                         followups = if (item.m.id == lastBlazeId && mood == Mood.IDLE && Settings.followups) item.m.followups else emptyList(),
@@ -607,6 +614,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                         if (live.isNotBlank() && Settings.showReasoning) ReasoningBlock(live, liveNow = true)
                     }
                 }
+                // Past 80% of the meter: offer a fresh chat that opens with this one's summary (v0.15.0).
+                if (mood == Mood.IDLE && Settings.longChat && meter?.high == true) FreshChatOffer { Agent.freshChat() }
             }
         }
         AnimatedVisibility(!atBottom, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),

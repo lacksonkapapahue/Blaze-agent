@@ -16,6 +16,8 @@ object ToolRouter {
     private val core = setOf(
         "remember", "forget", "open_view", "about_blaze", "blazerouter", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user", "self_test",
         "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
+        // Long chats (v0.15.0): always on hand so nothing older is ever out of reach.
+        "search_chat", "read_turn", "read_artifact", "update_brief",
         // Basic phone control stays in core: it's the most common thing people ask for.
         "run_plan", "open_app", "search_in_app", "read_screen",
         // Calls: "loudspeaker", "mute", "hang up" must work mid-call without guessing a group.

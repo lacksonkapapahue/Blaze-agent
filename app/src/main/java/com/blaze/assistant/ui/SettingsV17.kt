@@ -282,6 +282,8 @@ fun LearningSection() {
     Section("Learning")
     var titles by remember { mutableStateOf(Settings.autoTitles) }
     ToggleRow("Learn from chats", "Blaze saves lasting facts and preferences as you go, replaces ones that changed, and saves tasks you teach it or repeat as skills. Small talk costs nothing: it only checks when something worth keeping was said", auto) { auto = !auto; Settings.autoLearn = auto }
+    var long by remember { mutableStateOf(Settings.longChat) }
+    ToggleRow("Long chats", "Older turns fold into a running summary, Blaze searches the chat instead of re-reading it, long tool output is saved aside, and the work card shows tokens in and out", long) { long = !long; Settings.longChat = long }
     ToggleRow("Name chats by topic", "Chats are titled by what most of the conversation is about, not the first message. Chats you rename stay as you named them", titles) { titles = !titles; Settings.autoTitles = titles }
     ToggleRow("Ask before saving", "Changes wait here for your OK instead of saving straight away", ask) { ask = !ask; Settings.learnApproval = ask }
     if (pending.isNotEmpty()) {

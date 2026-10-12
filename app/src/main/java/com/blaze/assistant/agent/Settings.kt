@@ -168,6 +168,11 @@ object Settings {
         get() = modelFor(providerId)
         set(v) = prefs.edit().putString("model_$providerId", v.trim()).apply()
 
+    /** Long-chat engine (v0.15.0): rolling summary, search_chat, artifacts, token meter. */
+    var longChat: Boolean
+        get() = prefs.getBoolean("long_chat", true)
+        set(v) = prefs.edit().putBoolean("long_chat", v).apply()
+
     var phoneControl: Boolean
         get() = prefs.getBoolean("phone_control", true)
         set(v) = prefs.edit().putBoolean("phone_control", v).apply()
