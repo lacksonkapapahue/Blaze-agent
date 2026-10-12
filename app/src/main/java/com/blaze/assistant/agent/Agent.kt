@@ -598,6 +598,8 @@ When you finish, say what you did in one short sentence.
             if (Settings.followups) append("\nAt the very end of each final answer (never when calling tools), add one line exactly like <<follow-ups: first | second | third>> with three short next requests (max 6 words each) written as the user would say them. Skip it for routines.")
             append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
             append("\nEverything you create that keeps running (alarms, timers, routines, triggers, calendar events, jobs) gets an ID like R4. To change, stop or delete one, call processes to find the ID, then process(id, action). Only use action=details when the user asks for specifics.")
+            // v0.23.0: the always-present VIEWS block (static, so it stays in the cached prefix).
+            append(ViewRouter.PROMPT)
             // Speed plan step 2: everything above stays identical turn after turn, so providers can
             // reuse their cached prefix. Everything that changes (clock, memory, device) goes last.
             append("\n\n")
@@ -625,7 +627,7 @@ When you finish, say what you did in one short sentence.
             append(Learning.promptBlock(userText))
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
             append(com.blaze.assistant.link.DesktopLink.promptLine())
-            append(SelfKnowledge.promptBlock(app)); append(com.blaze.assistant.ui.Views.PROMPT_LINE); append(Projects.promptLine(_chatId.value))
+            append(SelfKnowledge.promptBlock(app)); append(Projects.promptLine(_chatId.value))
             append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
                 "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
             if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
@@ -758,6 +760,9 @@ When you finish, say what you did in one short sentence.
         var keep = false
         /** Tool names called this turn, in order (for Learn.decide). */
         val turnTools = java.util.Collections.synchronizedList(mutableListOf<String>())
+        /** v0.23.0: the view this turn must use (keyword classifier) and the skills looked up for it. */
+        @Volatile var turnView: ViewRouter.Spec? = null
+        @Volatile var turnSkills: SkillMatch.Result = SkillMatch.Result.NONE
         val history = JSONArray()
         val historyMark = HashMap<Long, Int>()
         val trace = JSONArray()
@@ -1065,7 +1070,8 @@ When you finish, say what you did in one short sentence.
             val sys = systemPrompt(lastUserText()) + Modes.promptLine(agentPlan) +
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
-                (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine())
+                (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
+                (turnView?.let { ViewRouter.hint(it) } ?: "") + SkillMatch.block(turnSkills)
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
@@ -1190,6 +1196,14 @@ When you finish, say what you did in one short sentence.
                     addAll(ToolRouter.guess(lastUserText()))
                     addAll(ToolRouter.usedIn(history))
                 }
+                // v0.23.0 views + skills: the view this request needs (its tools on) and the skills that match it,
+                // looked up before the first model call with no extra model call. Shown on the work card.
+                val userNow = lastUserText()
+                turnView = if (routine) null else ViewRouter.route(userNow)
+                turnView?.let { groupsOn += it.groups }
+                turnSkills = SkillMatch.forTurn(userNow)
+                SkillMatch.cardLine(turnSkills).takeIf { it.isNotBlank() }?.let { add(Role.STEP, it) }
+                var learnNudged = false
                 var tools = ToolRouter.select(allTools, groupsOn)
                 orient.reset()
                 val orientNote = if (!routine && "screen" in groupsOn) orientContext() else ""
@@ -1197,7 +1211,7 @@ When you finish, say what you did in one short sentence.
                 // Chat lane: small talk and plain questions = one light call with no tools.
                 val lastBlaze = msgs.lastOrNull { it.role == Role.BLAZE }?.text.orEmpty()
                 var lite = !routine && history.optJSONObject(history.length() - 1)?.opt("content") is String &&
-                    ChatLane.fits(lastUserText(), lastBlaze)
+                    ChatLane.fits(lastUserText(), lastBlaze) && turnView == null && turnSkills.full.isEmpty()
                 var firstMs = -1L
                 streamedVoice = false
                 while (trace.length() > 0) trace.remove(0)
@@ -1310,7 +1324,7 @@ When you finish, say what you did in one short sentence.
                         }
                     }
                     val calls = reply.optJSONArray("tool_calls")
-                    val textOut = when (val content = reply.opt("content")) {
+                    var textOut = when (val content = reply.opt("content")) {
                         is String -> content
                         is JSONArray -> (0 until content.length()).joinToString("") {
                             content.optJSONObject(it)?.optString("text") ?: ""
@@ -1325,6 +1339,31 @@ When you finish, say what you did in one short sentence.
                         add(Role.STEP, "Autopilot: deciding myself")
                         history.put(JSONObject().put("role", "user").put("content", Modes.AUTO_PREFIX + Modes.AUTO_REPLY))
                         continue
+                    }
+                    // Views first (v0.23.0): flashcards or a quiz written as text on a Learn turn become a Learn deck,
+                    // or the model is asked once to make the deck itself.
+                    if ((calls == null || calls.length() == 0) && !routine && turnView?.id == "learn") {
+                        val called = synchronized(turnTools) { Flashcards.TOOL in turnTools }
+                        when (ViewRouter.shouldConvert(lastUserText(), ReplyParts.split(textOut, final = true).text, called, learnNudged)) {
+                            ViewRouter.Fix.CONVERT -> {
+                                val cards = ViewRouter.cardsFrom(ReplyParts.split(textOut, final = true).text)
+                                val deck = ViewRouter.deckName(lastUserText())
+                                val n = kotlinx.coroutines.withContext(Dispatchers.IO) { Flashcards.add(deck, cards) }
+                                add(Role.STEP, "Made the \u201c$deck\u201d deck in Learn")
+                                turnTools.add(Flashcards.TOOL)
+                                textOut = ViewRouter.converted(deck, n, cards.size)
+                                reply.put("content", textOut)
+                                if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open("learn") }
+                            }
+                            ViewRouter.Fix.REPROMPT -> if (step < maxSteps - 3) {
+                                learnNudged = true
+                                if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                                add(Role.STEP, "Putting the cards in Learn")
+                                history.put(JSONObject().put("role", "user").put("content", ViewRouter.NUDGE))
+                                continue
+                            }
+                            ViewRouter.Fix.NONE -> {}
+                        }
                     }
                     if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && !routine) {
                         val nudge = when {

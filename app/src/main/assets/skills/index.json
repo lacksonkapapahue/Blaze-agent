@@ -251,6 +251,11 @@
    "name": "weekly-digest",
    "version": 1,
    "sha256": "f8dc4f2fae09282dab6a2b275f35c5b9f7fd6356bb65de5eb161d7b1cf6b8e6f"
+  },
+  {
+   "name": "study-flashcards",
+   "version": 1,
+   "sha256": "7a7b52116b49e230093c24192636f0d1aa405ab385c8fc67476b9038a2f8c4b7"
   }
  ]
 }

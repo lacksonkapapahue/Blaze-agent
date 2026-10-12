@@ -116,7 +116,7 @@ object Flashcards {
     const val TOOL = "flashcards"
 
     fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", TOOL)
-        .put("description", "The user's flashcards (spaced repetition, reviewed in the Learn view). add: save cards to a deck (from notes, a PDF, slides or a lesson); " +
+        .put("description", "The user's flashcards in the Learn view (spaced repetition). add: create a Learn deck or add cards to one (deck name + cards [{front, back}]) whenever the user wants flashcards, a quiz or something to study, then open_view view=learn; never write the cards in chat instead. " +
             "list: decks with due counts; due: cards due now in a deck (to quiz the user in chat); delete_deck.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("add", "list", "due", "delete_deck"))))

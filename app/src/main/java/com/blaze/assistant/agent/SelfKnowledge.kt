@@ -102,6 +102,7 @@ object SelfKnowledge {
             if (on("views")) {
                 append("## Views (/views, or open_view)\n")
                 append(com.blaze.assistant.ui.Views.all.joinToString("\n") { "- ${it.name} (/${it.id}): ${it.desc}" }).append("\n")
+                append("Blaze uses its views on its own, every turn, without being asked: output that fits a view (flashcards → Learn, pages → Design, reminders → Schedule, pictures and beats → Gallery, methods → Skills, facts → Memory) is made there, opened or linked, and answered briefly in chat. Matching skills are looked up before every turn.\n")
                 append("Commands: ").append(safe { Commands.all().take(60).joinToString(" ") { "/" + it.name } }).append("\n\n")
             }
             if (on("setup")) {

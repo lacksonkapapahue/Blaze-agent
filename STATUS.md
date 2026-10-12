@@ -42,3 +42,7 @@
 - **Not verified on a device (needs Luke on the A12):** Vosk CPU and battery with the sound gate over an hour; that `isClientSilenced` really pauses when WhatsApp records a voice note; that WhatsApp's RemoteInput reply sends from the notification; Samsung's beep on every SpeechRecognizer restart (fallback only, until the model is downloaded).
 - **Left (optional, in order):** 1) restyle Life logs / Notification replies pages with `ui/Kit.kt` like the visual-parity pages; 2) "Hey Blaze" during logs (the wake word sleeps while logs hold the mic; only "stop logs" / "pause logs" are heard from the transcript); 3) Desktop parity for the journal `kind` column and kinds `notif` / `life_log`.
 - **Next step:** install v0.22.0 on the A12, turn on notification access, try "start logs" and "reply to <name>"; file anything that misbehaves.
+
+## views-skills (v0.23.0, versionCode 65)
+- **State:** in progress on branch `views-skills`.
+- **What:** always-present VIEWS block + per-turn required-view hint (`agent/ViewRouter.kt`), Learn safety net (flashcard/quiz text → Learn deck, or one re-prompt), per-turn skill lookup across bundled / user / learned skills with disabled ones excluded (`agent/SkillMatch.kt`, top 1-3 in full within ~6,000 chars, "Skills: …" step on the work card), bundled skill `study-flashcards`, Projects in `/views`. Tests `ViewsSkillsTest`, screenshot `35-views-skills`.

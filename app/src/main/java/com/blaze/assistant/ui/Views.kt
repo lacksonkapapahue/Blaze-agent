@@ -16,6 +16,7 @@ data class BlazeView(val id: String, val name: String, val desc: String, val pag
 object Views {
     val all = listOf(
         BlazeView("chats", "Archive", "Chats from before one mind, read-only", special = "chats", aliases = listOf("history", "archive")),
+        BlazeView("projects", "Projects", "Ongoing efforts with their own threads, brief and instructions", special = "projects", aliases = listOf("project")),
         BlazeView("design", "Design", "Live preview of pages Blaze builds", special = "design", aliases = listOf("preview", "studio")),
         BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learning")),
         BlazeView("learn", "Learn", "Flashcards with spaced repetition, Classroom, low-data mode", page = "learn", aliases = listOf("flashcards", "study", "student", "classroom")),
@@ -70,7 +71,8 @@ object Views {
 
     fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", TOOL)
         .put("description", "Switch Blaze's own screen to one of its views: design (live preview of a web page, HTML file or local server you built), " +
-            "memory, jobs, schedule, agents, accounts, router (models/keys), skills, gallery, browser, doctor, usage, settings, chats. " +
+            "learn (flashcard decks; open it after flashcards add), memory, jobs, schedule, projects, agents, accounts, router (models/keys), skills, gallery, browser, doctor, usage, settings, chats (Archive). " +
+            "Output that fits a view is made there and the view opened, never dumped in chat. " +
             "The user can always tap Exit to come back to the chat. For design pass target = the file path (e.g. ~/site/index.html) or URL to preview.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("view", JSONObject().put("type", "string").put("enum", JSONArray(all.map { it.id })))
@@ -79,6 +81,7 @@ object Views {
             .put("reason", JSONObject().put("type", "string").put("description", "one short line: why switch")))
             .put("required", JSONArray(listOf("view")))))
 
+    /** Kept for older callers; the full VIEWS block is agent/ViewRouter.PROMPT since v0.23.0. */
     const val PROMPT_LINE = "\nVIEWS: when a task is visual (a website, page, design, poster, 3D), call open_view view=design with the file or URL as target, without asking. " +
         "For other views, set ask=true unless the user asked for that view."
 

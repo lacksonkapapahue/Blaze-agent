@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.22.0 (versionCode 64) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.23.0 (versionCode 65) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -48,6 +48,9 @@ Settings › Notification replies: with notification access on, Blaze reads chat
 
 ## Life logs
 Say "start logs" / "live logs" (or `/logs`, Settings › Life logs): a foreground service with a persistent notification (Pause, Stop) transcribes what the mic hears on the phone for free (Vosk small English model, shared with the wake word and downloaded once; Android's SpeechRecognizer until then). Only text is saved, as journal chunks (kind `life_log`) split by silence or topic; the idle review turns them into memories marked "(inferred)". "Brainstorm with me" (`/brainstorm`) writes ideas, decisions and next steps to the chat and memory when it stops. Pauses during calls, while another app records, while Blaze listens or speaks, and below 15% battery unless charging.
+
+## Views + skills
+Blaze always uses its views: flashcards and quizzes go into a **Learn** deck, pages into **Design**, reminders into **Schedule**, pictures and beats into the **Gallery**, methods into **Skills**, facts into **Memory**; the view opens and the chat gets a short answer. Each request is matched to its view on the phone (no extra model call), and to the skills that fit it (bundled, your own and learned; switched-off skills are skipped); the best 1-3 are read in full and shown as "Skills: …" on the work card. Code: `agent/ViewRouter.kt`, `agent/SkillMatch.kt`.
 
 ## Student pack
 Settings › Learn (or `/learn`): flashcards with spaced repetition, Google Classroom (switch on, then reconnect Google once) and low-data mode. Skills: study-planner, tutor, lecture-notes, essay-coach, group-project, classroom-sync.
