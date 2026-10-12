@@ -340,10 +340,10 @@ fun ChatScreen() {
     val toolbar = remember { BlazeToolbar({ r, cp, all -> tbRect = r; tbCopy = cp; tbAll = all }, { tbRect = null }) }
 
     if (inCall) { CallScreen(onHangUp = { inCall = false }); return }
+    val me = account.user
     Box(Modifier.fillMaxSize().background(c.paper)) {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            val me = account.user
             ShellTopBar(mode = shellMode,
                 onMode = { m -> if (m == "chat" && shellMode == "chat" && showing.isEmpty()) { Agent.refreshChats(); drawer = true } else { shellMode = m; if (m == "projects") projectOpen = "" } },
                 onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
