@@ -234,35 +234,44 @@ private fun runAction(ctx: android.content.Context, a: PagePointer.Action, h: Pa
     }
 }
 
+/** One tile of the pointer menu (shared by the page pointer and Magic Hand, v0.24.7). */
+class PointerTile(val label: String, val spoken: String, val icon: ImageVector, val primary: Boolean = false, val onClick: () -> Unit)
+
 /** The floating action menu: a rounded dark card, the element on top, then icon tiles with short labels. */
 @Composable
-fun PointerMenuCard(h: PagePointer.Hit, actions: List<PagePointer.Action>, widthDp: Float, onPick: (PagePointer.Action) -> Unit) {
+fun PointerMenuCard(h: PagePointer.Hit, actions: List<PagePointer.Action>, widthDp: Float, onPick: (PagePointer.Action) -> Unit) =
+    PointerTiles(h.kind.icon(), h.describe, actions.map { a ->
+        PointerTile(PagePointer.label(a, h.kind), PagePointer.spoken(a, h.kind), a.icon(), a == PagePointer.Action.ASK) { onPick(a) }
+    }, widthDp)
+
+/** The v0.24.6 pointer menu's look for any set of tiles (Magic Hand reuses it for its radial menu). */
+@Composable
+fun PointerTiles(headIcon: ImageVector, head: String, tiles: List<PointerTile>, widthDp: Float) {
     val shape = RoundedCornerShape(22.dp)
-    val cols = PagePointer.columns(actions.size)
+    val cols = PagePointer.columns(tiles.size)
     val tile = ((widthDp - PagePointer.PAD * 2) / cols)
     Column(Modifier.width(widthDp.dp).shadow(16.dp, shape).clip(shape).background(Glass.surface).border(1.dp, Glass.border, shape)
         .padding(PagePointer.PAD.dp)) {
         Row(Modifier.fillMaxWidth().height((PagePointer.HEAD - 4).dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(h.kind.icon(), contentDescription = null, tint = Glass.orange, modifier = Modifier.size(16.dp))
+            Icon(headIcon, contentDescription = null, tint = Glass.orange, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text(h.describe, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(head, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = Glass.sub))
         }
         Spacer(Modifier.height(4.dp))
-        actions.chunked(cols).forEach { row ->
+        tiles.chunked(cols).forEach { row ->
             Row(horizontalArrangement = Arrangement.Start) {
-                row.forEach { a ->
-                    val label = PagePointer.label(a, h.kind)
+                row.forEach { t ->
                     Column(Modifier.width(tile.dp).height(PagePointer.TILE_H.dp).clip(RoundedCornerShape(16.dp))
-                        .clickable(onClickLabel = PagePointer.spoken(a, h.kind)) { onPick(a) }
-                        .semantics { contentDescription = PagePointer.spoken(a, h.kind) }
+                        .clickable(onClickLabel = t.spoken) { t.onClick() }
+                        .semantics { contentDescription = t.spoken }
                         .padding(top = 6.dp, start = 2.dp, end = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(38.dp).clip(CircleShape).background(if (a == PagePointer.Action.ASK) Glass.blue else Glass.raised2),
+                        Box(Modifier.size(38.dp).clip(CircleShape).background(if (t.primary) Glass.blue else Glass.raised2),
                             contentAlignment = Alignment.Center) {
-                            Icon(a.icon(), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            Icon(t.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                         Spacer(Modifier.height(5.dp))
-                        Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        Text(t.label, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                             style = TextStyle(fontFamily = Type.Sans, fontSize = 10.5.sp, lineHeight = 12.sp, color = Glass.text))
                     }
                 }

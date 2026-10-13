@@ -50,3 +50,72 @@ object MagicHandMenu {
         }
     }
 }
+
+/**
+ * v0.24.7: the browser pointer's own element → action mapping (PagePointer.actionsFor, v0.24.6) as Magic Hand's
+ * mapper, so both pointers offer the same menu for the same kind of thing. Hand-only actions are added back by
+ * [MagicHandMenu.withHandActions].
+ */
+object BrowserMenuMapper : ElementActionMapper {
+    fun pageKind(k: Kind): com.blaze.assistant.browser.PagePointer.Kind = when (k) {
+        Kind.LINK -> com.blaze.assistant.browser.PagePointer.Kind.LINK
+        Kind.IMAGE -> com.blaze.assistant.browser.PagePointer.Kind.IMAGE
+        Kind.TEXT, Kind.VALUE, Kind.BUTTON, Kind.FIELD -> com.blaze.assistant.browser.PagePointer.Kind.TEXT
+        Kind.EMPTY, Kind.SECRET -> com.blaze.assistant.browser.PagePointer.Kind.OTHER
+    }
+
+    /** A browser action as a hand action; null for the ones that only make sense in a WebView (download, pop out). */
+    fun handAction(a: com.blaze.assistant.browser.PagePointer.Action): Action? = when (a) {
+        com.blaze.assistant.browser.PagePointer.Action.ASK -> Action.ASK
+        com.blaze.assistant.browser.PagePointer.Action.COPY_TEXT -> Action.COPY
+        com.blaze.assistant.browser.PagePointer.Action.TRANSLATE -> Action.TRANSLATE
+        com.blaze.assistant.browser.PagePointer.Action.EXPLAIN, com.blaze.assistant.browser.PagePointer.Action.SUMMARISE -> Action.EXPLAIN
+        com.blaze.assistant.browser.PagePointer.Action.OPEN, com.blaze.assistant.browser.PagePointer.Action.OPEN_BG -> Action.OPEN_LINK
+        com.blaze.assistant.browser.PagePointer.Action.COPY_LINK, com.blaze.assistant.browser.PagePointer.Action.COPY_IMAGE_LINK -> Action.COPY_LINK
+        com.blaze.assistant.browser.PagePointer.Action.SHARE -> Action.SHARE
+        com.blaze.assistant.browser.PagePointer.Action.SAVE_IMAGE -> Action.SAVE_IMAGE
+        com.blaze.assistant.browser.PagePointer.Action.SEARCH_IMAGE -> Action.DESCRIBE
+        com.blaze.assistant.browser.PagePointer.Action.DOWNLOAD, com.blaze.assistant.browser.PagePointer.Action.PIP -> null
+    }
+
+    override fun actionsFor(kind: Kind, carrying: Boolean): List<Action> {
+        if (kind == Kind.SECRET) return emptyList()
+        val base = com.blaze.assistant.browser.PagePointer.actionsFor(pageKind(kind)).mapNotNull(::handAction).toMutableList()
+        // The browser's text menu has no Search / Remind; text on the phone gets them like the hand's own menu.
+        if (kind == Kind.TEXT && Action.SEARCH !in base) base += Action.SEARCH
+        if (kind == Kind.FIELD && carrying) base.add(0, Action.DROP)
+        return base.distinct()
+    }
+}
+
+/**
+ * v0.24.7 Magic Hand safety rules (pure, tested): what the hand may do while a private chat (or a private browser
+ * tab) is in front. In private nothing is captured: no screenshot, no OCR, no teach recording, no watch, nothing
+ * sent to Blaze or saved. Moving text the user can already see (copy, carry, drop, share, open) still works.
+ */
+object MagicHandGuard {
+    private val capturing = setOf(Action.ASK, Action.EXPLAIN, Action.DESCRIBE, Action.TRANSLATE, Action.REMIND,
+        Action.WATCH, Action.SAVE_IMAGE, Action.DROP_IN_CHAT)
+
+    fun allowed(a: Action, private: Boolean): Boolean = !private || a !in capturing
+    fun canScreenshot(private: Boolean) = !private
+    fun canTeach(private: Boolean) = !private
+    fun canGrab(private: Boolean) = !private
+    fun canWatch(private: Boolean) = !private
+
+    const val PRIVATE_NOTE = "Private is on, so Magic Hand captures nothing. Copy, carry and drop still work."
+
+    /** The hand never taps on its own: every tap (teach) and every drop into a field asks first. */
+    fun needsConfirm(i: MagicHandLogic.Intent): Boolean = i == MagicHandLogic.Intent.TEACH_TAP || i == MagicHandLogic.Intent.DROP || i == MagicHandLogic.Intent.WATCH
+
+    /** The confirm line shown before the hand acts. */
+    fun confirmLine(i: MagicHandLogic.Intent, label: String, carried: String = ""): String {
+        val l = MagicHandLogic.preview(label.ifBlank { "this" }, 36)
+        return when (i) {
+            MagicHandLogic.Intent.TEACH_TAP -> "Tap \u201c$l\u201d for you?"
+            MagicHandLogic.Intent.DROP -> "Drop \u201c${MagicHandLogic.preview(carried, 24)}\u201d into \u201c$l\u201d?"
+            MagicHandLogic.Intent.WATCH -> "Watch \u201c$l\u201d and tell you when it changes?"
+            else -> l
+        }
+    }
+}
