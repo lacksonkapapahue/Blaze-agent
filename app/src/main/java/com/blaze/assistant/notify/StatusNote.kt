@@ -1,7 +1,7 @@
 package com.blaze.assistant.notify
 
 /**
- * v0.25.0: the one ongoing "what Blaze is doing" notification. Pure state → line so it can be tested
+ * v0.24.2: the one ongoing "what Blaze is doing" notification. Pure state → line so it can be tested
  * without Android. Priority: something that needs the user, then agent work, then an update download.
  * When agent work and a download run together the download rides along in the text.
  */

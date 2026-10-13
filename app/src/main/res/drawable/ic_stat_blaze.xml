@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- v0.25.0: status-bar icon = the spark blob, monochrome (white, alpha only), spark cut out. -->
+<!-- v0.24.2: status-bar icon = the spark blob, monochrome (white, alpha only), spark cut out. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp" android:viewportWidth="56" android:viewportHeight="56">
     <group android:translateX="-26" android:translateY="-26">

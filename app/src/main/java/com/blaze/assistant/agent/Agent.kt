@@ -312,10 +312,10 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         s.msgs = s.msgs.map { if (it.id == id) it.copy(meta = meta) else it }
     }
 
-    /** v0.25.0: true when the visible chat already has a card with this meta (one update card at a time). */
+    /** v0.24.2: true when the visible chat already has a card with this meta (one update card at a time). */
     fun hasCard(meta: String): Boolean = cur.msgs.any { it.meta == meta }
 
-    /** v0.25.0: removes app cards with this meta from every open chat (the update card when it finishes). */
+    /** v0.24.2: removes app cards with this meta from every open chat (the update card when it finishes). */
     fun removeCard(meta: String) {
         val all = (sessions.values + cur).toSet()
         all.forEach { s -> if (s.msgs.any { it.meta == meta }) { s.msgs = s.msgs.filterNot { it.meta == meta }; try { s.persist() } catch (_: Throwable) { } } }

@@ -57,7 +57,7 @@ object Updater {
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("install", JSONObject().put("type", "boolean").put("description", "Install if newer (default true)")))))
 
-    /** v0.25.0: the update runs in the background (its own scope, not the chat turn) so it can be stopped on its own. */
+    /** v0.24.2: the update runs in the background (its own scope, not the chat turn) so it can be stopped on its own. */
     @Volatile private var job: kotlinx.coroutines.Job? = null
 
     /** The /update command: show the (one) card and start in the background. */
@@ -104,7 +104,7 @@ object Updater {
     private val KEY_LAST_CHECK = "update_last_check"
 
     /**
-     * v0.25.0 background updates: at most once a day, on launch, a quiet check. If a newer Blaze is published the
+     * v0.24.2 background updates: at most once a day, on launch, a quiet check. If a newer Blaze is published the
      * single update card appears with Install; nothing is downloaded until the user taps it.
      */
     fun checkInBackground(ctx: Context) {

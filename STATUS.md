@@ -1,5 +1,14 @@
 # Blaze Android status
 
+- **Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release.**
+
+## simplify-day (v0.24.2, versionCode 74)
+- **Branch:** `simplify-icons-notify`, PR #40 (https://github.com/lacksonkapapahue/Blaze-agent/pull/40). Planned as "v0.25.0", shipped as v0.24.2 per the versioning rule.
+- **What (all in one PR):** spark blob launcher icon + monochrome layer + monochrome blob status icon; one combined status notification with Stop (`notify/StatusNote.kt`); background updates with Stop, a daily quiet check and a single update card that disappears when done; private chat (ghost, Private pill, confirm on leave, nothing saved or learned: `agent/PrivateChat.kt`); Settings cut to Brain/Voice/Permissions/Account/Updates/About/Advanced with the router dashboard removed (prefs kept); technical lines under replies hidden (`agent/ReplyChips.kt`, toggle `show_tech_lines`); onboarding rings that turn into checkmarks; dependency setup gate for new and upgraded users (`setup/SetupGate.kt`, `ui/SetupColumns.kt`) with a pre-setup backup in `filesDir/backup/`. Tests: `PrivateChatTest`, `StatusNoteTest`, `SetupGateTest`, `ReplyChipsTest`.
+- **Judgment calls:** no blob artwork existed anywhere (Desktop's logo is still the pixel B), so the blob was drawn new in the brand colours. Required gate steps: Notifications and Terminal (Linux); Desktop pairing, phone control, mic, overlay and battery are optional (Later), since pairing needs a computer and permissions can be refused for good. Routine / terminal-job `dataSync` foreground notifications and the Life logs / wake word mic notifications stay separate (merging would break their foreground-service types).
+- **Left (needs the A12):** check the new icon on the launcher (themed and not), that Stop in the status notification cancels a running turn and a download, that the gate shows only the missing steps after updating from v0.24.1 and never again after, and that a private chat leaves nothing in Settings › Memory or after a restart.
+- **Next step:** if anything above misbehaves, branch from main, fix, bump to v0.24.3.
+
 - **Now:** v0.22.0 (versionCode 64): notification replies + life logs, PR #23 (branch `life-logs`), squash-merged on green. Before that v0.21.0 visible pointer (PR #24, merge 0245eff), v0.20.0 orient loop + background browser (PR #22, merge d15e6e2), v0.19.0 visual parity (PR #21, merge b963d74). See CHANGELOG.md.
 - **Shipped:** v0.15.0 long chats, PR #17, merge 2a86aaf. v0.16.0 student pack, PR #18, merge a499beb. v0.17.0 marketer & seller pack, PR #19, merge 2be6525. v0.18.0 one mind, PR #20, merge fc5f3f3. v0.19.0 visual parity, PR #21, merge b963d74.
 - **Needs Luke (Google Cloud project blaze-511220):** enable the Classroom API and add the scopes `classroom.courses.readonly` + `classroom.coursework.me.readonly` to the OAuth consent screen (Testing mode), and make sure the blaze-auth Worker passes them through.

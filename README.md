@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.24.1 (versionCode 73) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.24.2 (versionCode 74) is the current build on `main`. Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -36,6 +36,15 @@ update normally. Because the name went down, CI also publishes the same APK as `
 
 ## One mind
 One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/mind.db` holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats stay on disk and in the journal (Blaze finds them with `search_chat`); since v0.24.0 there is no chat list or Archive screen, and `/clear` empties the screen without forgetting anything. Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.
+
+## Simpler day to day (v0.24.2)
+- **Icon:** the spark blob (paper blob, accent spark) on the launcher, with a themed monochrome version; every notification uses a monochrome blob.
+- **One status notification:** "Thinking…", "Browsing…", "Downloading update 42%" or "Needs you: …", with **Stop** (cancels the agent work and any update download). Life logs and the wake word keep their own microphone notifications; routines and terminal jobs keep their own foreground notifications.
+- **Background updates:** a quiet daily check; downloads run in the background with Stop; one update card that disappears when the update finishes.
+- **Private chat:** the ghost in the top bar opens a chat that's never saved or learned from ("Private" pill; leaving asks first and throws it away).
+- **Settings:** Brain, Voice, Permissions, Account, Updates, About, Advanced (everything else). The BlazeRouter dashboard is gone; its prefs are kept.
+- **Quieter replies:** timings, data used, model names and the token meter are hidden (Brain › advanced › *Show technical details*).
+- **Setup gate:** on launch Blaze checks Notifications and the Terminal (Linux) (required) plus phone control, mic, overlay, battery and Blaze Desktop pairing (optional, *Later*); only missing ones show, as columns with rings that spin and turn into checkmarks. `setup_deps_done` stops it for good; prefs and data are backed up first to `filesDir/backup/pre-setup-v<code>-<time>/`.
 
 ## Messaging-style chat (v0.24.0)
 The chat reads like a messaging app in Blaze's classic theme: your messages are ink bubbles on the right, Blaze's are soft bubbles on the left, runs from one side group tightly with asymmetric corners and one quiet timestamp, and the composer is a rounded pill (+, mic that turns into Send) whose placeholder rotates through on-device suggestions (your accounts, apps, birthdays, what's coming up). The top **Chat | Projects** toggle only switches tabs. `/clear` (or + › Clear screen) empties the screen, with Undo for a few seconds.

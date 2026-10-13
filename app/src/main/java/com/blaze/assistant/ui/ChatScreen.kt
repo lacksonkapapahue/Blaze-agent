@@ -403,7 +403,7 @@ fun ChatScreen() {
                 onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
                 onSearch = { showSearch = true },
                 routerOk = if (Settings.providerId == com.blaze.assistant.agent.BlazeRouter.ID) routerState.running else com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
-                onRouter = { settingsPage = "router" },
+                onRouter = { settingsPage = "ai" },
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
                 onAvatar = { avatarMenu = true }, mood = mood,
                 viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
@@ -493,7 +493,7 @@ fun ChatScreen() {
                             "call" -> startCall()
                             "plan" -> com.blaze.assistant.agent.Modes.toggleWork()
                             "approval" -> com.blaze.assistant.agent.Modes.toggleApproval()
-                            "model" -> settingsPage = "router"
+                            "model" -> settingsPage = "ai"
                             "views" -> showViews = true
                             "new" -> newChat(com.blaze.assistant.agent.Projects.of(Agent.chatId.value)?.id.orEmpty())
                             "clear" -> clearScreen()
@@ -534,7 +534,6 @@ fun ChatScreen() {
             val items = buildList {
                 add(MenuItem("account", "Account", if (me != null) "Signed in" else "Sign in"))
                 add(MenuItem("settings", "Settings"))
-                add(MenuItem("router", "BlazeRouter", if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "AUTO" else Settings.model.substringAfterLast('/').take(14)))
                 add(MenuItem("views", "All views", "/VIEWS"))
                 add(MenuItem("control", "Phone control", if (Settings.phoneControl && a11yOn) "ON" else "OFF"))
                 add(MenuItem("theme", if (dark) "Light theme" else "Dark theme", themeSub))
@@ -547,7 +546,7 @@ fun ChatScreen() {
                     when (id) {
                         "account" -> settingsPage = "account"
                         "settings" -> settingsPage = ""
-                        "router" -> settingsPage = "router"
+                        "router" -> settingsPage = "ai"
                         "views" -> showViews = true
                         "control" -> settingsPage = "control"
                         "theme" -> ThemeMode.set(if (dark) "light" else "dark")
