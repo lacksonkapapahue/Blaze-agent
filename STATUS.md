@@ -66,8 +66,12 @@
 - **Not verified on a device:** real model lists from Groq / Cerebras / Mistral / Gemini with Luke's keys (parsers tested on fixtures shaped like the public docs; NIM, OpenRouter and Pollinations lists checked live on 2026-10-13); how a full turn feels when many models fail in a row (each failed call can take up to 45 s before the next).
 - **Left (optional):** rotate extra keys (KeyRing) inside Auto on a 429 before moving to the next model; Cloudflare Workers AI isn't a provider in `Providers.kt` yet.
 
-## design-safe-scene (v0.23.5, versionCode 70) — in progress
-- **Branch:** `design-safe-scene` from main 5be9798. Fix for "Cannot read properties of null (reading 'morphAttributes')" on the A12: unknown shape names gave three.js r170 a null geometry.
+## design-safe-scene (v0.23.5, versionCode 70) — done
+- **Merged:** PR #33, branch `design-safe-scene` from main 5be9798, merge ef0b980 on main; released as v0.23.5 (https://github.com/lacksonkapapahue/Blaze-agent/releases/tag/v0.23.5). Followed by v0.23.6 (PR #34, BlazeRouter keys). Fix for "Cannot read properties of null (reading 'morphAttributes')" on the A12: unknown shape names gave three.js r170 a null geometry.
 - **What:** `assets/design/three-safe.js` (three.js safety net, importmap `three` → `/three/three.safe.js` / `/three/r162/three.safe.js`, mapped by `DesignServe.threeAsset`); hardened starter `shapeOf()`; `Designs.normShape` / `normalizeSpec` / `upgradeStarter` used by the tool, `DesignServe.prepareHtml`, `DesignView.designSpec` and `serveDesign`; `PartsSketch` draws unknown shapes as boxes, skips non-finite faces, shows `PartsSketch.NO_PARTS` when empty. Node test `app/src/test/js/design-safe.test.mjs` (CI step before Gradle); Kotlin tests in `DesignRenderTest`.
 - **Left (needs the A12):** install v0.23.5, open the design that failed and ask for a new rocket; check it draws (or the native drawing shows boxes), and that `~/designs/.last_error.txt` has no morphAttributes error.
 
+
+## messaging-chat (v0.24.0, versionCode 72) — in progress
+- **Branch:** `messaging-chat` from main eca8d53 (v0.23.6). Luke: /clear, no conversation switcher, messaging-style chat in the classic theme.
+- **What:** `agent/ClearScreen.kt` + `Agent.clearScreen/undoClear/canUndoClear` (visible thread emptied, history/journal/index kept, new context window, undo bar ~12 s; `Session.persist(force)`), `/clear` in Commands + slash list + + menu; RecentRail, `ChatsSheet.kt`, the `chats` view, `/chats` and Search's chat list removed (Search = views + "Ask Blaze what you said about…"); `ui/Bubbles.kt` (grouping, asymmetric corners, timestamps, UserBubble/BlazeBubble/BlazeReply/ErrorBubble/MetaLine/SoftPill/UndoBar/SendMark, `LocalBubble`, colours `bubble`/`inset`); pill Composer; lighter WorkCard, AnswerCards, QuestionView, ConfirmCard. Tests `ClearScreenTest`, `BubblesTest`; shots 39–42.

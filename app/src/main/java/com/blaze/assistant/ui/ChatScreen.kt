@@ -48,6 +48,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
@@ -116,10 +122,19 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.Calendar
 
-/** What the message list draws: a message, or a folded run of steps. */
+/** What the message list draws: a message, or a folded run of steps. [pos] = its place in a run from one side (v0.24.0). */
 private sealed class Item(val key: String) {
-    class Msg(val m: ChatMessage) : Item("m${m.id}")
-    class Steps(val steps: List<ChatMessage>, val live: Boolean, val endAt: Long, val startAt: Long) : Item("s${steps.first().id}")
+    var pos: GroupPos = GroupPos.SINGLE
+    abstract val side: Side
+    abstract val at: Long
+    class Msg(val m: ChatMessage) : Item("m${m.id}") {
+        override val side: Side get() = if (m.role == Role.USER) Side.ME else Side.BLAZE
+        override val at: Long get() = m.at
+    }
+    class Steps(val steps: List<ChatMessage>, val live: Boolean, val endAt: Long, val startAt: Long) : Item("s${steps.first().id}") {
+        override val side: Side get() = Side.BLAZE
+        override val at: Long get() = steps.first().at
+    }
 }
 
 private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item> {
@@ -129,6 +144,7 @@ private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item
     fun flush(live: Boolean, endAt: Long) { if (run.isNotEmpty()) { out += Item.Steps(run, live, endAt, prevAt.takeIf { it > 0 } ?: run.first().at); run = mutableListOf() } }
     messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false, m.at); out += Item.Msg(m); prevAt = m.at } }
     flush(working, 0L)
+    Bubbles.positions(out.map { it.side }, out.map { it.at }).forEachIndexed { i, p -> out[i].pos = p }
     return out
 }
 
@@ -164,9 +180,8 @@ fun ChatScreen() {
     // Blaze opening one of its own settings pages (setup help).
     val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
     LaunchedEffect(askedPage) { askedPage?.let { settingsPage = it; com.blaze.assistant.agent.SelfSetup.openPage.value = null } }
-    var showChats by rememberSaveable { mutableStateOf(false) }
-    var archiveOpen by remember { mutableStateOf<String?>(null) }
-    var drawer by rememberSaveable { mutableStateOf(false) }
+    // v0.24.0 /clear: when the last clear happened (0 = no undo bar).
+    var clearedAt by remember { mutableStateOf(0L) }
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var quote by rememberSaveable { mutableStateOf("") }
 
@@ -294,7 +309,6 @@ fun ChatScreen() {
     fun openView(v: BlazeView, target: String = "") {
         showViews = false; showSearch = false; plusOpen = false; avatarMenu = false
         when (v.special) {
-            "chats" -> { Agent.refreshChats(); showChats = true }
             "gallery" -> GalleryUi.open.value = true
             "projects" -> { shellMode = "projects"; projectOpen = "" }
             "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx)
@@ -313,24 +327,33 @@ fun ChatScreen() {
         Views.find(r.id)?.let { openView(it, r.target) }
     }
 
+    fun clearScreen() {
+        when (Agent.clearScreen()) {
+            com.blaze.assistant.agent.ClearScreen.Result.BUSY -> Toast.makeText(ctx, "Blaze is working. Stop it first, then /clear.", Toast.LENGTH_SHORT).show()
+            com.blaze.assistant.agent.ClearScreen.Result.EMPTY -> {}
+            com.blaze.assistant.agent.ClearScreen.Result.CLEARED -> { quote = ""; exitView(); clearedAt = System.currentTimeMillis() }
+        }
+    }
     fun send(raw: String) {
         val text = raw.trim()
+        if (com.blaze.assistant.agent.ClearScreen.isCommand(text)) { input = TextFieldValue(""); clearScreen(); return }
         if (callWords.matches(text)) { input = TextFieldValue(""); startCall(); return }
         val cmdName = text.removePrefix("/").substringBefore(' ').lowercase()
         if (text.startsWith("/") && !text.startsWith("//")) {
             if (cmdName == "views") { input = TextFieldValue(""); showViews = true; return }
             if (cmdName == "search") { input = TextFieldValue(""); showSearch = true; return }
             if (cmdName == "projects") { input = TextFieldValue(""); shellMode = "projects"; return }
-            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser", "archive") && !text.contains(' ')) {
+            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser") && !text.contains(' ')) {
                 input = TextFieldValue(""); Views.find(cmdName)?.let { openView(it) }; return
             }
         }
-        val cmd = CommandRunner.run(ctx, text, openSettings = { settingsPage = it }, openChats = { Agent.refreshChats(); showChats = true }, listen = { onMic() })
+        val cmd = CommandRunner.run(ctx, text, openSettings = { settingsPage = it }, listen = { onMic() })
         if (cmd == "") { input = TextFieldValue(""); return }
         val body = cmd ?: text
         val full = if (quote.isNotBlank()) quote.lines().joinToString("\n") { "> $it" } + "\n\n" + body else body
         if (full.isBlank() && pending.isEmpty()) return
         if (mood != Mood.IDLE) return
+        clearedAt = 0L
         val pid = com.blaze.assistant.agent.Projects.current.value
         if (pid.isNotBlank() && Agent.chatId.value != com.blaze.assistant.agent.Mind.MAIN && com.blaze.assistant.agent.Projects.of(Agent.chatId.value) == null) com.blaze.assistant.agent.Projects.assign(Agent.chatId.value, pid)
         Agent.send(full, attachments = pending)
@@ -341,10 +364,10 @@ fun ChatScreen() {
         exitView(); shellMode = "chat"
     }
     fun openChat(id: String) {
-        // One mind: old chats are read-only in Archive; only the main thread and project threads open for writing.
-        if (!Agent.isLive(id)) { archiveOpen = id; showChats = true; drawer = false; showSearch = false; return }
+        // One mind: only the main thread and project threads open (v0.24.0: no chat list or archive screen).
+        if (!Agent.isLive(id)) return
         Agent.open(id); com.blaze.assistant.agent.Projects.current.value = com.blaze.assistant.agent.Projects.of(id)?.id.orEmpty()
-        drawer = false; showSearch = false; exitView(); shellMode = "chat"
+        showSearch = false; exitView(); shellMode = "chat"
     }
 
     // Selection toolbar state.
@@ -359,9 +382,10 @@ fun ChatScreen() {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             ShellTopBar(mode = shellMode,
-                onMode = { m -> if (m == "chat" && shellMode == "chat" && showing.isEmpty()) { Agent.refreshChats(); drawer = true } else { shellMode = m; if (m == "projects") projectOpen = "" } },
+                // v0.24.0: the toggle only switches tabs; there is no conversation list behind it.
+                onMode = { m -> shellMode = m; if (m == "projects") projectOpen = "" },
                 onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
-                onSearch = { Agent.refreshChats(); showSearch = true },
+                onSearch = { showSearch = true },
                 routerOk = if (Settings.providerId == com.blaze.assistant.agent.BlazeRouter.ID) routerState.running else com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
                 onRouter = { settingsPage = "router" },
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
@@ -397,6 +421,10 @@ fun ChatScreen() {
                             onFollowup = { send(it) })
                     }
                 }
+                if (clearedAt > 0L && shellMode == "chat") {
+                    LaunchedEffect(clearedAt) { delay(com.blaze.assistant.agent.ClearScreen.UNDO_MS - 3_000); clearedAt = 0L }
+                    UndoBar("Chat cleared \u00b7 nothing is forgotten", onUndo = { Agent.undoClear(); clearedAt = 0L })
+                }
                 // Dim the chat while a sheet (+ menu, /views) is open, so half-cut lines at its edge read as background.
                 if (shellMode == "chat" && showing.isEmpty() && (plusOpen || showViews)) SheetScrim { plusOpen = false; showViews = false }
             }
@@ -422,15 +450,14 @@ fun ChatScreen() {
                 }
                 if (quote.isNotBlank()) QuoteStrip(quote) { quote = "" }
                 if (pending.isNotEmpty() || loadingFiles) AttachmentStrip(pending, loadingFiles) { a -> pending = pending - a }
-                if (clipHasImage && pending.isEmpty() && !plusOpen) Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.hair)
-                    .padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (clipHasImage && pending.isEmpty() && !plusOpen) Row(Modifier.fillMaxWidth().background(c.paper)
+                    .padding(horizontal = 14.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Label("Image on your clipboard", size = 10.sp, modifier = Modifier.weight(1f))
                     Label("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
                     Label("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
                 }
                 if (showViews) {
-                    val badges = mapOf("agents" to bgAgents.count { it.live }.let { if (it > 0) "$it LIVE" else "" },
-                        "chats" to busyChats.size.let { if (it > 0) "$it WORKING" else "" })
+                    val badges = mapOf("agents" to bgAgents.count { it.live }.let { if (it > 0) "$it LIVE" else "" })
                     ViewsSheet(badges, onPick = { openView(it) }, onDismiss = { showViews = false })
                     BackHandler { showViews = false }
                 }
@@ -451,6 +478,7 @@ fun ChatScreen() {
                             "model" -> settingsPage = "router"
                             "views" -> showViews = true
                             "new" -> newChat(com.blaze.assistant.agent.Projects.of(Agent.chatId.value)?.id.orEmpty())
+                            "clear" -> clearScreen()
                         }
                     }
                     BackHandler { plusOpen = false }
@@ -481,18 +509,6 @@ fun ChatScreen() {
                 }
             }
         }
-
-        // Recent chats rail (tap "Chat" again).
-        AnimatedVisibility(drawer, enter = fadeIn(tween(180)), exit = fadeOut(tween(180))) {
-            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)).clickable(remember { MutableInteractionSource() }, null) { drawer = false })
-        }
-        AnimatedVisibility(drawer, enter = slideInHorizontally(tween(220)) { -it }, exit = slideOutHorizontally(tween(200)) { -it }) {
-            Box(Modifier.statusBarsPadding().navigationBarsPadding()) {
-                RecentRail(allChats.filter { Agent.isLive(it.id) && com.blaze.assistant.agent.Projects.of(it.id) == null }, busyChats, currentChat, onNew = { newChat(); drawer = false }, onChat = { openChat(it) },
-                    onAll = { Agent.refreshChats(); showChats = true; drawer = false }, onClose = { drawer = false })
-            }
-        }
-        if (drawer) BackHandler { drawer = false }
 
         if (avatarMenu) {
             val dark = c.dark
@@ -526,10 +542,9 @@ fun ChatScreen() {
             BackHandler { avatarMenu = false }
         }
         if (showSearch) {
-            SearchScreen(allChats, onChat = { openChat(it) }, onView = { openView(it) }, onDismiss = { showSearch = false })
+            SearchScreen(onView = { openView(it) }, onAsk = { showSearch = false; send(it) }, onDismiss = { showSearch = false })
             BackHandler { showSearch = false }
         }
-        if (showChats) ChatsSheet(onDismiss = { showChats = false; archiveOpen = null }, initial = archiveOpen)
         if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
         if (onboard) SetupFlow(setupPage) { prompt ->
             onboard = false; setupPage = 0
@@ -599,20 +614,22 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
     val meter by Agent.meter.collectAsState()
     val lastStepsKey = items.lastOrNull { it is Item.Steps }?.key
     Box(Modifier.fillMaxSize()) {
+        // v0.24.0: a messaging thread. No uniform gaps: runs from one side sit 3dp apart, groups 16dp.
         LazyColumn(state = state, modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(items, key = { it.key }) { item ->
-                when (item) {
-                    is Item.Steps -> {
-                        val st by Agent.status.collectAsState()
-                        val m = if (Settings.longChat && (item.live || item.key == lastStepsKey)) meter else null
-                        WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
-                            meter = m?.text.orEmpty(), meterHigh = m?.high == true)
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp)) {
+            itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
+                Box(Modifier.fillMaxWidth().padding(top = Bubbles.gapAbove(item.pos, i == 0))) {
+                    when (item) {
+                        is Item.Steps -> {
+                            val st by Agent.status.collectAsState()
+                            val m = if (Settings.longChat && (item.live || item.key == lastStepsKey)) meter else null
+                            WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
+                                meter = m?.text.orEmpty(), meterHigh = m?.high == true)
+                        }
+                        is Item.Msg -> Entry(item.m, item.pos, canAct = mood == Mood.IDLE, onQuote = onQuote,
+                            followups = if (item.m.id == lastBlazeId && mood == Mood.IDLE && Settings.followups) item.m.followups else emptyList(),
+                            onFollowup = onFollowup)
                     }
-                    is Item.Msg -> Entry(item.m, canAct = mood == Mood.IDLE, onQuote = onQuote,
-                        followups = if (item.m.id == lastBlazeId && mood == Mood.IDLE && Settings.followups) item.m.followups else emptyList(),
-                        onFollowup = onFollowup)
                 }
             }
             item(key = "working") {
@@ -621,7 +638,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                 // One live card per turn: before the first step it's an empty "Working · 3s" card.
                 val hasLiveSteps = (items.lastOrNull() as? Item.Steps)?.live == true
                 AnimatedVisibility(mood != Mood.IDLE, enter = fadeIn(), exit = fadeOut()) {
-                    Column {
+                    Column(Modifier.padding(top = if (hasLiveSteps || items.lastOrNull()?.side == Side.BLAZE) 3.dp else 16.dp)) {
                         if (!hasLiveSteps) WorkCard(emptyList(), live = true,
                             startAt = messages.lastOrNull { it.role == Role.USER }?.at ?: 0L, endAt = 0L,
                             status = status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) })
@@ -634,7 +651,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
         }
         AnimatedVisibility(!atBottom, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut()) {
-            Box(Modifier.size(44.dp).background(c.ink).clickable { scope.launch { follow = true; toEnd(true) } }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(c.ink).clickable { scope.launch { follow = true; toEnd(true) } }
+                .semantics { contentDescription = "Jump to the newest message" }, contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(14.dp)) {
                     val u = size.width / 7f
                     // pixel down-arrow
@@ -725,51 +743,36 @@ fun BrainGlyph(color: Color) {
     }
 }
 
+/**
+ * One message in the thread (v0.24.0): yours on the right in an ink bubble, Blaze's on the left in a soft bubble,
+ * errors in Blaze's bubble with an accent wash. Only the last message of a group gets the quiet time + actions line.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Entry(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, followups: List<String>, onFollowup: (String) -> Unit) {
-    val c = LocalBlaze.current
+private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (String) -> Unit, followups: List<String>, onFollowup: (String) -> Unit) {
+    val time = remember(m.at) { Bubbles.time(m.at) }
     when (m.role) {
         Role.USER -> SwipeToQuote(true, onQuote = { onQuote(splitQuote(m.text).second) }) { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
             val (quoted, body) = splitQuote(m.text)
-            Column(Modifier.widthIn(max = 300.dp).background(c.ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
-                if (quoted.isNotEmpty()) {
-                    Text(quoted, maxLines = 4, modifier = Modifier.hairlineStart(c.paper.copy(alpha = 0.5f)).padding(start = 10.dp, bottom = 2.dp),
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.paper.copy(alpha = 0.65f)))
-                    Spacer(Modifier.height(8.dp))
-                }
-                SelectionContainer {
-                    Text(body, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp, color = c.paper))
-                }
-            }
+            UserBubble(body, quoted, pos)
             if (m.media.isNotEmpty()) AttachedThumbs(m.media)
             val unpictured = if (m.media.isNotEmpty()) m.files.drop(m.media.size) else m.files
-            if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
-            Actions(m, canAct, onQuote, allowQuote = false)
+            if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp, end = 4.dp))
+            if (pos.ends) Actions(m, Side.ME, time, canAct, onQuote, allowQuote = false)
         } }
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
         else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
         else SwipeToQuote(true, onQuote = { onQuote(m.text) }) { Column(Modifier.fillMaxWidth()) {
             if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
-            // Blaze answers in plain text, no bubble; cards inside stay square hairline boxes.
-            Box(Modifier.fillMaxWidth().padding(top = 2.dp)) {
-                AnswerBody(m.id, m.text)
-            }
+            BlazeReply(m.id, m.text, pos)
             if (m.media.isNotEmpty()) MediaStrip(m.media)
-            Actions(m, canAct, onQuote, allowQuote = true)
+            if (pos.ends || followups.isNotEmpty()) Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = true)
+            else if (m.meta.isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)
         } }
         Role.ERROR -> Column(Modifier.fillMaxWidth()) {
-            Label("Error", color = c.accent, size = 10.sp)
-            Spacer(Modifier.height(6.dp))
-            Row(Modifier.widthIn(max = 330.dp).background(c.paper).hairline(c.accent)) {
-                Box(Modifier.width(3.dp).height(48.dp).background(c.accent))
-                SelectionContainer {
-                    Text(m.text, modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 21.sp, color = c.body))
-                }
-            }
-            Actions(m, canAct, onQuote, allowQuote = false)
+            ErrorBubble(m.text, pos)
+            Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = false)
             if (canAct && m.meta.startsWith("usedup:")) BrainSwitcher(m.meta.removePrefix("usedup:")) { onFollowup("Continue where you stopped") }
             // Pick up where it broke instead of starting over: the history keeps the steps done so far.
             else if (canAct) Followups(listOf("Continue where you stopped"), onFollowup)
@@ -787,62 +790,49 @@ private fun splitQuote(t: String): Pair<String, String> {
 
 @Composable
 private fun Followups(list: List<String>, onPick: (String) -> Unit) {
-    val c = LocalBlaze.current
-    Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        list.forEach { s ->
-            Row(Modifier.widthIn(max = 330.dp).hairline(c.hair).clickable { onPick(s) }.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("↳", style = TextStyle(fontSize = 13.sp, color = c.accent))
-                Spacer(Modifier.width(10.dp))
-                Text(s, modifier = Modifier.weight(1f, fill = false), style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink))
-            }
-        }
+    Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        list.forEach { s -> SoftPill(s, lead = "↳") { onPick(s) } }
     }
 }
 
-/** COPY · QUOTE · RETRY. Long-press words in a reply to copy or quote just those. */
+/** Time · Copy · Quote · Retry under the last message of a group, small and quiet. Long-press words to copy or quote just those. */
 @Composable
-private fun Actions(m: ChatMessage, canAct: Boolean, onQuote: (String) -> Unit, allowQuote: Boolean) {
-    val c = LocalBlaze.current
+private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, onQuote: (String) -> Unit, allowQuote: Boolean, chipOnly: Boolean = false) {
     val clip = LocalClipboardManager.current
     val ctx = LocalContext.current
-    Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Label("Copy", color = c.sub, size = 10.sp, modifier = Modifier.clickable {
-            clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(m.text) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
-        }.padding(horizontal = 6.dp, vertical = 8.dp))
-        if (allowQuote) {
-            Label("·", color = c.weak, size = 10.sp)
-            Label("Quote", color = c.sub, size = 10.sp, modifier = Modifier.clickable { onQuote(m.text) }.padding(horizontal = 6.dp, vertical = 8.dp))
-        }
-        Label("·", color = c.weak, size = 10.sp)
-        Label("Retry", color = if (canAct) c.sub else c.weak, size = 10.sp, modifier = Modifier
-            .clickable(enabled = canAct) { Agent.retry(m.id) }.padding(horizontal = 6.dp, vertical = 8.dp))
-        if (m.meta.isNotBlank()) Label(m.meta, color = if (m.meta.startsWith("⚡")) c.accent else c.weak, size = 9.sp,
-            modifier = Modifier.padding(start = 6.dp).weight(1f, fill = false), maxLines = 1)
+    val usedUp = m.meta.startsWith("usedup:")
+    val chip = if (usedUp) "" else m.meta
+    if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }
+    val acts = buildList<Pair<String, (() -> Unit)?>> {
+        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(m.text) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
+        if (allowQuote) add("Quote" to { onQuote(m.text) })
+        add("Retry" to (if (canAct) ({ Agent.retry(m.id) }) else null))
     }
+    MetaLine(side, time, acts, chip, chip.startsWith("⚡"))
 }
 
 @Composable
 private fun QuoteStrip(q: String, onClear: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.hair).padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(3.dp).height(34.dp).background(c.accent))
+    Row(Modifier.fillMaxWidth().background(c.paper).padding(start = 12.dp, end = 12.dp, top = 6.dp).clip(RoundedCornerShape(16.dp)).background(c.bubble)
+        .padding(start = 12.dp, end = 2.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(3.dp).height(34.dp).clip(RoundedCornerShape(2.dp)).background(c.accent))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Label("Replying to", color = c.accent, size = 9.sp)
             Text(q, maxLines = 2, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.body))
         }
-        Label("×", size = 14.sp, modifier = Modifier.clickable(onClick = onClear).padding(12.dp))
+        Label("×", size = 14.sp, modifier = Modifier.clip(CircleShape).clickable(onClick = onClear).semantics { contentDescription = "Cancel reply" }.padding(12.dp))
     }
 }
 
 @Composable
 private fun SuggestionList(list: List<Suggestion>, onPick: (Suggestion) -> Unit) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().heightIn(max = 260.dp).background(c.paper).hairlineTop(c.ink).verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxWidth().background(c.paper).padding(horizontal = 10.dp, vertical = 4.dp).clip(RoundedCornerShape(18.dp)).background(c.raised)
+        .heightIn(max = 260.dp).verticalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
         list.forEach { s ->
-            Row(Modifier.fillMaxWidth().clickable { onPick(s) }.hairlineBottom(c.hair).padding(horizontal = 16.dp, vertical = 11.dp),
+            Row(Modifier.fillMaxWidth().clickable { onPick(s) }.padding(horizontal = 16.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text(s.title, maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 13.sp, color = c.ink))
                 Spacer(Modifier.width(12.dp))
@@ -859,7 +849,7 @@ private fun greeting(): String = when (Calendar.getInstance().get(Calendar.HOUR_
 }
 
 @Composable
-private fun Welcome(needsSetup: Boolean, onSetup: () -> Unit, onPick: (String) -> Unit) {
+internal fun Welcome(needsSetup: Boolean, onSetup: () -> Unit, onPick: (String) -> Unit) {
     val c = LocalBlaze.current
     val name = Settings.userName
     Column(
@@ -880,7 +870,7 @@ private fun Welcome(needsSetup: Boolean, onSetup: () -> Unit, onPick: (String) -
         Spacer(Modifier.height(32.dp))
 
         if (needsSetup) {
-            Column(Modifier.fillMaxWidth().background(c.ink).clickable(onClick = onSetup).padding(18.dp)) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.ink).clickable(onClick = onSetup).padding(18.dp)) {
                 Label("Make me smarter · one tap  →", color = c.paper, size = 12.sp)
                 Spacer(Modifier.height(4.dp))
                 Text("I already work. Signing in makes me faster and smarter.", style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.paper.copy(alpha = 0.75f)))
@@ -896,21 +886,9 @@ private fun Welcome(needsSetup: Boolean, onSetup: () -> Unit, onPick: (String) -
                 "Make me an afro beat",
                 "Open YouTube and play lo-fi music"
             )
-            Column(Modifier.fillMaxWidth().hairlineTop(c.hair)) {
-                items.forEachIndexed { i, s ->
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onPick(s) }.hairlineBottom(c.hair)
-                            .padding(vertical = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Label("%02d".format(i + 1), color = c.weak)
-                        Spacer(Modifier.width(16.dp))
-                        Text(s, modifier = Modifier.weight(1f),
-                            style = TextStyle(fontFamily = Type.Display, fontSize = 17.sp, color = c.ink,
-                                letterSpacing = (-0.01).em))
-                        Text("→", color = c.sub, fontSize = 16.sp)
-                    }
-                }
+            // v0.24.0: quick replies, as bubbles you could send.
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items.forEach { s -> SoftPill(s, fill = c.bubble, ink = c.ink) { onPick(s) } }
             }
         }
     }
@@ -946,10 +924,10 @@ private fun ListeningStrip() {
 @Composable
 private fun AttachmentStrip(files: List<com.blaze.assistant.agent.Attachment>, loading: Boolean, onRemove: (com.blaze.assistant.agent.Attachment) -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.hair).padding(horizontal = 14.dp, vertical = 8.dp),
+    Row(Modifier.fillMaxWidth().background(c.paper).padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         files.forEach { f ->
-            Row(Modifier.hairline(c.hair).clickable { onRemove(f) }.padding(horizontal = 10.dp, vertical = 6.dp),
+            Row(Modifier.clip(RoundedCornerShape(16.dp)).background(c.bubble).clickable { onRemove(f) }.padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text(f.name.take(18), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.body))
                 Spacer(Modifier.width(6.dp)); Label("×", size = 12.sp)
@@ -980,12 +958,12 @@ private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
         models = l.filter { !(pid == spentPid && it == spentModel) && !R.usedUp(pid, it) }
     }
     Column(Modifier.padding(top = 8.dp).widthIn(max = 330.dp).fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().background(c.ink).clickable { open = !open }.padding(horizontal = 14.dp, vertical = 12.dp),
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.ink).clickable { open = !open }.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Label("Switch brain and continue", color = c.paper, size = 10.sp, modifier = Modifier.weight(1f))
             Label(if (open) "\u25B2" else "\u25BC", color = c.paper, size = 10.sp)
         }
-        if (open) Column(Modifier.fillMaxWidth().hairline(c.hair).padding(10.dp)) {
+        if (open) Column(Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.bubble).padding(12.dp)) {
             // Fastest option: hand it to the free brains.
             Label("Auto \u00b7 free brains", color = c.accent, size = 10.sp, modifier = Modifier.fillMaxWidth().clickable {
                 Settings.providerId = P.AUTO; open = false; onPicked() }.padding(vertical = 10.dp))
@@ -994,7 +972,7 @@ private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
                 Row(Modifier.horizontalScroll(rememberScrollState())) {
                     providers.forEach { p ->
                         val on = p.id == pid
-                        Box(Modifier.padding(end = 6.dp).background(if (on) c.ink else c.paper).hairline(c.hair).clickable { pid = p.id }
+                        Box(Modifier.padding(end = 6.dp).clip(RoundedCornerShape(14.dp)).background(if (on) c.ink else c.paper).clickable { pid = p.id }
                             .padding(horizontal = 10.dp, vertical = 8.dp)) {
                             Label(p.name.substringBefore(" ("), color = if (on) c.paper else c.ink, size = 9.sp)
                         }

@@ -12,11 +12,11 @@ data class Command(val name: String, val args: String, val desc: String,
 
 object Commands {
     val actions = listOf(
-        Command("new", "", "Start a new chat"),
+        Command("clear", "", "Clear the screen (nothing is forgotten; undo for a few seconds)"),
+        Command("new", "", "Fresh start: a new context window (in a project: a new thread)"),
         Command("model", "<model>", "Switch model"),
         Command("provider", "<provider>", "Switch AI provider"),
         Command("persona", "<style>", "Change Blaze's personality"),
-        Command("chats", "", "Open saved chats"),
         Command("settings", "", "Open settings"),
         Command("retry", "", "Regenerate the last answer"),
         Command("stop", "", "Stop what Blaze is doing"),
@@ -37,7 +37,7 @@ object Commands {
         Command("orb", "", "Pin the floating orb"),
         Command("copy", "", "Copy this whole chat"),
         Command("views", "", "Open any view: memory, jobs, design, accounts…"),
-        Command("search", "", "Search chats and views"),
+        Command("search", "", "Search views and past conversations"),
         Command("projects", "", "Your projects"),
         Command("design", "", "Design: live preview"),
         Command("jobs", "", "Jobs and the terminal"),

@@ -42,8 +42,9 @@ class ViewsSkillsTest {
 
     @Test fun everyRoutedViewExistsAndIsInThePrompt() {
         for (s in ViewRouter.specs) {
-            val id = if (s.id == "archive") "chats" else s.id
-            assertTrue("no view ${s.id}", Views.find(id) != null)
+            // Archive is search only since v0.24.0 (no chat list screen); every other routed view has a screen.
+            if (s.id == "archive") assertTrue(ViewRouter.hint(s).contains("search_chat") && !ViewRouter.hint(s).contains("open_view"))
+            else assertTrue("no view ${s.id}", Views.find(s.id) != null)
             assertTrue("prompt misses ${s.name}", ViewRouter.PROMPT.contains("${s.name} (/${s.id})"))
             assertTrue(ViewRouter.hint(s).startsWith("\nREQUIRED VIEW THIS TURN: ${s.name}"))
         }

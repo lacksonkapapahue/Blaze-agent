@@ -47,15 +47,17 @@ object CommandRunner {
     /**
      * Run a typed command. Returns the text to send to Blaze instead (for prompt commands),
      * "" when the command was handled here, or null when it isn't a command.
-     * [openSettings] opens a settings page by id ("" = list), [openChats] the saved chats.
+     * [openSettings] opens a settings page by id ("" = list). The chat screen handles /clear itself (with undo);
+     * here it clears without one (the floating orb).
      */
-    fun run(ctx: Context, text: String, openSettings: (String) -> Unit, openChats: () -> Unit, listen: () -> Unit): String? {
+    fun run(ctx: Context, text: String, openSettings: (String) -> Unit, listen: () -> Unit): String? {
         if (!text.startsWith("/") || text.startsWith("//")) return null
         val name = text.removePrefix("/").substringBefore(' ').lowercase()
         val arg = text.substringAfter(' ', "").trim()
         fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_SHORT).show()
         when (name) {
-            "new", "clear" -> Agent.clear()
+            "new" -> Agent.clear()
+            "clear" -> if (Agent.clearScreen() == com.blaze.assistant.agent.ClearScreen.Result.BUSY) toast("Blaze is working. Stop it first, then /clear.")
             "model" -> if (arg.isEmpty()) openSettings("ai") else { Settings.model = arg; Agent.note("Model: $arg") }
             "provider" -> {
                 val p = Providers.all.firstOrNull { it.id.equals(arg, true) || it.name.equals(arg, true) || it.name.lowercase().startsWith(arg.lowercase()) }
@@ -65,7 +67,8 @@ object CommandRunner {
                 val p = Personas.all.firstOrNull { it.id.equals(arg, true) || it.name.equals(arg, true) }
                 if (p == null) openSettings("persona") else { Settings.personaId = p.id; Agent.note("Personality: ${p.name}") }
             }
-            "chats", "history" -> openChats()
+            // v0.24.0: no chat list any more; one conversation, and Blaze looks older words up.
+            "chats", "history", "archive" -> Agent.note("There's one conversation now, so there's no chat list. Ask me about anything you said before and I'll look it up.", asReply = true)
             "settings" -> openSettings("")
             "retry" -> Agent.retryLast()
             "update", "upgrade" -> com.blaze.assistant.update.Updater.start(ctx)

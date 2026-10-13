@@ -52,7 +52,7 @@ object ViewRouter {
         Spec("projects", "Projects", "ongoing efforts with their own threads, brief and instructions",
             listOf("update_brief", "open_view"), emptyList(),
             r("""\b((?:new|start|create|open) (?:a )?project|my projects|project (?:for|about|called))\b""")),
-        Spec("archive", "Archive", "old chats from before one mind (read-only) and searching past conversations",
+        Spec("archive", "Archive", "past conversations, searched with search_chat (there is no chat list screen; answer in chat)",
             listOf("search_past_chats", "search_chat"), emptyList(),
             r("""\b((?:old|past|previous|earlier|archived) (?:chats?|conversations?)|chat history|what did (?:we|i) (?:say|talk|discuss)|we talked about|last time we)\b""")),
         Spec("memory", "Memory", "lasting facts about the user, their people, preferences and decisions",
@@ -132,7 +132,7 @@ object ViewRouter {
         "gallery" -> "\nREQUIRED VIEW THIS TURN: Gallery. Make it with generate_image (art/photos) or run_code (beats, charts) saved under /root/phone/ so it lands in the Gallery; reply briefly."
         "skills" -> "\nREQUIRED VIEW THIS TURN: Skills. Save or install it with write_skill / install_skill; say its name in one line."
         "projects" -> "\nREQUIRED VIEW THIS TURN: Projects. Use open_view view=projects so the user can create or open the project there; keep the reply short."
-        "archive" -> "\nREQUIRED VIEW THIS TURN: Archive. Look it up with search_past_chats / search_chat and answer from what you find; offer open_view view=chats for the full thread."
+        "archive" -> "\nREQUIRED VIEW THIS TURN: Archive. Look it up with search_chat / search_past_chats and answer in chat from what you find (quote the exact words when it helps). There is no chat list screen to open."
         "memory" -> "\nREQUIRED VIEW THIS TURN: Memory. Save, update or forget with memory_save / remember / forget (or look up with memory_search); confirm in one line."
         "browser" -> "\nREQUIRED VIEW THIS TURN: Browser. Do it in Blaze's background browser (browser_open, browser_click, browser_type, browser_secure_input); browser_show only if the user must step in."
         else -> "\nREQUIRED VIEW THIS TURN: ${s.name}. Create the result there with ${s.tools.joinToString(" / ")}, open or link it, and reply briefly."

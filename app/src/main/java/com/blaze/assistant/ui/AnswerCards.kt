@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -169,15 +171,24 @@ private fun CodeText(code: String) {
     }
 }
 
+/** v0.24.0: cards are soft rounded insets, no outline. Inside a Blaze bubble they're lighter than the bubble. */
+@Composable
+private fun cardFill(): Color {
+    val c = LocalBlaze.current
+    return if (LocalBubble.current != null) c.inset else c.faint
+}
+
+private val CardShape = RoundedCornerShape(12.dp)
+
 @Composable
 private fun TableGrid(rows: List<List<String>>) {
     val c = LocalBlaze.current
     val cols = rows.maxOfOrNull { it.size } ?: 0
     if (cols == 0) return
     Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        Column(Modifier.hairline(c.hair)) {
+        Column(Modifier.clip(CardShape).background(cardFill())) {
             rows.forEachIndexed { r, row ->
-                Row(Modifier.background(if (r == 0) c.faint else Color.Transparent).then(if (r > 0) Modifier.hairlineTop(c.hair) else Modifier)) {
+                Row(Modifier.background(if (r == 0) c.faint else Color.Transparent).then(if (r > 0) Modifier.hairlineTop(c.hair.copy(alpha = c.hair.alpha * 0.7f)) else Modifier)) {
                     for (k in 0 until cols) {
                         val cell = row.getOrElse(k) { "" }
                         val shown = remember(cell, c.accent) { Md.render(cell, c.accent, c.hair.copy(alpha = 0.35f)) }
@@ -205,8 +216,8 @@ private fun CopyLabel(raw: String) {
 @Composable
 private fun PlainCard(title: String, raw: String, content: @Composable () -> Unit) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().hairline(c.hair)) {
-        Row(Modifier.fillMaxWidth().background(c.faint).padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxWidth().clip(CardShape).background(cardFill())) {
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Label(title, color = c.sub, size = 9.sp, modifier = Modifier.weight(1f), maxLines = 1)
             CopyLabel(raw)
         }
@@ -219,8 +230,9 @@ private fun PlainCard(title: String, raw: String, content: @Composable () -> Uni
 private fun FoldCard(key: String, title: String, raw: String, maxH: Dp = 220.dp, card: Boolean = true, content: @Composable () -> Unit) {
     val c = LocalBlaze.current
     var open by rememberSaveable(key) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().then(if (card) Modifier.hairline(c.hair) else Modifier)) {
-        Row(Modifier.fillMaxWidth().background(if (card) c.faint else Color.Transparent).padding(start = if (card) 10.dp else 0.dp),
+    val fill = if (card) cardFill() else (LocalBubble.current ?: c.paper)
+    Column(Modifier.fillMaxWidth().then(if (card) Modifier.clip(CardShape).background(fill) else Modifier)) {
+        Row(Modifier.fillMaxWidth().padding(start = if (card) 12.dp else 0.dp, top = if (card) 2.dp else 0.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Label(title, color = c.sub, size = 9.sp, modifier = Modifier.weight(1f), maxLines = 1)
             CopyLabel(raw)
@@ -228,10 +240,10 @@ private fun FoldCard(key: String, title: String, raw: String, maxH: Dp = 220.dp,
         Box(Modifier.fillMaxWidth().then(if (open) Modifier else Modifier.heightIn(max = maxH).clipToBounds())) {
             Box(Modifier.padding(horizontal = if (card) 0.dp else 0.dp)) { content() }
             if (!open) Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(56.dp)
-                .background(Brush.verticalGradient(listOf(c.paper.copy(alpha = 0f), c.paper))))
+                .background(Brush.verticalGradient(listOf(fill.copy(alpha = 0f), fill))))
         }
-        Row(Modifier.fillMaxWidth().then(if (card) Modifier.hairlineTop(c.hair) else Modifier).clickable { open = !open }
-            .padding(horizontal = if (card) 10.dp else 0.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().clickable { open = !open }
+            .padding(horizontal = if (card) 12.dp else 0.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
             Label(if (open) "Show less" else "Show all", color = c.accent, size = 10.sp)
             Spacer(Modifier.width(6.dp))
             Text(if (open) "⌃" else "⌄", style = TextStyle(fontSize = 12.sp, color = c.accent))

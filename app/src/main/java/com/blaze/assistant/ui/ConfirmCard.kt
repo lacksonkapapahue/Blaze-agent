@@ -11,6 +11,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -36,44 +43,35 @@ fun QuestionCard() {
     QuestionView(q.question, q.options, q.chat, key = q) { Agent.answerQuestion(it) }
 }
 
-/** The ask_user card itself (also used by screenshots). */
+/**
+ * The ask_user card itself (also used by screenshots). v0.24.0: it reads as Blaze's newest message: the question
+ * in Blaze's bubble, the answers as rounded pills under it, and your own answer in a small pill field.
+ */
 @Composable
 fun QuestionView(question: String, options: List<String>, chat: String = "", key: Any? = question, onAnswer: (String) -> Unit = {}) {
     val c = LocalBlaze.current
     var typing by remember(key) { mutableStateOf(false) }
     var text by remember(key) { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(3.dp).height(14.dp).background(c.accent))
-            Spacer(Modifier.width(8.dp))
-            Label(if (chat.isNotBlank()) "Question · ${chat.take(30)}" else "Blaze is asking", color = c.accent, size = 10.sp, maxLines = 1)
+    Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)) {
+        BlazeBubble(GroupPos.SINGLE) {
+            Label(if (chat.isNotBlank()) "Question · ${chat.take(30)}" else "Blaze is asking", color = c.accent, size = 9.sp, maxLines = 1)
+            Spacer(Modifier.height(4.dp))
+            Text(question, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink))
         }
-        Spacer(Modifier.height(8.dp))
-        Text(question, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 17.sp, lineHeight = 23.sp, color = c.ink))
-        Spacer(Modifier.height(10.dp))
-        Column(Modifier.fillMaxWidth().hairline(c.hair)) {
-            options.forEachIndexed { i, o ->
-                Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable { onAnswer(o) }.padding(horizontal = 14.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Label("%d".format(i + 1), color = c.accent, size = 10.sp)
-                    Spacer(Modifier.width(12.dp))
-                    Text(o, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink))
-                }
-            }
-            if (!typing) Row(Modifier.fillMaxWidth().clickable { typing = true }.padding(horizontal = 14.dp, vertical = 13.dp),
+        Spacer(Modifier.height(6.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            options.forEachIndexed { i, o -> SoftPill(o, lead = "${i + 1}") { onAnswer(o) } }
+            if (!typing) SoftPill("Type my own answer…", lead = "${options.size + 1}", fill = c.bubble, ink = c.sub) { typing = true }
+            else Row(Modifier.widthIn(max = 340.dp).fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(c.bubble).padding(start = 14.dp, end = 4.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Label("%d".format(options.size + 1), color = c.weak, size = 10.sp)
-                Spacer(Modifier.width(12.dp))
-                Text("Type my own answer…", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.sub))
-            } else Row(Modifier.fillMaxWidth().padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).padding(vertical = 13.dp)) {
+                Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
                     if (text.isEmpty()) Text("Your answer", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
                     BasicTextField(text, { text = it }, textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink),
                         cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth())
                 }
-                Box(Modifier.height(46.dp).width(72.dp).background(if (text.isBlank()) c.faint else c.accent)
-                    .clickable { if (text.isNotBlank()) onAnswer(text.trim()) }, contentAlignment = Alignment.Center) {
-                    Label("Send", color = if (text.isBlank()) c.weak else c.paper, size = 11.sp)
+                Box(Modifier.size(40.dp).clip(CircleShape).background(if (text.isBlank()) c.hair else c.accent)
+                    .clickable { if (text.isNotBlank()) onAnswer(text.trim()) }.semantics { contentDescription = "Send answer" }, contentAlignment = Alignment.Center) {
+                    SendMark(if (text.isBlank()) c.paper else c.onAccent, stop = false)
                 }
             }
         }
@@ -86,22 +84,20 @@ fun ConfirmCard() {
     val c = LocalBlaze.current
     val p by Agent.pendingConfirm.collectAsState()
     val pc = p ?: return
-    Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent).padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(3.dp).height(14.dp).background(c.accent))
-            Spacer(Modifier.width(8.dp))
-            Label("Needs your OK", color = c.accent, size = 10.sp)
+    Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)) {
+        BlazeBubble(GroupPos.SINGLE) {
+            Label("Needs your OK", color = c.accent, size = 9.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(pc.title, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 22.sp, color = c.ink))
+            if (pc.detail.isNotBlank()) Text(pc.detail, modifier = Modifier.padding(top = 4.dp),
+                style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
         }
         Spacer(Modifier.height(8.dp))
-        Text(pc.title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, color = c.ink))
-        if (pc.detail.isNotBlank()) Text(pc.detail, modifier = Modifier.padding(top = 4.dp),
-            style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Box(Modifier.weight(1f).height(46.dp).hairline(c.hair).clickable { Agent.answerConfirm(false) },
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.widthIn(max = 340.dp).fillMaxWidth()) {
+            Box(Modifier.weight(1f).height(46.dp).clip(RoundedCornerShape(23.dp)).background(c.bubble).clickable { Agent.answerConfirm(false) },
                 contentAlignment = Alignment.Center) { Label("Don't", color = c.ink, size = 11.sp) }
-            Box(Modifier.weight(1f).height(46.dp).background(c.accent).clickable { Agent.answerConfirm(true) },
-                contentAlignment = Alignment.Center) { Label(pc.action, color = c.paper, size = 11.sp) }
+            Box(Modifier.weight(1f).height(46.dp).clip(RoundedCornerShape(23.dp)).background(c.accent).clickable { Agent.answerConfirm(true) },
+                contentAlignment = Alignment.Center) { Label(pc.action, color = c.onAccent, size = 11.sp) }
         }
     }
 }
