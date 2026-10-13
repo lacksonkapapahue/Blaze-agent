@@ -92,7 +92,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          BLAZE_SHOTS=1 ./gradlew testDebugUnitTest --tests 'com.blaze.assistant.ui.ShotsTest' --stacktrace 2>&1 | tee shots.log
+          BLAZE_SHOTS=1 ./gradlew testDebugUnitTest --tests 'com.blaze.assistant.ui.ShotsTest*' --stacktrace 2>&1 | tee shots.log
           ls -la app/build/shots
 
       - name: Publish screenshots
