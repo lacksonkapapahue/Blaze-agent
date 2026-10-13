@@ -268,6 +268,7 @@ object Mind {
          * main thread costs little. [full] re-checks every turn (the migration). Returns how many rows were added.
          */
         @Synchronized fun journal(conv: String, h: JSONArray, at: Long = System.currentTimeMillis() / 1000, full: Boolean = false): Int {
+            if (PrivateChat.isPrivateId(conv)) return 0   // v0.24.4: private chats never reach the journal
             val n = h.length(); if (n == 0) return 0
             val known = if (full) 0 else (synced[conv] ?: maxTurn(conv))
             val from = if (full) 0 else (minOf(known, n) - 24).coerceAtLeast(0)
@@ -468,7 +469,7 @@ object Mind {
     fun delete(id: Long) { db?.delete(id); changed() }
 
     /** The journal after a chat was saved (Agent.persist). */
-    fun journal(conv: String, h: JSONArray) { try { db?.journal(conv, h) } catch (_: Exception) { } }
+    fun journal(conv: String, h: JSONArray) { if (PrivateChat.isPrivateId(conv)) return; try { db?.journal(conv, h) } catch (_: Exception) { } }
 
     // ---------------- migration ----------------
 

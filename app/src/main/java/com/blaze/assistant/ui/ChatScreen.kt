@@ -177,6 +177,8 @@ fun ChatScreen() {
     var setupPage by rememberSaveable { mutableStateOf(0) }
     val galleryOpen by GalleryUi.open.collectAsState()
     LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
+    // v0.24.4: the dependency gate. Upgraded (and new) users finish whatever required setup is missing; never again once done.
+    var gate by remember { mutableStateOf(!onboard && com.blaze.assistant.setup.SetupGate.shouldGate(ctx)) }
     // Blaze opening one of its own settings pages (setup help).
     val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
     LaunchedEffect(askedPage) { askedPage?.let { settingsPage = it; com.blaze.assistant.agent.SelfSetup.openPage.value = null } }
@@ -388,6 +390,10 @@ fun ChatScreen() {
 
     if (inCall) { CallScreen(onHangUp = { inCall = false }); return }
     val me = account.user
+    // v0.24.4 private chat: confirm before leaving (the chat is thrown away).
+    val isPrivate by Agent.privateChat.collectAsState()
+    var confirmLeavePrivate by remember { mutableStateOf(false) }
+    BackHandler(enabled = isPrivate && !confirmLeavePrivate) { confirmLeavePrivate = true }
     Box(Modifier.fillMaxSize().background(c.paper)) {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -397,11 +403,13 @@ fun ChatScreen() {
                 onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
                 onSearch = { showSearch = true },
                 routerOk = if (Settings.providerId == com.blaze.assistant.agent.BlazeRouter.ID) routerState.running else com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
-                onRouter = { settingsPage = "router" },
+                onRouter = { settingsPage = "ai" },
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
                 onAvatar = { avatarMenu = true }, mood = mood,
                 viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
-                onExit = { exitView() })
+                onExit = { exitView() },
+                isPrivate = isPrivate,
+                onGhost = { if (isPrivate) confirmLeavePrivate = true else { exitView(); shellMode = "chat"; Agent.enterPrivate() } })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (shellMode == "projects") {
                     val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
@@ -485,7 +493,7 @@ fun ChatScreen() {
                             "call" -> startCall()
                             "plan" -> com.blaze.assistant.agent.Modes.toggleWork()
                             "approval" -> com.blaze.assistant.agent.Modes.toggleApproval()
-                            "model" -> settingsPage = "router"
+                            "model" -> settingsPage = "ai"
                             "views" -> showViews = true
                             "new" -> newChat(com.blaze.assistant.agent.Projects.of(Agent.chatId.value)?.id.orEmpty())
                             "clear" -> clearScreen()
@@ -526,7 +534,6 @@ fun ChatScreen() {
             val items = buildList {
                 add(MenuItem("account", "Account", if (me != null) "Signed in" else "Sign in"))
                 add(MenuItem("settings", "Settings"))
-                add(MenuItem("router", "BlazeRouter", if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "AUTO" else Settings.model.substringAfterLast('/').take(14)))
                 add(MenuItem("views", "All views", "/VIEWS"))
                 add(MenuItem("control", "Phone control", if (Settings.phoneControl && a11yOn) "ON" else "OFF"))
                 add(MenuItem("theme", if (dark) "Light theme" else "Dark theme", themeSub))
@@ -539,7 +546,7 @@ fun ChatScreen() {
                     when (id) {
                         "account" -> settingsPage = "account"
                         "settings" -> settingsPage = ""
-                        "router" -> settingsPage = "router"
+                        "router" -> settingsPage = "ai"
                         "views" -> showViews = true
                         "control" -> settingsPage = "control"
                         "theme" -> ThemeMode.set(if (dark) "light" else "dark")
@@ -556,8 +563,16 @@ fun ChatScreen() {
             BackHandler { showSearch = false }
         }
         if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
+        if (confirmLeavePrivate) androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmLeavePrivate = false },
+            title = { Text(com.blaze.assistant.agent.PrivateChat.LEAVE_TITLE) },
+            text = { Text(com.blaze.assistant.agent.PrivateChat.LEAVE_TEXT) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmLeavePrivate = false; Agent.leavePrivate() }) { Text("Leave") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmLeavePrivate = false }) { Text("Stay") } })
+        if (!onboard && gate) SetupGateScreen(onOpenPage = { settingsPage = it }, onDone = { gate = false })
         if (onboard) SetupFlow(setupPage) { prompt ->
             onboard = false; setupPage = 0
+            gate = com.blaze.assistant.setup.SetupGate.shouldGate(ctx)
             when {
                 prompt == null -> {}
                 prompt.startsWith("/settings") -> settingsPage = "ai"
@@ -632,7 +647,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                     when (item) {
                         is Item.Steps -> {
                             val st by Agent.status.collectAsState()
-                            val m = if (Settings.longChat && (item.live || item.key == lastStepsKey)) meter else null
+                            // v0.24.4: the token meter is a technical line; shown only with Show technical details on.
+                            val m = if (Settings.longChat && (com.blaze.assistant.agent.ReplyChips.showTech() || meter?.high == true) && (item.live || item.key == lastStepsKey)) meter else null
                             WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
                                 meter = m?.text.orEmpty(), meterHigh = m?.high == true)
                         }
@@ -777,7 +793,7 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
             BlazeReply(m.id, m.text, pos)
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             if (pos.ends || followups.isNotEmpty()) Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = true)
-            else if (m.meta.isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
+            else if (com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech()).isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)
         } }
         Role.ERROR -> Column(Modifier.fillMaxWidth()) {
@@ -811,7 +827,9 @@ private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, o
     val clip = LocalClipboardManager.current
     val ctx = LocalContext.current
     val usedUp = m.meta.startsWith("usedup:")
-    val chip = if (usedUp) "" else m.meta
+    // v0.24.4: technical parts of the chip (timings, data, model ids) are hidden unless Show technical details is on.
+    val chip = if (usedUp) "" else com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech())
+    if (chipOnly && chip.isBlank()) return
     if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }
     val acts = buildList<Pair<String, (() -> Unit)?>> {
         add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(m.text) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pixel "B" status-bar icon (white, alpha only) -->
+<!-- v0.24.4: status-bar icon = the spark blob, monochrome (white, alpha only), spark cut out. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp" android:height="24dp" android:viewportWidth="7" android:viewportHeight="7">
-    <path android:fillColor="#FFFFFFFF"
-        android:pathData="M1,0h4v1h-4z M1,1h1v2h-1z M5,1h1v2h-1z M1,3h4v1h-4z M1,4h1v2h-1z M5,4h1v2h-1z M1,6h4v1h-4z"/>
+    android:width="24dp" android:height="24dp" android:viewportWidth="56" android:viewportHeight="56">
+    <group android:translateX="-26" android:translateY="-26">
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="M54,28 C68,27.5 80.5,37 81,50.5 C81.5,64.5 72.5,79.5 56.5,80 C41.5,80.5 27.5,72.5 27,57.5 C26.5,42.5 38.5,28.5 54,28 Z M54,40 C55.6,49.6 58.4,52.4 68,54 C58.4,55.6 55.6,58.4 54,68 C52.4,58.4 49.6,55.6 40,54 C49.6,52.4 52.4,49.6 54,40 Z" />
+    </group>
 </vector>
