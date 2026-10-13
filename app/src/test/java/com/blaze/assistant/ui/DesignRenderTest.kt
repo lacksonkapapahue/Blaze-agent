@@ -99,17 +99,17 @@ class DesignRenderTest {
     @Test fun importMapPointsAtTheSameOriginBuild() {
         val json = Regex("""<script type="importmap">([\s\S]*?)</script>""").find(template)!!.groupValues[1]
         val r170 = JSONObject(DesignServe.rewriteImportMap(json, DesignServe.R170)).getJSONObject("imports")
-        assertEquals("$O/three/three.module.min.js", r170.getString("three"))
+        assertEquals("$O/three/three.safe.js", r170.getString("three"))
         assertEquals("$O/three/addons/", r170.getString("three/addons/"))
         val r162 = JSONObject(DesignServe.rewriteImportMap(json, DesignServe.R162)).getJSONObject("imports")
-        assertEquals("$O/three/r162/three.module.min.js", r162.getString("three"))
+        assertEquals("$O/three/r162/three.safe.js", r162.getString("three"))
         assertEquals("$O/three/r162/addons/", r162.getString("three/addons/"))
         // Explicit addon files and other libraries.
         val m = """{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.min.js",
             "three/examples/jsm/controls/OrbitControls.js": "https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js",
             "chart": "https://cdn.jsdelivr.net/npm/chart.js" } }"""
         val out = JSONObject(DesignServe.rewriteImportMap(m, DesignServe.R162)).getJSONObject("imports")
-        assertEquals("$O/three/r162/three.module.min.js", out.getString("three"))
+        assertEquals("$O/three/r162/three.safe.js", out.getString("three"))
         assertEquals("$O/three/r162/addons/controls/OrbitControls.js", out.getString("three/examples/jsm/controls/OrbitControls.js"))
         assertEquals("https://cdn.jsdelivr.net/npm/chart.js", out.getString("chart"))
         // Each rewritten URL resolves to a bundled asset.
@@ -129,8 +129,8 @@ class DesignRenderTest {
         assertNotNull("importmap chooser", chooser)
         // The JS strings can't close the inline script early.
         assertFalse(chooser!!.groupValues[1].contains("</") || chooser.groupValues[2].contains("<"))
-        assertTrue(chooser.groupValues[1].contains("$O/three/r162/three.module.min.js"))
-        assertTrue(chooser.groupValues[2].contains("$O/three/three.module.min.js"))
+        assertTrue(chooser.groupValues[1].contains("$O/three/r162/three.safe.js"))
+        assertTrue(chooser.groupValues[2].contains("$O/three/three.safe.js"))
         assertTrue("chooser comes before the module script", out.indexOf("document.write") < out.indexOf("<script type=\"module\">"))
         assertTrue("old in-page banner hidden in the app", out.contains("#bz-fail{display:none!important}"))
         // The parts spec is untouched, so the native fallback and the tool still read it.
@@ -240,4 +240,100 @@ class DesignRenderTest {
         val turned = PartsSketch.faces(spec, 360f, 600f, yawDeg = 120.0, pitchDeg = 60.0)
         assertTrue(turned.isNotEmpty())
     }
+
+    // ---------------- v0.23.5: bad objects can't stop a design ----------------
+
+    private fun badRocket(): JSONObject = JSONObject().put("name", "Bad Rocket").put("units", "m").put("parts", JSONArray()
+        .put(JSONObject().put("id", "body").put("shape", "Cylinder").put("radius", 0.6).put("height", 7))
+        .put(JSONObject().put("id", "nose").put("shape", "nosecone").put("radius", 0.6).put("height", 2).put("position", JSONArray(listOf(0, 4.5, 0))))
+        .put(JSONObject().put("id", "fin").put("shape", "wing-thing").put("size", JSONArray(listOf(0.1, 1.5, 1))))
+        .put(JSONObject().put("id", "engine").put("type", "THREE.CylinderGeometry").put("radius", 0.4).put("height", 1))
+        .put(JSONObject().put("id", "nose").put("shape", JSONObject.NULL))
+        .put("not a part"))
+
+    @Test fun shapeAliasesResolve() {
+        fun s(shape: Any?, extra: JSONObject.() -> Unit = {}) = Designs.normShape(JSONObject().put("shape", shape ?: JSONObject.NULL).apply(extra))
+        assertEquals("cylinder" to false, s("Cylinder"))
+        assertEquals("cylinder" to false, s("CylinderGeometry"))
+        assertEquals("cylinder" to false, s("THREE.CylinderGeometry"))
+        assertEquals("cone" to false, s("nosecone"))
+        assertEquals("box" to false, s("cube"))
+        assertEquals("torus" to false, s("donut"))
+        assertEquals("sphere" to false, s("Ball"))
+        assertEquals("group" to false, s("group"))
+        assertEquals("cylinder" to false, Designs.normShape(JSONObject().put("type", "tube")))
+        // Unknown names are guessed from the dimensions and flagged.
+        assertEquals("box" to true, s("wing"))
+        assertEquals("cylinder" to true, s("rocketbody") { put("radius", 1).put("height", 2) })
+        assertEquals("sphere" to true, s("blob") { put("radius", 1) })
+        assertEquals("plane" to true, s("sheet") { put("size", JSONArray(listOf(1, 2))) })
+        assertEquals("torus" to true, s("hoop") { put("radius", 1).put("tube", 0.1) })
+        // No name at all: a guess, not a problem.
+        assertEquals("box" to false, s(null))
+        // Every alias maps to a shape the starter knows.
+        assertTrue(Designs.shapeAliases.values.all { it in Designs.shapes })
+    }
+
+    @Test fun normalizeSpecMakesEveryPartDrawable() {
+        val n = Designs.normalizeSpec(badRocket())
+        val parts = n.getJSONArray("parts")
+        assertEquals(5, parts.length())   // the string entry is dropped
+        val ids = (0 until parts.length()).map { parts.getJSONObject(it).getString("id") }
+        assertEquals(ids.size, ids.toSet().size)
+        assertTrue(ids.all { it.isNotBlank() })
+        assertEquals(listOf("cylinder", "cone", "box", "cylinder", "box"), (0 until parts.length()).map { parts.getJSONObject(it).getString("shape") })
+        assertEquals("Bad Rocket", n.getString("name"))
+        assertEquals(0.6, parts.getJSONObject(0).getDouble("radius"), 1e-9)
+        // No parts array at all still gives one.
+        assertEquals(0, Designs.normalizeSpec(JSONObject().put("name", "x")).getJSONArray("parts").length())
+    }
+
+    @Test fun stockStarterPagesUpgrade() {
+        val old = Designs.render3d(template.replace("const CUSTOM = {", "/* OLD-STARTER */\nconst CUSTOM = {"), rocket())
+        assertTrue(Designs.isStockStarter(old))
+        val up = Designs.upgradeStarter(old, template)
+        assertFalse(up.contains("OLD-STARTER"))
+        assertEquals(Designs.specFrom(old).toString(), Designs.specFrom(up).toString())
+        // Hand-written CUSTOM code, no template, or not a starter page: untouched.
+        val custom = old.replace("const CUSTOM = {\n", "const CUSTOM = {\n  \"wing\": p => null,\n")
+        assertFalse(Designs.isStockStarter(custom))
+        assertEquals(custom, Designs.upgradeStarter(custom, template))
+        assertEquals(old, Designs.upgradeStarter(old, null))
+        assertEquals("<html>hi</html>", Designs.upgradeStarter("<html>hi</html>", template))
+    }
+
+    @Test fun sketchDrawsARocketWithBadShapeNames() {
+        val spec = badRocket()
+        val faces = PartsSketch.faces(spec, 360f, 600f)
+        assertTrue("faces for a rocket with bad shape names", faces.size > 40)
+        assertTrue(faces.all { f -> f.pts.all { it.first.isFinite() && it.second.isFinite() } })
+        // Non-finite numbers are skipped, not allowed to break the fit.
+        spec.getJSONArray("parts").getJSONObject(0).put("radius", 100).put("scale", JSONArray(listOf(1e308, 1e308, 1e308)))   // overflows to Infinity
+        val rest = PartsSketch.faces(spec, 360f, 600f)
+        assertTrue(rest.isNotEmpty())
+        assertTrue(rest.all { f -> f.pts.all { it.first in -1f..361f && it.second in -1f..601f } })
+        // Nothing drawable: no faces (the view shows NO_PARTS).
+        assertTrue(PartsSketch.faces(JSONObject().put("parts", JSONArray()), 360f, 600f).isEmpty())
+        assertTrue(PartsSketch.faces(JSONObject(), 360f, 600f).isEmpty())
+        assertTrue(PartsSketch.NO_PARTS.isNotBlank())
+    }
+
+    @Test fun preparedPagesHaveCleanParts() {
+        val page = Designs.withSpec(Designs.render3d(template, rocket()), badRocket())
+        assertEquals("Cylinder", Designs.specFrom(page)!!.getJSONArray("parts").getJSONObject(0).getString("shape"))
+        val out = DesignServe.prepareHtml(page, true)
+        val parts = Designs.specFrom(out)!!.getJSONArray("parts")
+        assertEquals(5, parts.length())
+        assertTrue((0 until parts.length()).all { parts.getJSONObject(it).getString("shape") in Designs.shapes })
+        // A non-3D page isn't touched by the parts cleaner.
+        assertEquals(Designs.specFrom(page).toString(), Designs.specFrom(DesignServe.prepareHtml(page, false)).toString())
+    }
+
+    @Test fun safetyNetIsServedForBothBuilds() {
+        assertEquals("design/three-safe.js", DesignServe.threeAsset("three.safe.js"))
+        assertEquals("design/three-safe.js", DesignServe.threeAsset("r162/three.safe.js"))
+        assertEquals(DesignServe.SAFE_ASSET, DesignServe.threeAsset(DesignServe.SAFE_JS))
+        assertTrue(File("src/main/assets/design/three-safe.js").length() > 500)
+    }
 }
+

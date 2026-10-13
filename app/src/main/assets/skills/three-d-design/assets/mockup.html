@@ -68,9 +68,14 @@ import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 
 // ---- 1. Read the parts -------------------------------------------------------------------
 // Everything below is driven by this object; change the JSON, not the code, to change a part.
-const spec = JSON.parse(document.getElementById("blaze-parts").textContent);
-const U = spec.scale ?? 0.001;          // scene units per mockup unit
-const deg = d => (d || 0) * Math.PI / 180;
+// v0.23.5: a bad part (unknown shape, missing numbers, not an object) never stops the scene.
+let spec = {};
+try { spec = JSON.parse(document.getElementById("blaze-parts").textContent) || {}; } catch (e) { console.warn("blaze-parts: " + e.message); }
+spec.parts = (Array.isArray(spec.parts) ? spec.parts : []).filter(p => p && typeof p === "object");
+const num = (v, d) => (typeof v === "number" || typeof v === "string") && v !== "" && Number.isFinite(+v) ? +v : d;
+const vec = (v, d) => Array.isArray(v) ? d.map((x, i) => num(v[i], x)) : (typeof v === "number" ? d.map(() => v) : d);
+const U = num(spec.scale, 0.001) || 0.001;  // scene units per mockup unit
+const deg = d => num(d, 0) * Math.PI / 180;
 document.title = spec.name || document.title;
 document.getElementById("name").textContent = spec.name || "Mockup";
 
@@ -111,17 +116,32 @@ function material(p) {
 
 // ---- 5. Geometry per shape ---------------------------------------------------------------
 // Dimensions are in mockup units; the part's root is scaled by U, so geometry stays in units.
+// Shape names the model sometimes uses for the presets (Blaze also normalises them before serving).
+const ALIAS = { cube: "box", cuboid: "box", rect: "box", rectangle: "box", block: "box", wedge: "box", fin: "box", panel: "box",
+  cylinder: "cylinder", tube: "cylinder", pipe: "cylinder", disc: "cylinder", disk: "cylinder", frustum: "cylinder", rod: "cylinder",
+  cone: "cone", pyramid: "cone", nose: "cone", nosecone: "cone", sphere: "sphere", ball: "sphere", ellipsoid: "sphere", dome: "sphere",
+  hemisphere: "sphere", torus: "torus", ring: "torus", donut: "torus", doughnut: "torus", capsule: "capsule", pill: "capsule",
+  plane: "plane", ground: "plane", floor: "plane", group: "group", custom: "custom" };
+function shapeOf(p) {
+  const raw = String(p.shape ?? p.type ?? "").toLowerCase().replace(/^three\./, "").replace(/geometry$/, "").replace(/[^a-z]/g, "");
+  if (ALIAS[raw]) return ALIAS[raw];
+  if (Array.isArray(p.size)) return p.size.length === 2 ? "plane" : "box";
+  if (p.tube != null) return "torus";
+  if (p.radius != null) return p.height != null ? "cylinder" : "sphere";
+  return "box";
+}
 function geometry(p) {
-  switch (p.shape) {
-    case "box": { const [w, h, d] = p.size || [100, 100, 100]; return new THREE.BoxGeometry(w, h, d); }
-    case "cylinder": return new THREE.CylinderGeometry(p.radiusTop ?? p.radius ?? 50, p.radius ?? 50, p.height ?? 100, 48);
-    case "cone": return new THREE.ConeGeometry(p.radius ?? 50, p.height ?? 100, 48);
-    case "sphere": return new THREE.SphereGeometry(p.radius ?? 50, 48, 32);
-    case "torus": return new THREE.TorusGeometry(p.radius ?? 50, p.tube ?? 10, 24, 96);
-    case "capsule": return new THREE.CapsuleGeometry(p.radius ?? 25, p.height ?? 100, 8, 24);
-    case "plane": { const [w, d] = p.size || [100, 100]; return new THREE.PlaneGeometry(w, d).rotateX(-Math.PI / 2); }
+  const pos = (v, d) => Math.max(num(v, d), 1e-6);
+  switch (shapeOf(p)) {
+    case "cylinder": return new THREE.CylinderGeometry(pos(p.radiusTop ?? p.radius, 50), pos(p.radius, 50), pos(p.height, 100), 48);
+    case "cone": return new THREE.ConeGeometry(pos(p.radius, 50), pos(p.height, 100), 48);
+    case "sphere": return new THREE.SphereGeometry(pos(p.radius, 50), 48, 32);
+    case "torus": return new THREE.TorusGeometry(pos(p.radius, 50), pos(p.tube, 10), 24, 96);
+    case "capsule": return new THREE.CapsuleGeometry(pos(p.radius, 25), pos(p.height, 100), 8, 24);
+    case "plane": { const [w, d] = vec(p.size, [100, 100]); return new THREE.PlaneGeometry(pos(w, 100), pos(d, 100)).rotateX(-Math.PI / 2); }
   }
-  return null;
+  const [w, h, d] = vec(p.size, [100, 100, 100]);   // box, and anything unknown
+  return new THREE.BoxGeometry(pos(w, 100), pos(h, 100), pos(d, 100));
 }
 
 // ---- 6. Custom parts ---------------------------------------------------------------------
@@ -136,18 +156,26 @@ const CUSTOM = {
 const parts = new Map();
 function build(p) {
   let obj;
-  if (p.shape === "group") obj = new THREE.Group();
-  else if (p.shape === "custom") obj = CUSTOM[p.id] ? CUSTOM[p.id](p) : new THREE.Group();
-  else { obj = new THREE.Mesh(geometry(p), material(p)); obj.castShadow = obj.receiveShadow = true; }
+  const shape = shapeOf(p);
+  try {
+    if (shape === "group") obj = new THREE.Group();
+    else if (shape === "custom") obj = (CUSTOM[p.id] && CUSTOM[p.id](p)) || new THREE.Group();
+    else { obj = new THREE.Mesh(geometry(p), material(p)); obj.castShadow = obj.receiveShadow = true; }
+    if (!obj || !obj.isObject3D) obj = new THREE.Group();
+  } catch (e) {
+    // One bad part becomes an empty group (and a console note); the rest of the model still draws.
+    console.warn("part " + p.id + " couldn't be built: " + e.message);
+    obj = new THREE.Group();
+  }
   const root = new THREE.Group();     // root holds position/rotation/scale; children hold geometry
   root.add(obj);
-  root.name = p.label || p.id;
+  root.name = String(p.label || p.id);
   root.userData = { part: p.id, label: p.label || p.id };
-  const [x, y, z] = p.position || [0, 0, 0];
+  const [x, y, z] = vec(p.position, [0, 0, 0]);
   root.position.set(x, y, z);
-  const [rx, ry, rz] = p.rotation || [0, 0, 0];
+  const [rx, ry, rz] = vec(p.rotation, [0, 0, 0]);
   root.rotation.set(deg(rx), deg(ry), deg(rz));
-  const [sx, sy, sz] = p.scale || [1, 1, 1];
+  const [sx, sy, sz] = vec(p.scale, [1, 1, 1]);
   root.scale.set(sx, sy, sz);
   root.visible = p.visible !== false;
   parts.set(p.id, root);
@@ -156,8 +184,13 @@ function build(p) {
 const model = new THREE.Group();
 model.scale.setScalar(U);               // mockup units -> scene units
 scene.add(model);
-spec.parts.forEach(build);
-spec.parts.forEach(p => (parts.get(p.parent) || model).add(parts.get(p.id)));
+spec.parts.forEach((p, i) => { if (p.id == null || parts.has(p.id)) p.id = (p.id ?? "part") + "-" + (i + 1); build(p); });
+spec.parts.forEach(p => {
+  const parent = p.parent != null && p.parent !== p.id ? parts.get(p.parent) : null;
+  // A parent that is the part itself, missing, or inside the part (a loop) falls back to the model.
+  let loop = false; for (let a = parent; a; a = a.parent) if (a === parts.get(p.id)) { loop = true; break; }
+  (parent && !loop ? parent : model).add(parts.get(p.id));
+});
 // Part roots sit in mockup units inside `model`, so a JSON position is the root's position
 // relative to its parent, and Design's arrow-key nudges move it by exactly spec.nudge units.
 model.updateMatrixWorld(true);
@@ -165,18 +198,21 @@ model.updateMatrixWorld(true);
 // ---- 8. Blueprint panel ------------------------------------------------------------------
 // The parts list with each part's main dimension, read from the same JSON.
 function dims(p) {
-  if (p.size) return p.size.join(" × ");
+  if (Array.isArray(p.size)) return p.size.join(" × ");
   if (p.radius != null && p.height != null) return `⌀${p.radius * 2} × ${p.height}`;
   if (p.radius != null && p.tube != null) return `⌀${p.radius * 2} / ${p.tube * 2}`;
   if (p.radius != null) return `⌀${p.radius * 2}`;
   return "";
 }
-document.getElementById("bom").innerHTML = spec.parts.filter(p => p.shape !== "group")
-  .map(p => `<tr><td>${p.label || p.id}</td><td>${dims(p)} ${dims(p) ? spec.units : ""}</td></tr>`).join("");
+document.getElementById("bom").innerHTML = spec.parts.filter(p => shapeOf(p) !== "group")
+  .map(p => `<tr><td>${String(p.label || p.id).replace(/</g, "&lt;")}</td><td>${dims(p)} ${dims(p) ? spec.units : ""}</td></tr>`).join("");
 
 // ---- 9. Frame the camera on the model ----------------------------------------------------
-const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
-const r = Math.max(size.x, size.y, size.z) || 1;
+const box = new THREE.Box3().setFromObject(model);
+const size = box.isEmpty() ? new THREE.Vector3(1, 1, 1) : box.getSize(new THREE.Vector3());
+const mid = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+const r = Number.isFinite(Math.max(size.x, size.y, size.z)) && Math.max(size.x, size.y, size.z) > 0 ? Math.max(size.x, size.y, size.z) : 1;
+if (![mid.x, mid.y, mid.z].every(Number.isFinite)) mid.set(0, 0, 0);
 camera.position.set(mid.x + r * 1.6, mid.y + r * 1.1, mid.z + r * 1.9);
 controls.target.copy(mid); controls.update();
 

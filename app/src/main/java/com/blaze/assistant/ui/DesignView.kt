@@ -73,6 +73,7 @@ fun designSpec(target: String, home: File?): org.json.JSONObject? = try {
     val u = designUrl(target, home)
     if (!u.startsWith("file://")) null else File(u.removePrefix("file://")).takeIf { it.isFile && it.length() < 2_000_000 }
         ?.let { com.blaze.assistant.agent.Designs.specFrom(it.readText()) }
+        ?.let { com.blaze.assistant.agent.Designs.normalizeSpec(it) }   // v0.23.5: known shapes, unique ids
 } catch (_: Exception) { null }
 
 /**
@@ -300,7 +301,9 @@ fun serveDesign(ctx: android.content.Context, url: String, home: File?, engine: 
             is DesignServe.Target.Disk -> when {
                 !t.file.isFile -> notFound()
                 t.mime == "text/html" -> {
-                    val html = t.file.readText()
+                    // v0.23.5: a page from an older stock starter is served from the current one (same parts).
+                    val html = com.blaze.assistant.agent.Designs.upgradeStarter(t.file.readText(),
+                        try { com.blaze.assistant.agent.Designs.templateLoader?.invoke() } catch (_: Exception) { null })
                     val is3d = com.blaze.assistant.agent.Designs.specFrom(html) != null
                     ok("text/html", java.io.ByteArrayInputStream(DesignServe.prepareHtml(html, is3d).toByteArray(Charsets.UTF_8)), "no-store")
                 }

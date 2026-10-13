@@ -16,7 +16,9 @@ import java.io.File
  *  - Every HTML page served gets [HOOK_JS] first in <head>: it catches errors (window.onerror, failed
  *    module/script loads, unhandled rejections), checks WebGL2/WebGL1, picks the three.js build, and
  *    reports gl / error / ready / fail to the Design view through the `BlazeDesign` bridge.
- *  - A three.js importmap is rewritten so the page imports the chosen same-origin build ([prepareHtml]).
+ *  - A three.js importmap is rewritten so the page imports the chosen same-origin build ([prepareHtml]), through
+ *    the safety net (v0.23.5, assets/design/three-safe.js: null geometry / material objects are fixed and hidden
+ *    instead of killing the scene), and a 3D page's parts are normalised ([com.blaze.assistant.agent.Designs.normalizeSpec]).
  *
  * Pure (no Android classes) so the mapping, rewriting and fallback choice are unit-tested (DesignRenderTest).
  */
@@ -29,6 +31,9 @@ object DesignServe {
     /** After the first error on a 3D page that isn't ready yet, wait this long before falling back. */
     const val ERROR_GRACE_MS = 2_000L
     const val ERROR_FILE = ".last_error.txt"
+    /** v0.23.5: what a three.js importmap's "three" points at: the bundled build wrapped with the safety net. */
+    const val SAFE_JS = "three.safe.js"
+    const val SAFE_ASSET = "design/three-safe.js"
 
     // ---------------- URL mapping ----------------
 
@@ -86,6 +91,9 @@ object DesignServe {
         val tail = if (r162) rest.removePrefix("$R162/") else rest.removePrefix("$R170/")
         val name = when {
             Regex("^(build/)?three\\.module(\\.min)?\\.js$").matches(tail) -> "three.module.min.js"
+            // v0.23.5: the safety net (null geometry / material can't stop a scene); one file for both builds,
+            // it imports ./three.module.min.js next to the URL it was loaded from.
+            tail == SAFE_JS -> return SAFE_ASSET
             tail.endsWith("/OrbitControls.js") || tail == "OrbitControls.js" -> "OrbitControls.js"
             tail.endsWith("/GLTFExporter.js") || tail == "GLTFExporter.js" -> "GLTFExporter.js"
             r162 && (tail.endsWith("/TextureUtils.js") || tail == "TextureUtils.js") -> "TextureUtils.js"
@@ -158,7 +166,7 @@ object DesignServe {
             val key = m.groupValues[1]; val v = m.groupValues[2]
             val asset = bundledThree(v)
             val nv = when {
-                asset == "three.module.min.js" -> base + "three.module.min.js"
+                asset == "three.module.min.js" -> base + SAFE_JS
                 asset != null -> base + "addons/" + v.substringAfter("/examples/jsm/", v.substringAfter("/addons/"))
                 v.endsWith("/") && isThreeCdn(v) && (v.endsWith("/examples/jsm/") || v.endsWith("/addons/")) -> base + "addons/"
                 else -> v
@@ -205,6 +213,8 @@ object DesignServe {
      */
     fun prepareHtml(html: String, is3d: Boolean): String {
         var out = html
+        // v0.23.5: the parts every renderer gets are normalised (known shapes, unique ids, objects only).
+        if (is3d) com.blaze.assistant.agent.Designs.specFrom(out)?.let { out = com.blaze.assistant.agent.Designs.withSpec(out, com.blaze.assistant.agent.Designs.normalizeSpec(it)) }
         importMap.find(out)?.let { m ->
             val json = m.groupValues[1]
             if (usesThree(out)) {

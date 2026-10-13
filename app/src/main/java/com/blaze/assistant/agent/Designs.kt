@@ -62,6 +62,34 @@ object Designs {
 
     fun slug(title: String): String = title.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(40).ifBlank { "design" }
 
+    /** v0.23.5: shape names models use for the starter's presets (kept in step with ALIAS in mockup.html). */
+    val shapeAliases: Map<String, String> = mapOf(
+        "cube" to "box", "cuboid" to "box", "rect" to "box", "rectangle" to "box", "block" to "box", "wedge" to "box", "fin" to "box", "panel" to "box",
+        "tube" to "cylinder", "pipe" to "cylinder", "disc" to "cylinder", "disk" to "cylinder", "frustum" to "cylinder", "rod" to "cylinder",
+        "pyramid" to "cone", "nose" to "cone", "nosecone" to "cone", "ball" to "sphere", "ellipsoid" to "sphere", "dome" to "sphere", "hemisphere" to "sphere",
+        "ring" to "torus", "donut" to "torus", "doughnut" to "torus", "pill" to "capsule", "ground" to "plane", "floor" to "plane",
+    ) + shapesList().associateWith { it }
+
+    private fun shapesList() = listOf("box", "cylinder", "cone", "sphere", "torus", "capsule", "plane", "group", "custom")
+
+    /**
+     * v0.23.5: the starter shape for a part (a known name, an alias such as "Cylinder"/"CylinderGeometry"/"nosecone",
+     * or a guess from its dimensions), and whether the name had to be guessed. Mirrors shapeOf() in mockup.html, so
+     * the page, the native drawing and the tool agree; an unknown shape used to give three.js a null geometry.
+     */
+    fun normShape(p: JSONObject): Pair<String, Boolean> {
+        val given = (p.opt("shape")?.takeIf { it != JSONObject.NULL } ?: p.opt("type")?.takeIf { it != JSONObject.NULL })?.toString().orEmpty()
+        val raw = given.lowercase().trim().removePrefix("three.").removeSuffix("geometry").replace(Regex("[^a-z]"), "").removeSuffix("geometry")
+        shapeAliases[raw]?.let { return it to false }
+        val guess = when {
+            p.optJSONArray("size") != null -> if (p.optJSONArray("size")!!.length() == 2) "plane" else "box"
+            p.has("tube") -> "torus"
+            p.has("radius") -> if (p.has("height")) "cylinder" else "sphere"
+            else -> "box"
+        }
+        return guess to given.isNotBlank()
+    }
+
     /** Normalises a parts list: every part gets an id, a known shape and numbers where they're required. Returns (parts, problems). */
     fun cleanParts(parts: JSONArray): Pair<JSONArray, List<String>> {
         val out = JSONArray(); val problems = ArrayList<String>(); val seen = HashSet<String>()
@@ -73,13 +101,36 @@ object Designs {
             seen += id
             o.put("id", id)
             if (!o.has("label")) o.put("label", id.replace('-', ' ').replaceFirstChar { it.uppercase() })
-            val shape = o.optString("shape").lowercase().ifBlank { if (o.has("size")) "box" else if (o.has("radius")) "cylinder" else "box" }
-            if (shape !in shapes) { problems += "part $id: unknown shape \"$shape\" (use ${shapes.joinToString(", ")}), drawn as a box"; o.put("shape", "box") } else o.put("shape", shape)
+            val given = o.optString("shape").ifBlank { o.optString("type") }
+            val (shape, guessed) = normShape(o)
+            if (guessed) problems += "part $id: unknown shape \"$given\" (use ${shapes.joinToString(", ")}), drawn as a $shape"
+            o.put("shape", shape)
             out.put(o)
         }
         return out to problems
     }
 
+    /**
+     * v0.23.5: a copy of a blaze-parts spec that every renderer can draw: parts is an array of objects, each with a
+     * unique non-blank id and a known shape (see [normShape]). Other keys are kept as they are. Used when a design is
+     * served to the Design view and drawn natively, so designs saved by older versions or edited by hand still draw.
+     */
+    fun normalizeSpec(spec: JSONObject): JSONObject {
+        val out = JSONObject(spec.toString())
+        val parts = spec.optJSONArray("parts") ?: JSONArray()
+        val clean = JSONArray(); val seen = HashSet<String>()
+        for (i in 0 until parts.length()) {
+            val p = parts.optJSONObject(i) ?: continue
+            val o = JSONObject(p.toString())
+            var id = o.optString("id").takeIf { o.opt("id") != JSONObject.NULL }.orEmpty().ifBlank { "part-${i + 1}" }
+            while (id in seen) id += "-2"
+            seen += id
+            o.put("id", id)
+            o.put("shape", normShape(o).first)
+            clean.put(o)
+        }
+        return out.put("parts", clean)
+    }
     fun spec3d(name: String, parts: JSONArray, units: String = "mm", scale: Double? = null, nudge: Double? = null): JSONObject {
         val u = units.ifBlank { "mm" }
         val sc = scale ?: when (u.lowercase()) { "m" -> 1.0; "cm" -> 0.01; else -> 0.001 }
@@ -90,6 +141,26 @@ object Designs {
 
     /** The parts spec inside a 3D page, or null when the page isn't a parts-based 3D design. */
     fun specFrom(html: String): JSONObject? = partsBlock.find(html)?.let { try { JSONObject(it.groupValues[2]) } catch (_: Exception) { null } }
+
+    /** v0.23.5: [html] with its blaze-parts block replaced by [spec] (unchanged when it has none). */
+    fun withSpec(html: String, spec: JSONObject): String {
+        val json = spec.toString(2).replace("</", "<\\/")
+        return partsBlock.find(html)?.let { m -> html.replaceRange(m.range, m.groupValues[1] + "\n" + json + "\n" + m.groupValues[3]) } ?: html
+    }
+
+    /**
+     * v0.23.5: true when [html] is a page made from the 3D starter with no hand-written code (its CUSTOM builders
+     * are still the starter's empty example), so it can be re-made from the current starter without losing anything.
+     */
+    fun isStockStarter(html: String): Boolean =
+        html.contains("Blaze 3D mockup starter") && Regex("""const CUSTOM = \{\s*//[^\n]*\n\s*\};""").containsMatchIn(html)
+
+    /** v0.23.5: a stock starter page re-made from the current [template] (same parts, title and Blaze additions), else [html]. */
+    fun upgradeStarter(html: String, template: String?): String {
+        if (template == null || !isStockStarter(html) || !isStockStarter(template)) return html
+        val spec = specFrom(html) ?: return html
+        return render3d(template, spec)
+    }
 
     /** v0.23.2's additions (kept so pages made then are recognised and upgraded on their next update). */
     private const val EXTRA_3D_V1 = """
@@ -157,7 +228,11 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
             val p = set.optJSONObject(i) ?: continue
             val id = slug(p.optString("id").ifBlank { p.optString("label") })
             val old = byId[id]
-            if (old != null) { p.keys().forEach { k -> if (k != "id") old.put(k, p.get(k)) }; changed += id }
+            if (old != null) {
+                p.keys().forEach { k -> if (k != "id") old.put(k, p.get(k)) }
+                if (p.has("shape") || p.has("type")) old.put("shape", normShape(old).first)   // v0.23.5: never an unknown shape
+                changed += id
+            }
             else {
                 val (clean, _) = cleanParts(JSONArray().put(JSONObject(p.toString()).put("id", id)))
                 byId[id] = clean.getJSONObject(0); added += id
@@ -323,7 +398,8 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
                 summary = if (args.has("parts") && !args.has("set_parts") && remove.isEmpty()) "replaced all parts" else s
                 if (merged.toString() == spec.toString()) return Outcome("Error: that changed nothing (unknown ids? the current parts are: " +
                     (0 until (spec.optJSONArray("parts")?.length() ?: 0)).joinToString(", ") { spec.getJSONArray("parts").getJSONObject(it).optString("id") } + ").")
-                render3d(old, merged)
+                // v0.23.5: pages from an older starter get the current one (bad parts can't stop the scene).
+                render3d(upgradeStarter(old, try { templateLoader?.invoke() } catch (_: Exception) { null }), merged)
             }
             args.optJSONArray("edits")?.let { it.length() > 0 } == true -> {
                 val (s, pr) = applyEdits(old, args.getJSONArray("edits")); problems += pr
