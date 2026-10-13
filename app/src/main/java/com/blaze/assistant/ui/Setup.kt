@@ -159,7 +159,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // v0.19.0: progress segments, like Desktop's onboarding.
-                (0 until 3).forEach { i -> Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).background(if (i <= page) c.accent else c.hair2)) }
+                (0 until 3).forEach { i -> Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).clip(BlazeShapes.pill).background(if (i <= page) c.accent else c.hair2)) }
                 Spacer(Modifier.width(8.dp))
                 Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
                 Spacer(Modifier.weight(1f))

@@ -187,7 +187,7 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                 ActionText("Open", color = c.accent, size = 9.sp, modifier = Modifier.clickable { onOpenInBrowser(fileUrl) }.padding(6.dp))
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().background(c.faint)) {
+        Box(Modifier.weight(1f).fillMaxWidth().clip(BlazeShapes.medium).background(c.faint)) {
             val failure = rs.failure
             if (url.isBlank()) {
                 Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {

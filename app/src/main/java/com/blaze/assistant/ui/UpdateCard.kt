@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -50,8 +51,8 @@ fun UpdateCard() {
         Text(line, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
         if (pct >= 0) {
             Spacer(Modifier.height(10.dp))
-            Box(Modifier.fillMaxWidth().height(4.dp).background(c.faint)) {
-                Box(Modifier.fillMaxWidth(pct / 100f).height(4.dp).background(c.accent))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(BlazeShapes.pill).background(c.faint)) {
+                Box(Modifier.fillMaxWidth(pct / 100f).height(4.dp).clip(BlazeShapes.pill).background(c.accent))
             }
         }
         val action = when (st) {

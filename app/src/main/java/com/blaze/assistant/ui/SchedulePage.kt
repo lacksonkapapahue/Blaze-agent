@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -99,7 +100,7 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
                 onClick = { open = if (open == r.id) -1 else r.id }) {
                 KitSwitch(r.enabled) { if (list0 == null) Routines.setEnabled(r.id, !r.enabled) }
             }
-            if (open == r.id) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+            if (open == r.id) Column(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
                 Label(if (r.isCommand) "Shell job" + (if (r.linux) " \u00b7 Linux" else "") else "Blaze does", size = 9.sp, color = c.weak)
                 Text(if (r.isCommand) "$ " + r.command else r.prompt, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
                     style = TextStyle(fontFamily = if (r.isCommand) Type.Mono else Type.Sans, fontSize = 12.5.sp, lineHeight = 18.sp, color = c.body))

@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -53,7 +54,7 @@ fun SavedLoginsPage() {
     }
     sites.forEach { (host, names) ->
         Column(Modifier.fillMaxWidth().padding(bottom = 14.dp).hairline(c.hair)) {
-            Row(Modifier.fillMaxWidth().background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(host, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = c.ink))
                 ActionText("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Vault.forget(host); tick++ }.padding(6.dp))
             }

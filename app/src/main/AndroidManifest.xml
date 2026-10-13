@@ -92,6 +92,7 @@
         <activity
             android:name=".browser.BrowserActivity"
             android:exported="true"
+            android:supportsPictureInPicture="true"
             android:label="Blaze browser"
             android:launchMode="singleTask"
             android:taskAffinity="com.blaze.assistant.browser"

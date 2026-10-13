@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -49,7 +50,7 @@ fun ModelList(models: List<ModelCatalog.Model>, selected: String, query: String,
         shown.forEach { m ->
             val on = m.id == selected
             val free = m.note.contains("free", true) || m.id.endsWith(":free")
-            Row(Modifier.fillMaxWidth().hairlineTop(c.hair).background(if (on) c.accentSoft else c.raised).clickable { onPick(m.id) }
+            Row(Modifier.fillMaxWidth().hairlineTop(c.hair).clip(BlazeShapes.small).background(if (on) c.accentSoft else c.raised).clickable { onPick(m.id) }
                 .heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2, BlazeShapes.pill)); Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {

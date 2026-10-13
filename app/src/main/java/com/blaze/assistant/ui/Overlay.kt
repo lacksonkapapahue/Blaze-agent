@@ -414,9 +414,8 @@ private fun Scatter(size: androidx.compose.ui.unit.Dp, onGone: () -> Unit) {
         bits.forEach { (ang, sp, k) ->
             val dist = this.size.width * 0.9f * sp * t
             val col = if (k == 0) c.accent else c.ink
-            drawRect(col.copy(alpha = (1f - t).coerceIn(0f, 1f)),
-                Offset(cx + kotlin.math.cos(ang) * dist - px / 2, cy + kotlin.math.sin(ang) * dist - px / 2),
-                androidx.compose.ui.geometry.Size(px * (1f - t * 0.5f), px * (1f - t * 0.5f)))
+            drawCircle(col.copy(alpha = (1f - t).coerceIn(0f, 1f)), px * (1f - t * 0.5f) / 2f,
+                Offset(cx + kotlin.math.cos(ang) * dist, cy + kotlin.math.sin(ang) * dist))
         }
         if (t < 0.25f) drawCircle(c.accent.copy(alpha = 0.3f * (1f - t * 4f)), radius = this.size.width / 2f * (1f + t))
     }
@@ -454,159 +453,21 @@ private fun ParticleBin(shown: Boolean, hot: Boolean) {
             val spread = (1f - heat * 0.75f) * 18.dp.toPx()
             val rad = ringR + (rr - 0.5f) * spread + kotlin.math.sin(time * 2 + ph * 9) * 3.dp.toPx() * (1f - heat)
             val col = if (heat > 0.5f || ph > 0.86f) c.accent else Color.White
-            drawRect(col.copy(alpha = vis * (0.55f + 0.45f * heat)),
-                Offset(cx + kotlin.math.cos(a) * rad - px / 2, cy + kotlin.math.sin(a) * rad - px / 2),
-                androidx.compose.ui.geometry.Size(px, px))
+            drawCircle(col.copy(alpha = vis * (0.55f + 0.45f * heat)), px / 2f,
+                Offset(cx + kotlin.math.cos(a) * rad, cy + kotlin.math.sin(a) * rad))
         }
         // Pixel "×" in the middle (hidden under the orb when it snaps in).
         val cell = 4.dp.toPx()
         for (i in -3..3) {
             for (sgn in listOf(1, -1)) {
-                drawRect((if (heat > 0.5f) c.accent else Color.White).copy(alpha = vis * 0.9f),
-                    Offset(cx + i * cell - cell / 2, cy + sgn * i * cell - cell / 2), androidx.compose.ui.geometry.Size(cell * 0.9f, cell * 0.9f))
+                drawCircle((if (heat > 0.5f) c.accent else Color.White).copy(alpha = vis * 0.9f), cell * 0.45f,
+                    Offset(cx + i * cell, cy + sgn * i * cell))
             }
         }
     }
 }
 
-/** Compact chat over any app: orb, the latest messages, and an input with mic. */
-@Composable
-fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onExpand: () -> Unit) {
-    val c = LocalBlaze.current
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val messages by Agent.messages.collectAsState()
-    val mood by Agent.mood.collectAsState()
-    val voice by Voice.state.collectAsState()
-    val partial by Voice.partial.collectAsState()
-    val agentStatus by Agent.status.collectAsState()
-    var text by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var compact by remember { mutableStateOf(Settings.bool("compact_panel", true)) }
-    val recentAll = messages.filter { it.role != Role.STEP || it == messages.lastOrNull() }.takeLast(8)
-    // Compact: just the newest thing Blaze said or is doing.
-    val recent = if (compact) recentAll.filter { it.role != Role.USER }.takeLast(1) else recentAll
-    val list = rememberLazyListState()
-    // Fade away a few seconds after a task finishes, unless you're typing or talking.
-    var touched by remember { mutableStateOf(false) }
-    var wasBusy by remember { mutableStateOf(false) }
-    LaunchedEffect(mood) {
-        if (mood != Mood.IDLE) { wasBusy = true; return@LaunchedEffect }
-        if (wasBusy && compact && !touched && Settings.bool("auto_hide_panel", true) && Agent.pendingQuestion.value == null) {
-            kotlinx.coroutines.delay(7000)
-            if (mood == Mood.IDLE && !touched && text.isEmpty() && Voice.state.value == Voice.State.IDLE && Agent.pendingQuestion.value == null) onClose()
-        }
-    }
-    LaunchedEffect(recent.size, recent.lastOrNull()?.text?.length) { if (recent.isNotEmpty()) list.animateScrollToItem(recent.size - 1) }
-
-    fun listen() {
-        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            note = "Open Blaze once and allow the microphone."; return
-        }
-        Voice.listen(onText = { if (it.isNotBlank()) Agent.send(it, byVoice = true) }, onError = { note = it })
-    }
-    LaunchedEffect(Unit) { if (autoListen && mood == Mood.IDLE) listen() }
-    val octx = androidx.compose.ui.platform.LocalContext.current
-    fun submit() {
-        if (text.isBlank()) return
-        val openApp = { s: String -> octx.startActivity(android.content.Intent(octx, com.blaze.assistant.MainActivity::class.java)
-            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        val cmd = CommandRunner.run(octx, text.trim(), openSettings = { openApp(it) }, listen = { })
-        if (cmd == "") { text = ""; return }
-        if (mood == Mood.IDLE) { Agent.send(cmd ?: text); text = "" }
-    }
-
-    Box(Modifier.fillMaxSize().clickable(remember { MutableInteractionSource() }, null) { Voice.cancelListening(); onClose() }) {
-        Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .clickable(remember { MutableInteractionSource() }, null) { }
-                // The window itself resizes above the keyboard, so no IME padding here (doubling it
-                // shoved the panel under the status bar).
-                .statusBarsPadding().navigationBarsPadding()
-                .padding(10.dp)
-                .background(c.paper, BlazeShapes.medium).hairline(c.hair)
-        ) {
-            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                OrbFace(if (compact) 30.dp else 40.dp)
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    if (!compact) Text("Blaze", style = TextStyle(fontFamily = Type.Display, fontSize = 17.sp, color = c.ink))
-                    Label(when {
-                        voice == Voice.State.LISTENING -> "Listening"
-                        voice == Voice.State.SPEAKING -> "Speaking"
-                        mood != Mood.IDLE -> agentStatus.ifBlank { com.blaze.assistant.agent.Friendly.between(null) }
-                        else -> "Ready"
-                    }, color = if (mood != Mood.IDLE || voice != Voice.State.IDLE) c.accent else c.sub, size = 9.sp)
-                }
-                if (!compact) {
-                    PanelButton("New") { Voice.cancelListening(); Agent.clear(); text = "" }
-                    PanelButton("Pin", onPin)
-                    PanelButton("Open", onExpand)
-                }
-                PanelButton(if (compact) "More" else "Less") { compact = !compact; touched = true; Settings.setBool("compact_panel", compact) }
-                PanelButton("×", onClose)
-            }
-            if (recent.isNotEmpty()) {
-                LazyColumn(state = list, modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = if (compact) 150.dp else 300.dp).padding(horizontal = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item { Spacer(Modifier.height(4.dp)) }
-                    items(recent, key = { it.id }) { m ->
-                        when (m.role) {
-                            Role.USER -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                                Text(m.text, modifier = Modifier.clip(RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp)).background(c.ink).padding(horizontal = 12.dp, vertical = 8.dp),
-                                    style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.paper))
-                            }
-                            Role.STEP -> Label("— " + m.text, size = 10.sp)
-                            else -> SelectionContainer {
-                                Text(if (m.role == Role.BLAZE) Md.render(m.text, c.accent, c.hair.copy(alpha = 0.35f)) else AnnotatedString(m.text),
-                                    style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp,
-                                    color = if (m.role == Role.ERROR) c.accent else c.body))
-                            }
-                        }
-                    }
-                    item { Spacer(Modifier.height(4.dp)) }
-                }
-            }
-            ConfirmCard()
-            QuestionCard()
-            if (voice == Voice.State.LISTENING || note.isNotEmpty()) {
-                Text(if (note.isNotEmpty()) note else partial.ifBlank { "Listening…" },
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                    style = TextStyle(fontFamily = Type.Display, fontSize = 19.sp, color = if (note.isNotEmpty()) c.accent else c.ink))
-            }
-            Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 12.dp, vertical = 12.dp)) {
-                    if (text.isEmpty()) Text("Ask Blaze", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
-                    BasicTextField(text, { text = it; touched = true },
-                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink),
-                        cursorBrush = SolidColor(c.accent), maxLines = 3,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { submit() }),
-                        modifier = Modifier.fillMaxWidth())
-                }
-                Spacer(Modifier.width(8.dp))
-                val micOn = voice != Voice.State.IDLE
-                Box(Modifier.size(46.dp).background(if (micOn) c.accent else c.paper, BlazeShapes.medium).hairline(if (micOn) c.accent else c.hair)
-                    .clickable {
-                        note = ""; touched = true
-                        when (voice) {
-                            Voice.State.LISTENING -> Voice.cancelListening()
-                            Voice.State.SPEAKING -> Voice.stopSpeaking()
-                            else -> listen()
-                        }
-                    }, contentAlignment = Alignment.Center) {
-                    ButtonText(if (micOn) "■" else "Mic", color = if (micOn) c.paper else c.ink, size = 13.sp)
-                }
-                Spacer(Modifier.width(6.dp))
-                Box(Modifier.height(46.dp).clip(BlazeShapes.pill).background(if (mood != Mood.IDLE) androidx.compose.ui.graphics.SolidColor(c.accent) else BlazeBrush.primary, BlazeShapes.pill)
-                    .clickable { if (mood != Mood.IDLE) Agent.stop() else submit() }.padding(horizontal = 14.dp),
-                    contentAlignment = Alignment.Center) {
-                    ButtonText(if (mood != Mood.IDLE) "Stop" else "Send", color = Color.White)
-                }
-            }
-        }
-    }
-}
+// v0.24.6: AssistPanel moved to ui/AssistPanel.kt (rounded Blaze look, icon buttons, mascot, edge particles).
 
 @Composable
 private fun PanelButton(label: String, onClick: () -> Unit) {

@@ -51,6 +51,9 @@ class BlazeAccessibilityService : AccessibilityService() {
         if (event == null) return
         lastEventAt = android.os.SystemClock.uptimeMillis()
         try { Watchers.onEvent(this, event.packageName?.toString().orEmpty()) } catch (_: Exception) { }
+        // v0.24.7 Magic Hand: watches re-read when their app comes up; teach mode records the user's own taps / typing.
+        try { MagicHand.onEvent(this, event) } catch (_: Exception) { }
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString().orEmpty()
             if (pkg.isNotEmpty() && pkg != lastWindowPkg && pkg != packageName) {
@@ -93,6 +96,7 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         Pointer.done()
+        MagicHand.stop()
         com.blaze.assistant.ui.Overlay.hideOrb(this, unpin = false)
         instance = null
         super.onDestroy()
@@ -100,6 +104,7 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         com.blaze.assistant.device.CrashLog.write("Phone control disconnected (unbound by Android)")
+        MagicHand.stop()
         instance = null
         return super.onUnbind(intent)
     }
@@ -347,7 +352,8 @@ class BlazeAccessibilityService : AccessibilityService() {
                 val f = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0x226B8CFF }
                 override fun onDraw(c: android.graphics.Canvas) {
                     val h = p.strokeWidth
-                    c.drawRect(h, h, width - h, height - h, f); c.drawRect(h, h, width - h, height - h, p)
+                    val rr = 12 * resources.displayMetrics.density   // v0.24.8: rounded tap highlight
+                    c.drawRoundRect(h, h, width - h, height - h, rr, rr, f); c.drawRoundRect(h, h, width - h, height - h, rr, rr, p)
                 }
             }
             val lp = android.view.WindowManager.LayoutParams(r.width() + pad * 2, r.height() + pad * 2,

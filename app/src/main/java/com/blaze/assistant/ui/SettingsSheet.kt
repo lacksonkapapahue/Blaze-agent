@@ -59,15 +59,18 @@ import androidx.compose.ui.draw.clip
 data class SettingsPage(val id: String, val title: String, val sub: String)
 
 /**
+ * v0.24.6: Settings is six rows: Voice, Permissions, Account, Updates, About, Advanced. Brain left the list (models are
+ * managed on the Blaze Gateway dashboard; its page, prefs and keys stay, reachable from /views › Brain), and the
+ * views (Memory, Learn, Seller, Schedule, Skills, Agents, Jobs, Dashboard) left Advanced: they open from the
+ * composer's + menu, /views and Blaze's "Open in …?" chip. Their prefs are untouched.
  * v0.24.4: Settings is cut to seven rows: Brain, Voice, Permissions, Account, Updates, About, Advanced.
  * Every older page still exists (and keeps its prefs) behind Advanced; the BlazeRouter dashboard is gone
  * (its prefs stay; Brain picks Auto or a fixed model).
  */
-val essentialPages = listOf("ai", "voice", "permissions", "account", "updates", "about", "advanced")
+val essentialPages = listOf("voice", "permissions", "account", "updates", "about", "advanced")
 
 /** The top-level rows. */
 val topPages = listOf(
-    SettingsPage("ai", "Brain", "Which AI answers: Auto (free) or your own model and keys"),
     SettingsPage("voice", "Voice", "Hey Blaze, spoken replies, default assistant"),
     SettingsPage("permissions", "Permissions", "Phone control, notifications, mic, overlay"),
     SettingsPage("account", "Account", "Blaze account and connected apps"),
@@ -80,30 +83,39 @@ val topPages = listOf(
 val advancedPages = listOf(
     SettingsPage("connections", "Connected accounts", "Google, GitHub, Spotify, Notion, Slack"),
     SettingsPage("desktop", "Blaze Desktop", "Pair with Blaze on your computer"),
-    SettingsPage("terminal", "Terminal", "A real shell, jobs, Linux, Termux"),
     SettingsPage("control", "Phone control", "Accessibility, skills, the pointer"),
     SettingsPage("persona", "Personality", "How Blaze talks"),
     SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
-    SettingsPage("memory", "Memory & learning", "What Blaze remembers and has learned"),
     SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
+    SettingsPage("watches", "Watches", "Values Magic Hand is watching for you"),
     SettingsPage("logins", "Saved logins", "Sign-ins from Blaze's secure form, encrypted on this phone"),
     SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
-    SettingsPage("routines", "Routines", "Things Blaze does on a schedule"),
-    SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
-    SettingsPage("skills", "Skill library", "Research, email, plans, docs, code: on, off, restore"),
     SettingsPage("commands", "Slash commands", "Your own /commands and prompt skills"),
     SettingsPage("orb", "Floating orb", "Keep Blaze over other apps"),
-    SettingsPage("learn", "Learn", "Flashcards, Google Classroom, low-data mode"),
-    SettingsPage("seller", "Seller", "Brand kit, weekly store digest, replies from your PC"),
     SettingsPage("logs", "Life logs", "Transcribe what the mic hears into memory, brainstorms"),
     SettingsPage("replies", "Notification replies", "Chat logs and replies from notifications, auto-reply"),
-    SettingsPage("dashboard", "Dashboard", "Local web dashboard and analytics"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
     SettingsPage("device", "Device & diagnostics", "Phone health, self-check, crash report"),
     SettingsPage("backup", "Backup", "Export or import everything"),
 )
 
-val settingsPages = topPages + advancedPages
+/**
+ * Pages that are views (v0.24.6): not listed in Settings any more, still opened by id from /views, the + menu,
+ * open_view and the "Open in …?" chip. Brain stays here too (models live on the gateway dashboard).
+ */
+val viewPages = listOf(
+    SettingsPage("ai", "Brain", "Which AI answers: Blaze Gateway, Auto (free) or your own model and keys"),
+    SettingsPage("terminal", "Jobs", "A real shell, jobs, Linux, Termux"),
+    SettingsPage("memory", "Memory", "What Blaze remembers and has learned"),
+    SettingsPage("routines", "Schedule", "Things Blaze does on a schedule"),
+    SettingsPage("specialists", "Agents", "Sub-agents Blaze can delegate to"),
+    SettingsPage("skills", "Skills", "Research, email, plans, docs, code: on, off, restore"),
+    SettingsPage("learn", "Learn", "Flashcards, Google Classroom, low-data mode"),
+    SettingsPage("seller", "Seller", "Brand kit, weekly store digest, replies from your PC"),
+    SettingsPage("dashboard", "Dashboard", "Local web dashboard and analytics"),
+)
+
+val settingsPages = topPages + advancedPages + viewPages
 
 @Composable
 fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> Unit, onDismiss: () -> Unit) {
@@ -167,6 +179,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "logs" -> LifeLogsPage()
                 "replies" -> RepliesPage()
                 "logins" -> SavedLoginsPage()
+                "watches" -> com.blaze.assistant.phone.MagicHandWatchesPage()
             }
             Spacer(Modifier.height(30.dp))
         }
@@ -445,7 +458,7 @@ private fun ProviderPicker(pid: String, onPick: (String) -> Unit) {
                 val on = p.id == pid
                 val hasKey = Settings.keyFor(p.id).isNotBlank()
                 Row(
-                    Modifier.fillMaxWidth().background(if (on) c.faint else c.paper)
+                    Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (on) c.faint else c.paper)
                         .clickable { onPick(p.id); open = false }
                         .hairlineBottom(c.hair).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -631,7 +644,7 @@ private fun PersonaSection() {
     Label("Personality", modifier = Modifier.padding(bottom = 8.dp))
     Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         com.blaze.assistant.agent.Personas.all.forEach { p ->
-            Row(Modifier.fillMaxWidth().background(if (p.id == pid) c.faint else c.paper)
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (p.id == pid) c.faint else c.paper)
                 .clickable { pid = p.id; Settings.personaId = p.id }.padding(horizontal = 14.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(6.dp).background(if (p.id == pid) c.accent else Color.Transparent, BlazeShapes.pill))

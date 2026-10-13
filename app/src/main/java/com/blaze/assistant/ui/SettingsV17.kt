@@ -145,7 +145,7 @@ fun StepsModelSection() {
     val options = listOf("" to "Same as main") + Providers.all.filter { it.id == Providers.AUTO || Settings.keyFor(it.id).isNotBlank() }.map { it.id to it.name }
     Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         options.forEach { (id, name) ->
-            Row(Modifier.fillMaxWidth().background(if (id == pid) c.faint else c.paper).hairlineBottom(c.hair)
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (id == pid) c.faint else c.paper).hairlineBottom(c.hair)
                 .clickable { pid = id; Settings.stepsProvider = id }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(6.dp).background(if (id == pid) c.accent else c.paper, BlazeShapes.pill)); Spacer(Modifier.width(10.dp))
                 Text(name, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink))
@@ -175,7 +175,7 @@ fun ConnectionsPage(connected0: Set<String>? = null, online0: Boolean? = null, o
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.blaze.assistant.connect.BlazeAccount.refreshProviders(true) } }
     }
     PageHead("Accounts", "Connected accounts", "Let Blaze use your apps: tap Connect, approve in your browser, and you're back. Tokens stay encrypted on this phone; sending or posting always asks you first.")
-    if (!acct.online) Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+    if (!acct.online) Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(BlazeShapes.small).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(6.dp).background(c.sub, BlazeShapes.pill)); Spacer(Modifier.width(10.dp))
         Text("Can't reach Blaze's sign-in service right now. Check your connection.", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, lineHeight = 17.sp, color = c.body))
     }
@@ -187,7 +187,7 @@ fun ConnectionsPage(connected0: Set<String>? = null, online0: Boolean? = null, o
             val tag = when { on -> "Connected"; one -> "Connect"; acct.online -> "Soon"; else -> "Offline" }
             KitRow(conn.name, st[conn.id]?.takeIf { it.isNotBlank() } ?: conn.blurb, first = i == 0, pill = tag, pillOn = on,
                 onClick = { open = if (open == conn.id) "" else conn.id }, lead = { Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2, BlazeShapes.pill)) })
-            if (open == conn.id) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 33.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+            if (open == conn.id) Column(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).hairlineTop(c.hair).padding(start = 33.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
                 when {
                     on -> KitButton("Disconnect", Btn.LINE) { Connectors.disconnect(conn.id); tick++ }
                     one -> {

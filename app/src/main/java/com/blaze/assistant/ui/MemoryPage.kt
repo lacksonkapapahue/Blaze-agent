@@ -435,7 +435,7 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
     val links = if (idx >= 0) graph.neighbours(idx) else emptyList()
 
     Row(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(c.hair2)
-        .drawBehind { drawRect(c.accent, size = Size(3.dp.toPx(), size.height)) }) {
+        .drawBehind { drawRoundRect(c.accent, topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 10.dp.toPx()), size = Size(3.dp.toPx(), (size.height - 20.dp.toPx()).coerceAtLeast(1f)), cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())) }) {
         Column(Modifier.weight(1f).padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 14.dp)) {
             Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).background(c.accent, BlazeShapes.pill)); Spacer(Modifier.width(8.dp))

@@ -60,6 +60,34 @@ object Views {
     val request = MutableStateFlow<Request?>(null)
     fun open(id: String, target: String = "") { request.value = Request(id, target) }
 
+    // ---------------- v0.24.6: ask before switching ----------------
+
+    /** "Open in Design?": a chip in the chat that opens the view on one tap (Luke: Blaze asks, it doesn't jump). */
+    data class Offer(val id: String, val target: String = "", val n: Long = System.nanoTime())
+    val offer = MutableStateFlow<Offer?>(null)
+
+    fun offerLabel(id: String): String = "Open in ${find(id)?.name ?: id.replaceFirstChar { it.uppercase() }}?"
+
+    /** True when the user's own words asked to open / show / switch to this view (then it opens straight away). */
+    fun askedFor(text: String, id: String): Boolean {
+        val v = find(id) ?: return false
+        val names = (listOf(v.id, v.name) + v.aliases).map { Regex.escape(it.lowercase()) }.joinToString("|")
+        val t = text.lowercase().trim()
+        if (t.startsWith("/${v.id}")) return true
+        return Regex("""\b(open|show|switch to|go to|take me to|bring up|launch)\b[^.?!]{0,30}\b($names)\b""").containsMatchIn(t) ||
+            Regex("""\b(open (it|that|this)|show (it|me)|let me see|so i can see)\b""").containsMatchIn(t) && id == "design"
+    }
+
+    /**
+     * Opens [id] now when the user asked for it (or it's already on screen), else offers it with the chip.
+     * Returns true when it opened. Call on the main thread.
+     */
+    fun openOrOffer(id: String, target: String, userText: String, autopilot: Boolean = false): Boolean {
+        if (autopilot || showing.value == id || askedFor(userText, id)) { offer.value = null; open(id, target); return true }
+        offer.value = Offer(id, target)
+        return false
+    }
+
     /** The view shown over the chat right now ("" = plain chat). Shown as the "DESIGN ✕ Exit" chip. */
     val showing = MutableStateFlow("")
 

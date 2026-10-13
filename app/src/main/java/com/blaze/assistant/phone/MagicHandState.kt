@@ -1,0 +1,116 @@
+package com.blaze.assistant.phone
+
+import com.blaze.assistant.phone.MagicHandLogic.Action
+import com.blaze.assistant.phone.MagicHandLogic.Intent
+import com.blaze.assistant.phone.MagicHandLogic.Kind
+
+/**
+ * Magic Hand (v0.24.7): what the dock shows, as one immutable value, plus the pure transitions the controller
+ * (MagicHand) applies. No Android types, so the rules are unit tested (MagicHandStateTest) and the dock, menu,
+ * grab and teach-review cards render straight from it in ShotsTest.
+ */
+object MagicHandState {
+    /** What the dock is showing below its header. */
+    enum class Panel { STATUS, MENU, ASKING, ANSWER, CONFIRM, GRAB, TEACH, TEACH_REVIEW }
+
+    /** Actions offered on grabbed (circled) text. */
+    enum class GrabAction(val label: String) { COPY("Copy"), TRANSLATE("Translate"), SEARCH("Search"), SAVE("Save"), CARRY("Carry") }
+
+    /** A pending "do this?" card. Nothing happens until the user says yes. */
+    data class Confirm(val intent: Intent, val line: String, val yes: String = "Yes", val no: String = "Cancel")
+
+    data class Ui(
+        val on: Boolean = false,
+        val panel: Panel = Panel.STATUS,
+        val mode: MagicHandLogic.Mode = MagicHandLogic.Mode.POINT,
+        /** Label of the element under the tip ("" = nothing). */
+        val pointing: String = "",
+        val kind: Kind = Kind.EMPTY,
+        val app: String = "",
+        val menu: List<Action> = emptyList(),
+        val question: String = "",
+        val answer: String = "",
+        val confirm: Confirm? = null,
+        val grabbed: String = "",
+        val grabSource: String = "",
+        val carried: String = "",
+        val teachSteps: List<String> = emptyList(),
+        val teachName: String = "",
+        val private: Boolean = false,
+        val note: String = "",
+    ) {
+        val carrying: Boolean get() = carried.isNotBlank()
+    }
+
+    const val HELLO = "Drag me. Double-tap for a menu, hold on a value to watch it, draw a circle to grab text."
+    const val NOTHING = "Nothing readable here. Move me onto some text or a button."
+    const val NEEDS_A11Y = "Magic Hand needs phone control. Turn on Blaze in Settings \u203a Accessibility."
+    const val TEACH_HELLO = "Teaching: do the task yourself. I'm only watching your taps and typing. Tap Done when finished."
+    const val BUSY = "Blaze is still answering. Try again in a moment."
+
+    fun start(private: Boolean): Ui = Ui(on = true, private = private, note = if (private) MagicHandGuard.PRIVATE_NOTE else HELLO)
+
+    /** Closing the dock stops everything: no menu, no question in flight, nothing carried, no teach recording. */
+    fun close(): Ui = Ui(on = false)
+
+    fun point(u: Ui, label: String, kind: Kind, app: String): Ui =
+        if (u.panel == Panel.STATUS || u.panel == Panel.TEACH) u.copy(pointing = label, kind = kind, app = app, note = if (label.isBlank()) u.note else "") else u.copy(pointing = label, kind = kind, app = app)
+
+    /** The radial menu for what's under the tip, with anything that captures removed in Private. */
+    fun menu(u: Ui, label: String, kind: Kind, app: String): Ui {
+        val acts = MagicHandMenu.actions(kind, u.carrying).filter { MagicHandGuard.allowed(it, u.private) }
+        if (acts.isEmpty()) return u.copy(panel = Panel.STATUS, note = if (kind == Kind.SECRET) "That's a password field. Magic Hand leaves it alone." else NOTHING)
+        return u.copy(panel = Panel.MENU, menu = acts, pointing = label, kind = kind, app = app, note = "")
+    }
+
+    fun asking(u: Ui, question: String): Ui = u.copy(panel = Panel.ASKING, question = question, answer = "", menu = emptyList())
+    fun answered(u: Ui, answer: String): Ui = if (u.panel == Panel.ASKING || u.panel == Panel.ANSWER) u.copy(panel = Panel.ANSWER, answer = answer) else u
+
+    fun confirm(u: Ui, intent: Intent, label: String): Ui {
+        val line = MagicHandGuard.confirmLine(intent, label, u.carried)
+        val yes = when (intent) { Intent.TEACH_TAP -> "Tap it"; Intent.DROP -> "Drop"; Intent.WATCH -> "Watch"; else -> "Yes" }
+        return u.copy(panel = Panel.CONFIRM, confirm = Confirm(intent, line, yes), menu = emptyList())
+    }
+
+    /** Back to the plain status line (after an answer, a cancel or a done action). */
+    fun back(u: Ui, note: String = ""): Ui = u.copy(panel = if (u.mode == MagicHandLogic.Mode.TEACH) Panel.TEACH else Panel.STATUS,
+        menu = emptyList(), confirm = null, note = note)
+
+    fun grabbed(u: Ui, text: String, source: String): Ui =
+        if (text.isBlank()) back(u, "I couldn't read any text in that circle.")
+        else u.copy(panel = Panel.GRAB, grabbed = text.trim(), grabSource = source, menu = emptyList())
+
+    /** Grab actions: Translate and Save send or keep what was captured, so Private has none of them (grab itself is off there). */
+    fun grabActions(private: Boolean): List<GrabAction> =
+        if (private) listOf(GrabAction.COPY, GrabAction.CARRY) else GrabAction.values().toList()
+
+    fun carry(u: Ui, text: String): Ui = back(u.copy(carried = text.trim()), "Carrying \u201c${MagicHandLogic.preview(text)}\u201d. Double-tap a text box in any app to drop it.")
+    fun dropped(u: Ui): Ui = back(u.copy(carried = ""), "Dropped.")
+
+    fun teach(u: Ui): Ui = if (!MagicHandGuard.canTeach(u.private)) back(u, MagicHandGuard.PRIVATE_NOTE)
+        else u.copy(mode = MagicHandLogic.Mode.TEACH, panel = Panel.TEACH, teachSteps = emptyList(), note = TEACH_HELLO, menu = emptyList())
+    fun teachSteps(u: Ui, lines: List<String>): Ui = u.copy(teachSteps = lines)
+    fun review(u: Ui, lines: List<String>, defaultName: String): Ui =
+        u.copy(panel = Panel.TEACH_REVIEW, teachSteps = lines, teachName = u.teachName.ifBlank { defaultName })
+    fun endTeach(u: Ui, note: String): Ui = u.copy(mode = MagicHandLogic.Mode.POINT, panel = Panel.STATUS, teachSteps = emptyList(), teachName = "", note = note)
+
+    /** Dock header buttons for the current state (pure, tested). Close is always last and always there. */
+    enum class DockButton(val desc: String) { TEACH("Teach Blaze a task"), DONE("Done teaching"), DROP_CHAT("Drop in chat"), CLOSE("Close Magic Hand") }
+    fun dockButtons(u: Ui): List<DockButton> = buildList {
+        if (u.mode == MagicHandLogic.Mode.TEACH) { if (u.panel == Panel.TEACH) add(DockButton.DONE) }
+        else if (!u.private) add(DockButton.TEACH)
+        if (u.carrying && !u.private && u.mode == MagicHandLogic.Mode.POINT) add(DockButton.DROP_CHAT)
+        add(DockButton.CLOSE)
+    }
+
+    /** The one status line under the dock header. */
+    fun statusLine(u: Ui): String = when {
+        u.note.isNotBlank() -> u.note
+        u.pointing.isNotBlank() -> (if (u.app.isNotBlank()) u.app + " \u00b7 " else "") + MagicHandLogic.preview(u.pointing, 60)
+        u.mode == MagicHandLogic.Mode.TEACH -> TEACH_HELLO
+        else -> HELLO
+    }
+
+    /** The search URL for grabbed text (DuckDuckGo: free, no key). */
+    fun searchUrl(text: String): String = "https://duckduckgo.com/?q=" + java.net.URLEncoder.encode(text.trim().take(300), "UTF-8")
+}

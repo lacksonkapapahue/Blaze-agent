@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -67,7 +68,7 @@ fun SkillLibraryPage(rows0: List<SkillLibrary.Row>? = null, open0: String = "", 
                     dim = !r.installed || !r.on, mono = true, onClick = { open = if (open == r.name) "" else r.name }) {
                     if (r.installed && !r.core) KitSwitch(r.on) { change { SkillLibrary.setOn(r.name, !r.on) } }
                 }
-                if (open == r.name) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+                if (open == r.name) Column(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
                     if (r.description.isNotBlank() && r.description.trim() != r.description.lineSequence().firstOrNull().orEmpty().trim()) Text(r.description, modifier = Modifier.padding(bottom = 10.dp),
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, lineHeight = 18.sp, color = c.body))
                     Label(when { r.core -> if (r.edited) "Core \u00b7 always on \u00b7 edited by you" else "Core \u00b7 always on"; !r.installed -> "Deleted \u00b7 bundled"; r.edited -> "Bundled \u00b7 edited by you"; r.bundled -> "Bundled"; else -> "Yours" },
