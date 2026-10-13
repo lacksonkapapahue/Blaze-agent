@@ -1032,7 +1032,8 @@ When you finish, say what you did in one short sentence.
             Voice.lastTurnByVoice = byVoice
             val shown = text.trim().ifEmpty { "Take a look at this." }
             LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
-            val id = add(Role.USER, shown, attachments.map { it.name })
+            // Files with a thumbnail first, so the bubble pairs thumbnails with their names (v0.24.6).
+            val id = add(Role.USER, shown, attachments.sortedBy { if (it.thumb != null) 0 else 1 }.map { it.name })
             attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
             historyMark[id] = history.length()
             // Heads-ups Blaze posted into this chat as notifications, and the one being replied to: the model
@@ -1467,7 +1468,7 @@ When you finish, say what you did in one short sentence.
                                 turnOk += ClaimGuard.Call(Flashcards.TOOL)
                                 textOut = ViewRouter.converted(deck, n, cards.size)
                                 reply.put("content", textOut)
-                                if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open("learn") }
+                                if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.openOrOffer("learn", "", lastUserText(), Modes.autopilot) }
                             }
                             ViewRouter.Fix.REPROMPT -> if (step < maxSteps - 3) {
                                 learnNudged = true
@@ -1906,27 +1907,19 @@ When you finish, say what you did in one short sentence.
                     if (v == null) "Unknown view. Pick one of: " + com.blaze.assistant.ui.Views.all.joinToString { it.id }
                     else {
                         add(Role.STEP, com.blaze.assistant.ui.Views.step(args))
-                        val go = if (args.optBoolean("ask") && !Modes.autopilot) {
-                            mood = Mood.IDLE
-                            val a = askUser("Switch to ${v.name}?" + args.optString("reason").let { if (it.isBlank()) "" else " $it" }, listOf("Switch", "Stay in chat"), title)
-                            mood = Mood.ACTING
-                            a.trim().startsWith("Switch", true) || a.trim().startsWith("yes", true)
-                        } else true
-                        if (!go) "The user chose to stay in the chat."
-                        else {
-                            // v0.23.2: Design with no target shows the current design (not an empty preview).
-                            val tgt = args.optString("target").ifBlank { if (v.id == "design") kotlinx.coroutines.withContext(Dispatchers.IO) { Designs.current()?.path }.orEmpty() else "" }
-                            kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open(v.id, tgt) }
-                            if (v.id == "design" && tgt.isBlank()) "Opened Design, but there is no design to show yet: make one with the design tool (action=create)."
-                            else "Opened ${v.name}" + (if (v.id == "design") " showing $tgt" else "") + ". The user can tap Exit to come back to the chat."
-                        }
+                        // v0.24.6: Blaze asks first with an "Open in <view>?" chip in the chat, unless the user asked for the view.
+                        val tgt = args.optString("target").ifBlank { if (v.id == "design") kotlinx.coroutines.withContext(Dispatchers.IO) { Designs.current()?.path }.orEmpty() else "" }
+                        val opened = if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.openOrOffer(v.id, tgt, lastUserText(), Modes.autopilot) } else false
+                        if (v.id == "design" && tgt.isBlank()) "There is no design to show yet: make one with the design tool (action=create)."
+                        else if (!opened) "Offered to open ${v.name} with an \u201c${com.blaze.assistant.ui.Views.offerLabel(v.id)}\u201d chip in the chat; the user opens it with one tap. Don't say it's already open."
+                        else "Opened ${v.name}" + (if (v.id == "design") " showing $tgt" else "") + ". The user can tap Exit to come back to the chat."
                     }
                 }
                 Designs.TOOL -> {
                     add(Role.STEP, Designs.step(args))
                     val out = kotlinx.coroutines.withContext(Dispatchers.IO) { Designs.run(args) }
-                    out.open?.let { path -> if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.open("design", path) } }
-                    out.text
+                    val opened = out.open?.let { path -> if (agentId == null) kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.ui.Views.openOrOffer("design", path, lastUserText(), Modes.autopilot) } else false }
+                    if (opened == false) out.text + "\n(Design isn't open yet: the user has an \u201cOpen in Design?\u201d chip in the chat.)" else out.text
                 }
                 "ask_user" -> {
                     val opts = args.optJSONArray("options")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList()

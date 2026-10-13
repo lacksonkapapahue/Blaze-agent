@@ -14,6 +14,9 @@ data class Provider(
 object Providers {
     const val CUSTOM = "custom"
     const val AUTO = "auto"
+    /** v0.24.6: Blaze Gateway, one endpoint holding Blaze's own free-tier keys; models are managed on its dashboard. */
+    const val GATEWAY = "gateway"
+    const val GATEWAY_BASE = "https://blaze-gateway.blaze-app.workers.dev/v1/"
     /** Keyless public endpoint used as the very last resort (chat only, no tools). */
     val keyless = Provider("pollinations", "Pollinations (keyless)", "https://text.pollinations.ai/openai/",
         "openai-fast", "", "", "")
@@ -22,6 +25,8 @@ object Providers {
         Provider(AUTO, "Auto (free routing)", "", "", "", "", ""),
         // Runs on this phone (agent/BlazeRouter.kt); its key is set when it starts.
         Provider("blazerouter", "BlazeRouter (on this phone)", "http://127.0.0.1:20128/v1/", "auto/best-free", "set automatically", "", ""),
+        // Signs in with your Blaze account (no key to paste); until you sign in, Auto (free) answers instead.
+        Provider(GATEWAY, "Blaze Gateway", GATEWAY_BASE, "blaze-auto", "your Blaze account", "", ""),
         Provider("gemini", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/",
             "gemini-3.8-flash", "AIza…", "https://aistudio.google.com/apikey",
             "https://aistudio.google.com/rate-limit?timeRange=last-28-days"),

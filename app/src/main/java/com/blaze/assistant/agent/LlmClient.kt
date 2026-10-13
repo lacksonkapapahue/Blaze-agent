@@ -24,7 +24,8 @@ object LlmClient {
         val p = Providers.byId(pid)
         val base = if (pid == Providers.CUSTOM) Settings.customBase else p.baseUrl
         val m = model?.takeIf { it.isNotBlank() } ?: Settings.modelFor(pid)
-        return Target(pid, base, if (pid == Providers.keyless.id) "" else KeyRing.active(pid, m), m)
+        val key = when (pid) { Providers.keyless.id -> ""; Providers.GATEWAY -> Settings.gatewayToken(); else -> KeyRing.active(pid, m) }
+        return Target(pid, base, key, m)
     }
 
     /** MAIN = the user's turn, STEPS = a turn right after a phone action, BACKGROUND = learning/summaries. */

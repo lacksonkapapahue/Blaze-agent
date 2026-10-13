@@ -77,9 +77,20 @@ object Settings {
         } catch (_: Exception) { }
     }
 
+    /**
+     * v0.24.6: with nothing picked yet, Blaze uses the Blaze Gateway (models are managed on its dashboard). Installs that
+     * never saved a provider but have a Gemini key keep Gemini (the old default). The gateway needs a signed-in Blaze
+     * account; until then Auto (free) answers. A saved choice is never changed.
+     */
     var providerId: String
-        get() = prefs.getString("provider", "gemini") ?: "gemini"
+        get() {
+            val v = prefs.getString("provider", null) ?: if (keyFor("gemini").isNotBlank()) "gemini" else Providers.GATEWAY
+            return if (v == Providers.GATEWAY && gatewayToken().isBlank()) Providers.AUTO else v
+        }
         set(v) = prefs.edit().putString("provider", v).apply()
+
+    /** The Blaze account session token the gateway takes as its API key ("" when signed out). */
+    fun gatewayToken(): String = try { com.blaze.assistant.connect.BlazeAccount.sessionToken() } catch (_: Throwable) { "" }
 
     val provider: Provider get() = Providers.byId(providerId)
 
@@ -150,7 +161,7 @@ object Settings {
         set(v) = prefs.edit().putBoolean("screen_memory", v).apply()
 
     var apiKey: String
-        get() = keyFor(providerId)
+        get() = if (providerId == Providers.GATEWAY) gatewayToken() else keyFor(providerId)
         set(v) = setKeyFor(providerId, v)
 
     var customBase: String
