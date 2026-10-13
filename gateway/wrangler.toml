@@ -1,0 +1,38 @@
+# Blaze Gateway. Free tier only: one Worker, one D1 database, Workers AI (10,000 Neurons/day free).
+name = "blaze-gateway"
+main = "src/index.ts"
+compatibility_date = "2025-10-01"
+account_id = "ef895b6795ee39066c863c39a42ec8b6"   # same Cloudflare account as blaze-auth
+workers_dev = true
+# Never log request bodies: observability stays off (console.error only prints error names).
+[observability]
+enabled = false
+
+# Workers AI: the last-resort fallback model, no key needed.
+[ai]
+binding = "AI"
+
+# Providers, encrypted keys, task routes, plans, usage counters, model health.
+# CI fills in database_id (it finds or creates "blaze-gateway"); locally: npx wrangler d1 create blaze-gateway
+[[d1_databases]]
+binding = "DB"
+database_name = "blaze-gateway"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# blaze-auth: sign-in for /admin and the /v1/me fallback. Workers can't fetch another
+# *.workers.dev Worker on the same account over the internet, so this is a service binding.
+[[services]]
+binding = "AUTH"
+service = "blaze-auth"
+
+# blaze-auth's KV namespace (sess:<hash>, user:<id>), read only by the gateway: checks a Blaze
+# token with two KV reads. Same id as Blaze-dekstop/cloud/wrangler.toml.
+[[kv_namespaces]]
+binding = "AUTH_KV"
+id = "03a2047f64234d28946816100f97e46a"
+
+# Secrets (never in this file): npx wrangler secret put <NAME>
+#   KEY_ENCRYPTION_SECRET   32+ random characters; encrypts provider keys (AES-GCM). Don't lose or change it.
+#   ADMIN_EMAILS            comma-separated Blaze account emails allowed into /admin
+#   ADMIN_TOKEN             optional, 24+ characters: admin sign-in without blaze-auth
