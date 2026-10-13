@@ -401,7 +401,7 @@ fun plusItems(work: String, approval: String, model: String, hasClipImage: Boole
 fun PlusMenu(items: List<PlusItem>, onPick: (String) -> Unit) {
     val c = LocalBlaze.current
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(c.raised)
-        .heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(top = 8.dp)) {
+        .heightIn(max = 480.dp).verticalScroll(rememberScrollState()).padding(top = 8.dp)) {
         Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 4.dp).size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(c.hair))
         items.forEach { it ->
             Row(Modifier.fillMaxWidth().clickable { onPick(it.id) }.padding(horizontal = 18.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {

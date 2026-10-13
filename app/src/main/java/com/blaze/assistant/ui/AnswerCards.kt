@@ -188,7 +188,7 @@ private fun TableGrid(rows: List<List<String>>) {
     Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
         Column(Modifier.clip(CardShape).background(cardFill())) {
             rows.forEachIndexed { r, row ->
-                Row(Modifier.background(if (r == 0) c.faint else Color.Transparent).then(if (r > 0) Modifier.hairlineTop(c.hair.copy(alpha = 0.6f)) else Modifier)) {
+                Row(Modifier.background(if (r == 0) c.faint else Color.Transparent).then(if (r > 0) Modifier.hairlineTop(c.hair.copy(alpha = c.hair.alpha * 0.7f)) else Modifier)) {
                     for (k in 0 until cols) {
                         val cell = row.getOrElse(k) { "" }
                         val shown = remember(cell, c.accent) { Md.render(cell, c.accent, c.hair.copy(alpha = 0.35f)) }
