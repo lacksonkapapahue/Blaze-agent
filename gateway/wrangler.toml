@@ -8,6 +8,11 @@ workers_dev = true
 [observability]
 enabled = false
 
+# Model discovery (src/catalog.ts). Every 30 min, but each run only refreshes providers whose list
+# is about a day old (one D1 read otherwise), so a fresh deploy gets its catalogue within 30 min.
+[triggers]
+crons = ["*/30 * * * *"]
+
 # Workers AI: the last-resort fallback model, no key needed.
 [ai]
 binding = "AI"

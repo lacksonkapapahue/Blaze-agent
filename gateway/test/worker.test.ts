@@ -34,6 +34,8 @@ async function admin(method: string, path: string, body?: unknown) {
 async function addKey(provider: string, key: string) {
   const r = await admin("POST", `providers/${provider}/keys`, { key });
   expect(r.status).toBe(200);
+  // Adding a key runs model discovery (GET …/models); keep chat-call counts about chat calls.
+  for (let i = calls.length - 1; i >= 0; i--) if (/\/models(\?|$)/.test(calls[i]!.url)) calls.splice(i, 1);
   return r.body;
 }
 
@@ -68,7 +70,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("basics", () => {
   it("health", async () => {
     const r = await call("GET", "/health");
-    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.1.0" });
+    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.2.0" });
   });
   it("app endpoints need a live Blaze session", async () => {
     expect((await call("GET", "/v1/models")).status).toBe(401);
@@ -342,5 +344,118 @@ describe("admin", () => {
     const s = await admin("GET", "state");
     expect(s.body.warnings.join(" ")).toContain("KEY_ENCRYPTION_SECRET");
     expect((await call("POST", `/admin/api/providers/groq/keys`, { key: "gsk_whatever_1234" }, ADMIN)).status).toBe(503);
+  });
+});
+
+describe("model discovery and the route editor API", () => {
+  const geminiList = { models: [
+    { name: "models/gemini-flash-latest", displayName: "Gemini Flash Latest", inputTokenLimit: 1048576, supportedGenerationMethods: ["generateContent"] },
+    { name: "models/gemini-3-pro-preview", displayName: "Gemini 3 Pro Preview", inputTokenLimit: 1048576, supportedGenerationMethods: ["generateContent"] },
+    { name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] },
+  ] };
+  const mistralList = { data: [
+    { id: "mistral-small-latest", max_context_length: 131072, capabilities: { completion_chat: true, function_calling: true, vision: true } },
+    { id: "codestral-latest", max_context_length: 256000, capabilities: { completion_chat: true, function_calling: true, vision: false } },
+  ] };
+  beforeEach(() => {
+    upstream = (url, init) => {
+      if (url.startsWith("https://generativelanguage.googleapis.com/v1beta/models")) return new Response(JSON.stringify(geminiList), { status: 200 });
+      if (url === "https://api.mistral.ai/v1/models") return new Response(JSON.stringify(mistralList), { status: 200 });
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      return okJSON(JSON.parse(String(init.body)).model);
+    };
+  });
+
+  it("adding a key finds the provider's models right away; the same key twice isn't duplicated", async () => {
+    const r = await admin("POST", "providers/gemini/keys", { key: "AIza-test-key-1234" });
+    expect(r.body).toMatchObject({ ok: true, masked: "••••1234", discovery: { ok: true, count: 2 } });
+    const g = calls.find(c => c.url.includes("generativelanguage.googleapis.com/v1beta/models"))!;
+    expect(g.url).toContain("pageSize=1000");
+    const again = await admin("POST", "providers/gemini/keys", { key: "AIza-test-key-1234" });
+    expect(again.body).toMatchObject({ ok: true, duplicate: true, id: r.body.id });
+    expect(db.rows("SELECT id FROM provider_keys WHERE provider_id = 'gemini'").length).toBe(1);
+    const other = await admin("POST", "providers/gemini/keys", { key: "AIza-other-key-9999" });
+    expect(other.body.duplicate).toBeUndefined();
+    expect(db.rows("SELECT id FROM provider_keys WHERE provider_id = 'gemini'").length).toBe(2);
+    const models = await admin("GET", "models");
+    expect(models.body.models.map((m: any) => m.id)).toEqual(["gemini-flash-latest"]); // the paid one is hidden
+    expect(models.body.models[0].name).toContain("sees images");
+    expect(db.rows("SELECT free FROM models WHERE model_id = 'gemini-3-pro-preview'")[0].free).toBe(0);
+    const s = await admin("GET", "state");
+    expect(s.body.discovery.find((d: any) => d.provider_id === "gemini")).toMatchObject({ ok: 1, count: 2, source: "api" });
+    expect(s.body.task_info.vision.needs).toBe("vision");
+  });
+
+  it("Find models per provider and for all; Workers AI uses the binding catalogue or the built-in list", async () => {
+    await addKey("mistral", "mistral-key-abcdef-9z9z");
+    const one = await admin("POST", "providers/mistral/discover");
+    expect(one.body).toMatchObject({ ok: true, count: 2, source: "api" });
+    const cf = await admin("POST", "providers/workers-ai/discover");
+    expect(cf.body.source).toBe("curated"); // FakeAI has no models()
+    expect(cf.body.count).toBeGreaterThan(10);
+    (ai as any).models = async () => [{ name: "@cf/meta/llama-3.1-8b-instruct-fast", task: { name: "Text Generation" }, properties: [] }];
+    expect((await admin("POST", "providers/workers-ai/discover")).body).toMatchObject({ ok: true, count: 1, source: "binding" });
+    const groq = await admin("POST", "providers/groq/discover");
+    expect(groq.body).toMatchObject({ ok: false, error: "Add a key first" });
+    const all = await admin("POST", "discover");
+    const ids = all.body.results.map((x: any) => x.provider);
+    expect(ids).toContain("mistral");
+    expect(ids).toContain("workers-ai");
+    expect(ids).not.toContain("groq"); // no key
+    upstream = () => new Response("nope", { status: 401 });
+    const bad = await admin("POST", "providers/mistral/discover");
+    expect(bad.body.ok).toBe(false);
+    expect(db.rows("SELECT COUNT(*) AS n FROM models WHERE provider_id = 'mistral'")[0].n).toBe(2); // old list kept
+  });
+
+  it("suggests a free lineup and can apply it", async () => {
+    await addKey("gemini", "AIza-test-key-1234");
+    await addKey("mistral", "mistral-key-abcdef-9z9z");
+    await admin("POST", "providers/workers-ai/discover");
+    const sug = await admin("POST", "routes/suggest", {});
+    expect(sug.body.applied).toBe(false);
+    expect(sug.body.routes.chat[0]).toEqual({ provider: "gemini", model: "gemini-flash-latest" });
+    expect(sug.body.routes.chat.at(-1).provider).toBe("workers-ai");
+    expect(sug.body.routes.code.slice(0, 3).map((c: any) => c.model)).toContain("codestral-latest");
+    expect(JSON.stringify(sug.body.routes)).not.toContain("gemini-3-pro-preview");
+    const before = (await admin("GET", "state")).body.routes.chat;
+    expect(before).not.toEqual(sug.body.routes.chat);
+    await admin("POST", "routes/suggest", { apply: true });
+    expect((await admin("GET", "state")).body.routes.chat).toEqual(sug.body.routes.chat);
+  });
+
+  it("free-only: paid OpenRouter / flagged models can't be saved and are never routed to", async () => {
+    expect((await admin("PUT", "routes/chat", { models: [{ provider: "openrouter", model: "openai/gpt-4o" }] })).status).toBe(400);
+    await addKey("gemini", "AIza-test-key-1234");
+    expect((await admin("PUT", "routes/chat", { models: [{ provider: "gemini", model: "gemini-3-pro-preview" }] })).status).toBe(400);
+    // An old route that still names a paid model (saved before discovery) is skipped at request time.
+    db.sqlite.prepare("UPDATE task_routes SET models = ?1 WHERE task = 'chat'").run(JSON.stringify([{ provider: "gemini", model: "gemini-3-pro-preview" }, { provider: "workers-ai", model: "@cf/x" }]));
+    resetDbCacheForTests();
+    calls.length = 0;
+    const r = await chat();
+    expect(r.headers.get("X-Blaze-Provider")).toBe("workers-ai");
+    expect(calls.length).toBe(0);
+  });
+
+  it("the cron refreshes stale lists only", async () => {
+    await addKey("mistral", "mistral-key-abcdef-9z9z");
+    calls.length = 0;
+    await worker.scheduled!({ cron: "*/30 * * * *", scheduledTime: Date.now(), noRetry() {} } as any, env, ctx as unknown as ExecutionContext);
+    await ctx.settle();
+    expect(calls.filter(c => c.url === "https://api.mistral.ai/v1/models").length).toBe(0); // just ran when the key was added
+    expect(db.rows("SELECT provider_id FROM discovery").map(r => r.provider_id)).toContain("workers-ai");
+    db.sqlite.exec("UPDATE discovery SET ran_at = 1");
+    await worker.scheduled!({ cron: "*/30 * * * *", scheduledTime: Date.now(), noRetry() {} } as any, env, ctx as unknown as ExecutionContext);
+    await ctx.settle();
+    expect(calls.filter(c => c.url === "https://api.mistral.ai/v1/models").length).toBe(1);
+  });
+
+  it("old routes without a models table entry keep working (backward compatible)", async () => {
+    await addKey("groq", "gsk_test_key_AAAA");
+    await setRoute("chat", [["groq", "anything-not-discovered"]]);
+    resetDbCacheForTests();
+    const r = await chat();
+    expect(r.status).toBe(200);
+    expect(r.headers.get("X-Blaze-Model")).toBe("anything-not-discovered");
   });
 });

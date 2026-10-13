@@ -1,5 +1,5 @@
 // Blaze Gateway: the Worker entry point.
-//   GET  /health                    {"ok":true,"service":"blaze-gateway","version":"0.1.0"}
+//   GET  /health                    {"ok":true,"service":"blaze-gateway","version":"0.2.0"}
 //   GET  /v1/models                 the task-tagged virtual models (Blaze account token)
 //   POST /v1/chat/completions       OpenAI-compatible, streaming or not (Blaze account token)
 //   GET  /admin                     the admin dashboard; /admin/api/* behind ADMIN_EMAILS / ADMIN_TOKEN
@@ -7,7 +7,9 @@
 import { handleAdminApi } from "./admin";
 import { adminPage } from "./admin-page";
 import { requireUser } from "./auth";
+import { discoverAll } from "./catalog";
 import { chatCompletions } from "./chat";
+import { loadConfig } from "./db";
 import { VERSION, type Env } from "./env";
 import { TASKS } from "./router";
 import { CORS, HttpError, apiError, json } from "./util";
@@ -69,5 +71,16 @@ export default {
       console.error("gateway error", (e as Error)?.name || "Error");
       return apiError(500, "internal_error", "Something went wrong in the gateway");
     }
+  },
+  /** Cron (wrangler.toml): model discovery for providers whose list is about a day old. */
+  async scheduled(_ev: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil((async () => {
+      try {
+        const cfg = await loadConfig(env.DB);
+        await discoverAll(env, [...cfg.providers.values()], cfg.keys, { onlyStale: true });
+      } catch (e) {
+        console.error("discovery cron", (e as Error)?.name || "Error");
+      }
+    })());
   },
 } satisfies ExportedHandler<Env>;

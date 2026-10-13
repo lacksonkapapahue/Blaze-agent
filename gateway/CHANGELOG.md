@@ -1,5 +1,27 @@
 # Blaze Gateway changelog
 
+## 0.2.0 (2026-10-14)
+
+- Model discovery: every provider's own model-list API (Gemini v1beta/models; OpenAI-style
+  `/models` for Groq, Cerebras, Mistral, OpenRouter, NVIDIA, GitHub Models; Workers AI through the
+  AI binding catalogue, curated list as fallback), cached in D1 (`migrations/0002_models.sql`:
+  `models`, `discovery`). Runs after a key is added, on "Find models", and from a cron (every
+  30 min, refreshing lists about a day old).
+- Free only: OpenRouter `:free` models only; known paid-only models are hidden, refused when
+  saving a route, and skipped at request time.
+- Route editor without memorised ids: plain-language task descriptions, friendly names,
+  searchable provider-grouped dropdowns filtered by capability (Vision only offers models that
+  see images), up / down / remove, raw ids behind a detail, "Suggest best free lineup", Save all.
+  The text editor stays under "advanced".
+- Fix: "Add key" now re-renders the provider card (the focused button used to block the
+  refresh, so the key looked unsaved and got added again); messages show inside the card; the
+  same key added twice is ignored (compared after decryption; same last 4 within a minute when a
+  row can't be decrypted).
+- Admin look: rounded everywhere, orange + blue accents.
+- New admin API: `GET /admin/api/models`, `POST /admin/api/providers/:id/discover`,
+  `POST /admin/api/discover`, `POST /admin/api/routes/suggest`. Existing API, `task_routes` and
+  routing are unchanged.
+
 ## 0.1.0 (2026-10-13)
 
 First version.

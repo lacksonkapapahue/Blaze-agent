@@ -1,5 +1,18 @@
 # Blaze Gateway status
 
+- **2026-10-14, v0.2.0 (branch `gateway-models`):** model discovery (D1 `models` / `discovery`,
+  migration 0002, cron `*/30` refreshing day-old lists), free-only rule (OpenRouter `:free`,
+  paid-only models never routed), friendly route editor with capability filters and "Suggest
+  best free lineup", Add-key re-render / in-card messages / duplicate-key guard. CI now deploys
+  from `main` (the Cloudflare secrets are set; the 2026-10-13 23:28 CAT workflow run deployed).
+  Live at `https://ai.blaze-app.workers.dev` and `https://blaze-gateway.blaze-app.workers.dev`.
+  Keys in D1: gemini, mistral (keep mistral key id 2; duplicates 3-7 were deleted by Luke).
+  - Watch: OpenRouter's `/models` JSON is ~1 MB; on the Workers Free 10 ms CPU limit its
+    discovery may hit the CPU cap once a key is added. If so, the error shows on the card and
+    the other providers are unaffected.
+  - Gemini free/paid flags are a name heuristic (Gemini 3 Pro, `-pro-preview`, deep-research
+    → paid). Re-check against ai.google.dev/pricing when Google changes tiers.
+
 - **Now:** v0.1.0 in `gateway/` of Blaze-agent (Luke's GitHub connector can't create new repos,
   so it lives here; it has its own workflow `.github/workflows/gateway.yml`, and the Android
   `build.yml` ignores `gateway/**`).

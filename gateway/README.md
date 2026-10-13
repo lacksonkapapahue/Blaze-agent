@@ -1,4 +1,4 @@
-# Blaze Gateway 0.1.0
+# Blaze Gateway 0.2.0
 
 One OpenAI-compatible endpoint for every Blaze app, so users never set up models or API keys.
 A Cloudflare Worker holds Blaze's own free-tier provider keys, picks the best model for each
@@ -101,9 +101,43 @@ blaze-auth `GET /v1/me` through the `AUTH` service binding (a Worker can't fetch
   20-sessions-per-account limit; Sign out ends it), or with the `ADMIN_TOKEN` secret.
 - **Health**: per model: last success / failure, cooldown and why, requests today (ok / fail,
   average latency), `test` (a 5-token completion through the real path) and `clear` cooldown.
-- **Routes**: one `provider model` per line per task; Reset to defaults.
+- **Routes**: per task (Chat, Quick, Code, Vision, Long, Agent) a plain-language description and an
+  ordered fallback list of friendly model names ("Gemini Flash (fast, sees images)"). Add from a
+  searchable dropdown grouped by provider (by default only models that fit the task: Vision shows
+  only models that see images, Agent only tool-calling ones, Long only large-context ones), move
+  up / down, remove; raw ids sit behind a small "id" detail. Slots are flagged when a model lacks
+  what the task needs, isn't in the provider's latest list, or its provider has no key yet.
+  **Suggest best free lineup** fills every task from discovered models (review, then Save all);
+  Reset to defaults; "advanced: edit as text" keeps the old `provider model` lines.
 - **Providers**: add / edit / disable (name, https base URL, type `openai` or `workers-ai`),
   several keys each, `test key` (`GET {base}/models`, no tokens spent), enable/disable/delete keys.
+  Adding the same key twice is a no-op (compared after decryption). **Find models** runs model
+  discovery for that provider; messages show inside the provider's card.
+
+## Model discovery (0.2.0)
+
+`src/catalog.ts` asks each provider's own model-list API and caches the chat models in D1
+`models` (provider, id, friendly name, capabilities `chat/vision/code/fast/long/tools`, context
+length, free flag) plus one `discovery` row per provider (when, how many, source, last error).
+
+| Provider | List API |
+| --- | --- |
+| Gemini | native `GET …/v1beta/models?pageSize=1000` (`x-goog-api-key`); `generateContent` models only |
+| Groq, Cerebras, Mistral, OpenRouter, NVIDIA, GitHub Models | `GET {base_url}/models` (Bearer key; OpenRouter's list is public) |
+| Workers AI | the AI binding's `models({task:"Text Generation"})`; a built-in curated list if that fails |
+
+- Embeddings, speech, image generation, moderation, guard and OCR models are dropped.
+- Capabilities come from provider metadata where given (Mistral `capabilities`, OpenRouter
+  `architecture` / `supported_parameters`, Workers AI properties, Gemini token limits), otherwise
+  from the model id.
+- **Free only:** OpenRouter keeps only `:free` models; Gemini models matching known paid-only
+  names (Gemini 3 Pro, `-pro-preview`, deep-research) are stored with `free = 0`, hidden in
+  `/admin`, refused by `PUT /routes/:task`, and skipped at request time even if an old route names
+  them. Free flags for Gemini are a name heuristic; check Google's pricing page if in doubt.
+- Runs right after a key is added, when **Find models** is pressed, and from the cron
+  (`*/30 * * * *`, but each provider is refreshed only when its list is ~20 h old, failed ones
+  after 6 h), so it's effectively daily. Routing never depends on the catalogue: routes whose
+  model isn't in `models` keep working exactly as before.
 - **Plans**: price label, messages/day, tokens/day; assign plans by email.
 
 Keys: AES-256-GCM, key derived with HKDF-SHA256 from the `KEY_ENCRYPTION_SECRET` Worker secret,
@@ -126,6 +160,9 @@ says so; add them again.
 | PUT | `/admin/api/routes/:task`, POST `/admin/api/routes/reset` | admin |
 | PUT | `/admin/api/plans/:id`, PUT `/admin/api/assignments` | admin |
 | POST | `/admin/api/test-model`, `/admin/api/cooldowns/clear`, `/admin/api/seed`, `/admin/api/logout` | admin |
+| GET | `/admin/api/models` (free discovered models + discovery status) | admin |
+| POST | `/admin/api/providers/:id/discover`, `/admin/api/discover` (all) | admin |
+| POST | `/admin/api/routes/suggest` `{apply?: true}` (best free lineup per task) | admin |
 
 ## Develop
 
@@ -133,7 +170,7 @@ says so; add them again.
 cd gateway
 npm ci
 npx tsc --noEmit        # type check (src/)
-npx vitest run          # 44 tests: router, quota, crypto, and the Worker end to end
+npx vitest run          # 59 tests: router, quota, crypto, catalogue, and the Worker end to end
 npx wrangler dev        # local; put KEY_ENCRYPTION_SECRET etc. in gateway/.dev.vars (git-ignored)
 ```
 
@@ -154,4 +191,5 @@ Scout), so it's only the fallback. KV reads (token checks) come from blaze-auth'
 plan, classify (pure) · `src/providers.ts` OpenAI-compatible + Workers AI adapters ·
 `src/quota.ts` plans · `src/auth.ts` Blaze tokens, admins · `src/crypto.ts` AES-GCM ·
 `src/db.ts` D1 · `src/admin.ts` admin API · `src/admin-page.ts` the page ·
-`src/defaults.ts` seed providers / routes / plans · `migrations/0001_init.sql` schema.
+`src/defaults.ts` seed providers / routes / plans · `src/catalog.ts` model discovery, capabilities,
+free-only rule, suggested lineups · `migrations/0001_init.sql` schema, `0002_models.sql` catalogue.
