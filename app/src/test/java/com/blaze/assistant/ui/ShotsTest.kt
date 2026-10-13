@@ -569,24 +569,47 @@ class ShotsTest {
         }
     }
 
-    // v0.24.5: the spark-blob pointer on light, dark and busy backgrounds, gliding and clicking, plus the "Click '…'?" check.
-    @Test fun pointerBlob() = shot("44-pointer-blob") {
-        val G = androidx.compose.ui.graphics.Color
-        fun T(t: String, col: androidx.compose.ui.graphics.Color) = androidx.compose.material3.Text(t, style = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = col))
+    // v0.24.5: the mascot pointer on light, dark and busy backgrounds, gliding and clicking, plus the "Click '…'?" check.
+    @Test fun pointerMascot() = shot("44-pointer-mascot") {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().weight(1f).background(G(0xFFF4F4F4))) {
-                Column(Modifier.padding(top = 96.dp, start = 18.dp)) { T("Light app · Blaze gliding", G(0xFF1D1A16)) }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFFF4F4F4))) {
+                Text("Light app \u00b7 Blaze gliding", Modifier.padding(top = 96.dp, start = 18.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color(0xFF1D1A16)))
                 PointerGlyph(pulse = 1.06f, modifier = Modifier.padding(start = 150.dp, top = 140.dp))
-                Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = androidx.compose.ui.Alignment.TopCenter) { PointerCheck("Click \u2018Add to cart\u2019?") }
+                Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = Alignment.TopCenter) { PointerCheck("Click \u2018Add to cart\u2019?") }
             }
-            Box(Modifier.fillMaxWidth().weight(1f).background(G(0xFF111110))) {
-                Column(Modifier.padding(top = 20.dp, start = 18.dp)) { T("Dark app · clicking (squish)", G(0xFFEDEDED)) }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFF111110))) {
+                Text("Dark app \u00b7 clicking (squish)", Modifier.padding(top = 20.dp, start = 18.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color(0xFFEDEDED)))
                 PointerGlyph(ripple = 0.5f, modifier = Modifier.padding(start = 210.dp, top = 70.dp))
             }
-            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(G(0xFF1F4BD8), G(0xFFE8743B), G(0xFF2E7D32))))) {
-                Column(Modifier.padding(top = 20.dp, start = 18.dp)) { T("Busy photo · paused (you have it)", G.White) }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(
+                androidx.compose.ui.graphics.Color(0xFF1F4BD8), androidx.compose.ui.graphics.Color(0xFFE8743B), androidx.compose.ui.graphics.Color(0xFF2E7D32))))) {
+                Text("Busy photo \u00b7 paused (you have it)", Modifier.padding(top = 20.dp, start = 18.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color.White))
                 PointerGlyph(paused = true, modifier = Modifier.padding(start = 120.dp, top = 70.dp))
             }
+        }
+    }
+
+    // v0.24.5: the real launcher icon (adaptive background + foreground), the themed-icon silhouette and the
+    // notification icon, rendered from res/drawable, next to the mascot pointer drawn big.
+    @Test fun mascotIcons() = shot("45-mascot-icons") {
+        val R = com.blaze.assistant.R.drawable
+        Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF212226)).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text("Launcher icon", style = TextStyle(fontSize = 13.sp, color = androidx.compose.ui.graphics.Color(0xFFBBBBBB)))
+            Box(Modifier.size(216.dp)) {
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_launcher_background), null, Modifier.size(216.dp))
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_launcher_foreground), null, Modifier.size(216.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Box(Modifier.size(108.dp).background(androidx.compose.ui.graphics.Color(0xFFDDE3F0))) {
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_launcher_monochrome), null, Modifier.size(108.dp),
+                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.ui.graphics.Color(0xFF2A3550)))
+                }
+                Box(Modifier.size(108.dp).background(androidx.compose.ui.graphics.Color(0xFF333333)), contentAlignment = Alignment.Center) {
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_stat_blaze), null, Modifier.size(72.dp))
+                }
+                PointerGlyph(scale = 1.7f)
+            }
+            Text("Themed icon \u00b7 notification icon \u00b7 pointer", style = TextStyle(fontSize = 13.sp, color = androidx.compose.ui.graphics.Color(0xFFBBBBBB)))
         }
     }
 

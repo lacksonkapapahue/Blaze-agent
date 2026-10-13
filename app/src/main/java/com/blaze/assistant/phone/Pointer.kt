@@ -31,8 +31,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * A small bar offers Resume and Stop while paused.
  *
  * v0.24.4: always on while Blaze controls apps (every tap, long-press, swipe and type focus glides it first), a 64 dp
- * window drawn as Blaze's spark blob mascot (white outline, soft shadow, a tip marker where it clicks, a pulse while
- * moving and a squish on click) that stays on screen until the task ends, and a manual double-tap is checked first: Blaze reads what's under the tip and shows
+ * window drawn as Blaze's flame mascot (gradient, eyes, glow, white edge and soft shadow; the flame tip is the click
+ * point; a pulse while moving and a squish on click) that stays on screen until the task ends, and a manual double-tap is checked first: Blaze reads what's under the tip and shows
  * "Click '…'?" for ~1.5 s (Cancel stops it), or asks when it's unclear or risky (pay / send / delete…).
  *
  * Light on purpose (Galaxy A12): plain Views in accessibility overlay windows, no Compose, and it only
@@ -60,12 +60,13 @@ object Pointer {
 
     /** The pointer window = its touch target, in dp (v0.24.4: 64 dp, was 44; Luke asked for at least ~56). */
     const val TOUCH_DP = 64
-    /** The spark blob mascot drawn inside it (v0.24.4, replaces the arrow nobody could see), in dp. */
-    const val BLOB_DP = 48
-    /** Where the click lands: the tip marker, this far from the window's top-left corner, in dp. */
-    const val TIP_DP = 7
-    /** The blob's centre, from the window's top-left, in dp (the blob sits down-right of the tip). */
-    const val BLOB_CENTER_DP = TOUCH_DP - BLOB_DP / 2f - 2f
+    /** Blaze's mascot drawn inside it (v0.24.5, Luke's flame art; replaces the arrow nobody could see): tip to bottom, in dp. */
+    const val MASCOT_DP = 52
+    /** Mascot units (body radius) in dp. */
+    val UNIT_DP: Float get() = MASCOT_DP / Mascot.HEIGHT
+    /** The click point = the flame tip, from the window's top-left, in dp. */
+    const val TIP_Y_DP = 6f
+    val TIP_X_DP: Float get() = TOUCH_DP / 2f + Mascot.TIP[0] * UNIT_DP
 
     /** Light "I'm moving" pulse: 1.0 → 1.07 and back every 600 ms while gliding. */
     fun pulseScale(ms: Long): Float = 1f + 0.035f * (1f - kotlin.math.cos(ms % 600 / 600f * 2f * Math.PI.toFloat()))
@@ -352,39 +353,39 @@ object Pointer {
     }
 
     /**
-     * The pointer (v0.24.4): Blaze's spark blob (same art as the app icon) with a white outline and a soft shadow,
-     * down-right of a small tip marker (accent dot in a white ring) that shows exactly where the click lands.
-     * It pulses lightly while gliding, squishes when it clicks, and the spark turns orange while the user has it.
+     * The pointer (v0.24.5): Blaze's mascot (phone/Mascot.kt): the flame body with its orange → blue gradient and cyan
+     * middle, two dark eyes, a soft orange / blue glow, a thin white edge and a soft shadow so it reads on any app.
+     * The flame tip is the click point (a tiny white dot marks it). It pulses lightly while gliding, squishes on click
+     * (around the tip, so the click point never moves), and its edge turns orange while the user holds it.
      * Stays on screen until the task ends (Pointer.done).
      */
     private class Dot(ctx: Context, val d: Float) : View(ctx) {
-        val tipX = TIP_DP * d; val tipY = TIP_DP * d
-        private val cx = BLOB_CENTER_DP * d; private val cy = BLOB_CENTER_DP * d
-        private val blobPx = BLOB_DP * d
+        val tipX = TIP_X_DP * d; val tipY = TIP_Y_DP * d
+        private val k = UNIT_DP * d
         var paused = false
         private var rippleStart = 0L; private var rippleMs = 0L
         private var moveStart = 0L
-        private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SparkBlob.INK; style = Paint.Style.FILL
-            setShadowLayer(4 * d, 0f, 1.5f * d, Color.argb(110, 0, 0, 0)) }
-        private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SparkBlob.INK; style = Paint.Style.FILL }
-        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2.5f * d; strokeJoin = Paint.Join.ROUND }
-        private val sparkP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SparkBlob.SPARK; style = Paint.Style.FILL }
-        private val tipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT; style = Paint.Style.FILL }
-        private val tipRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL
-            setShadowLayer(2 * d, 0f, 0.5f * d, Color.argb(120, 0, 0, 0)) }
-        private val stem = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2 * d; strokeCap = Paint.Cap.ROUND }
+        private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(70, 0, 0, 0); style = Paint.Style.FILL
+            setShadowLayer(3.5f * d, 0f, 1.5f * d, Color.argb(120, 0, 0, 0)) }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val hi = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND }
+        private val eye = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Mascot.EYE; style = Paint.Style.FILL }
+        private val tipDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL
+            setShadowLayer(1.2f * d, 0f, 0f, Color.argb(160, 0, 0, 0)) }
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT; style = Paint.Style.STROKE; strokeWidth = 2.5f * d }
-        private val blobPath = Path(); private val sparkPath = Path()
+        private val bodyPath = Path()
+        private val rect = android.graphics.RectF()
 
         init { setLayerType(LAYER_TYPE_SOFTWARE, null) }   // shadow layers on paths; the view is only 64 dp
 
         fun moving(on: Boolean) { moveStart = if (on) SystemClock.uptimeMillis() else 0L; invalidate() }
         fun ripple(ms: Long) { rippleStart = SystemClock.uptimeMillis(); rippleMs = ms; invalidate() }
 
-        private fun build(p: Path, s: SparkBlob.Shape, size: Float, sx: Float, sy: Float) {
-            p.reset()
-            SparkBlob.walk(s, cx, cy, size, sx, sy, { x, y -> p.moveTo(x, y) }, { a, b, c2, d2, e, f -> p.cubicTo(a, b, c2, d2, e, f) })
-            p.close()
+        private fun radial(at: FloatArray, r: Float, color: Int, sx: Float, sy: Float): android.graphics.RadialGradient {
+            val c = Mascot.at(at, tipX, tipY, k, sx, sy)
+            return android.graphics.RadialGradient(c[0], c[1], r * k * maxOf(sx, sy), color, color and 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP)
         }
 
         override fun onDraw(c: Canvas) {
@@ -392,21 +393,37 @@ object Pointer {
             val t = if (rippleMs > 0) (now - rippleStart).toFloat() / rippleMs else 2f
             var (sx, sy) = squish(t)
             if (moveStart > 0) { val p = pulseScale(now - moveStart); sx *= p; sy *= p }
-            // Stem from the tip marker to the blob, then the tip marker itself.
-            c.drawLine(tipX, tipY, cx - blobPx * 0.28f, cy - blobPx * 0.28f, stem)
-            build(blobPath, SparkBlob.blob, blobPx, sx, sy)
-            build(sparkPath, SparkBlob.spark, blobPx, sx, sy)
-            c.drawPath(blobPath, shadow)
-            c.drawPath(blobPath, ink)
-            c.drawPath(blobPath, edge)
-            sparkP.color = if (paused) SparkBlob.SPARK_PAUSED else SparkBlob.SPARK
-            c.drawPath(sparkPath, sparkP)
-            c.drawCircle(tipX, tipY, 4.5f * d, tipRing)
-            tipFill.color = if (paused) SparkBlob.SPARK_PAUSED else ACCENT
-            c.drawCircle(tipX, tipY, 2.8f * d, tipFill)
+            bodyPath.reset()
+            Mascot.walk(Mascot.body, tipX, tipY, k, sx, sy, move = { x, y -> bodyPath.moveTo(x, y) },
+                cubic = { a, b, c2, d2, e, f -> bodyPath.cubicTo(a, b, c2, d2, e, f) })
+            bodyPath.close()
+            // Glow (blue around the body, orange around the tip), then a soft shadow, the gradient body and its cyan middle.
+            val gb = Mascot.at(Mascot.GLOW_BLUE_AT, tipX, tipY, k, sx, sy)
+            glow.shader = radial(Mascot.GLOW_BLUE_AT, Mascot.GLOW_BLUE_R, Mascot.GLOW_BLUE, sx, sy)
+            c.drawCircle(gb[0], gb[1], Mascot.GLOW_BLUE_R * k * maxOf(sx, sy), glow)
+            val go = Mascot.at(Mascot.GLOW_ORANGE_AT, tipX, tipY, k, sx, sy)
+            glow.shader = radial(Mascot.GLOW_ORANGE_AT, Mascot.GLOW_ORANGE_R, Mascot.GLOW_ORANGE, sx, sy)
+            c.drawCircle(go[0], go[1], Mascot.GLOW_ORANGE_R * k * maxOf(sx, sy), glow)
+            c.drawPath(bodyPath, shadow)
+            val top = Mascot.at(floatArrayOf(0f, Mascot.GRAD_TOP), tipX, tipY, k, sx, sy)
+            val bot = Mascot.at(floatArrayOf(0f, Mascot.GRAD_BOTTOM), tipX, tipY, k, sx, sy)
+            fill.shader = android.graphics.LinearGradient(top[0], top[1], bot[0], bot[1], Mascot.COLORS, Mascot.STOPS, android.graphics.Shader.TileMode.CLAMP)
+            c.drawPath(bodyPath, fill)
+            hi.shader = radial(Mascot.HIGHLIGHT_AT, Mascot.HIGHLIGHT_R, Mascot.HIGHLIGHT, sx, sy)
+            c.drawPath(bodyPath, hi)
+            edge.color = if (paused) Mascot.PAUSED else Color.argb(215, 255, 255, 255)
+            edge.strokeWidth = (if (paused) 2.5f else 1.5f) * d
+            c.drawPath(bodyPath, edge)
+            for (e in Mascot.EYES) {
+                val p = Mascot.at(e, tipX, tipY, k, sx, sy)
+                val w = Mascot.EYE_W * k * sx / 2; val h = Mascot.EYE_H * k * sy / 2
+                rect.set(p[0] - w, p[1] - h, p[0] + w, p[1] + h)
+                c.drawRoundRect(rect, Mascot.EYE_R * k, Mascot.EYE_R * k, eye)
+            }
+            c.drawCircle(tipX, tipY, 1.6f * d, tipDot)
             if (t <= 1f) {
                 ring.alpha = ((1 - t) * 255).toInt()
-                c.drawCircle(tipX, tipY, (5 + 12 * t) * d, ring)
+                c.drawCircle(tipX, tipY, (4 + 12 * t) * d, ring)
             } else rippleMs = 0
             if (t <= 1f || moveStart > 0) postInvalidateOnAnimation()
         }

@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeJoin
@@ -21,37 +22,45 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The pointer as drawn by phone/Pointer.kt (v0.24.4: Blaze's spark blob with a white outline, soft shadow and a tip
- * marker), from the same geometry ([com.blaze.assistant.phone.SparkBlob]), for screenshots. [ripple] 0..1 draws the
- * click ring and the squish; [pulse] is the gliding scale.
+ * The pointer as drawn by phone/Pointer.kt (v0.24.5: Blaze's flame mascot, gradient, eyes, glow, white edge; the tip is
+ * the click point), from the same geometry ([com.blaze.assistant.phone.Mascot]), for screenshots. [ripple] 0..1 draws
+ * the click ring and the squish; [pulse] is the gliding scale. [sizeDp] lets the icon shots draw it bigger.
  */
 @Composable
-fun PointerGlyph(paused: Boolean = false, ripple: Float = -1f, pulse: Float = 1f, modifier: Modifier = Modifier) {
+fun PointerGlyph(paused: Boolean = false, ripple: Float = -1f, pulse: Float = 1f, modifier: Modifier = Modifier, scale: Float = 1f) {
     val P = com.blaze.assistant.phone.Pointer
-    val B = com.blaze.assistant.phone.SparkBlob
-    Canvas(modifier.size(P.TOUCH_DP.dp)) {
-        val d = density
-        val tx = P.TIP_DP * d; val ty = P.TIP_DP * d
-        val cx = P.BLOB_CENTER_DP * d; val cy = P.BLOB_CENTER_DP * d
-        val px = P.BLOB_DP * d
+    val M = com.blaze.assistant.phone.Mascot
+    Canvas(modifier.size((P.TOUCH_DP * scale).dp)) {
+        val d = density * scale
+        val tx = P.TIP_X_DP * d; val ty = P.TIP_Y_DP * d
+        val k = P.UNIT_DP * d
         val (sq1, sq2) = P.squish(ripple)
         val sx = sq1 * pulse; val sy = sq2 * pulse
-        fun path(sh: com.blaze.assistant.phone.SparkBlob.Shape, ox: Float = 0f, oy: Float = 0f) = Path().apply {
-            B.walk(sh, cx + ox, cy + oy, px, sx, sy, { x, y -> moveTo(x, y) }, { a1, b1, c1, d1, e1, f1 -> cubicTo(a1, b1, c1, d1, e1, f1) })
+        fun at(u: FloatArray) = M.at(u, tx, ty, k, sx, sy).let { Offset(it[0], it[1]) }
+        val body = Path().apply {
+            M.walk(M.body, tx, ty, k, sx, sy, move = { x, y -> moveTo(x, y) }, cubic = { a1, b1, c1, d1, e1, f1 -> cubicTo(a1, b1, c1, d1, e1, f1) })
             close()
         }
-        val accent = Color(0xFF1F4BD8)
-        drawLine(Color.White, Offset(tx, ty), Offset(cx - px * 0.28f, cy - px * 0.28f), strokeWidth = 2 * d, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-        // Soft shadow: a few offset, fading copies under the blob.
-        for (i in 3 downTo 1) drawPath(path(B.blob, 0f, 0.6f * i * d), Color.Black.copy(alpha = 0.07f), style = Stroke(1.6f * i * d, join = StrokeJoin.Round))
-        val blob = path(B.blob)
-        drawPath(blob, Color(B.INK))
-        drawPath(blob, Color.White, style = Stroke(2.5f * d, join = StrokeJoin.Round))
-        drawPath(path(B.spark), Color(if (paused) B.SPARK_PAUSED else B.SPARK))
-        drawCircle(Color.Black.copy(alpha = 0.18f), 5.2f * d, Offset(tx, ty + 0.5f * d))
-        drawCircle(Color.White, 4.5f * d, Offset(tx, ty))
-        drawCircle(if (paused) Color(B.SPARK_PAUSED) else accent, 2.8f * d, Offset(tx, ty))
-        if (ripple in 0f..1f) drawCircle(accent.copy(alpha = 1 - ripple), radius = (5 + 12 * ripple) * d, center = Offset(tx, ty), style = Stroke(2.5f * d))
+        fun glow(u: FloatArray, r: Float, c: Int) {
+            val col = Color(c); val o = at(u); val rr = r * k * maxOf(sx, sy)
+            drawCircle(Brush.radialGradient(listOf(col, col.copy(alpha = 0f)), center = o, radius = rr), rr, o)
+        }
+        glow(M.GLOW_BLUE_AT, M.GLOW_BLUE_R, M.GLOW_BLUE)
+        glow(M.GLOW_ORANGE_AT, M.GLOW_ORANGE_R, M.GLOW_ORANGE)
+        for (i in 3 downTo 1) drawPath(body, Color.Black.copy(alpha = 0.06f), style = Stroke(1.4f * i * d, join = StrokeJoin.Round))
+        drawPath(body, Brush.verticalGradient(*M.STOPS.indices.map { M.STOPS[it] to Color(M.COLORS[it]) }.toTypedArray(),
+            startY = at(floatArrayOf(0f, M.GRAD_TOP)).y, endY = at(floatArrayOf(0f, M.GRAD_BOTTOM)).y))
+        val hc = Color(M.HIGHLIGHT)
+        drawPath(body, Brush.radialGradient(listOf(hc, hc.copy(alpha = 0f)), center = at(M.HIGHLIGHT_AT), radius = M.HIGHLIGHT_R * k * maxOf(sx, sy)))
+        drawPath(body, if (paused) Color(M.PAUSED) else Color.White.copy(alpha = 0.85f), style = Stroke((if (paused) 2.5f else 1.5f) * d, join = StrokeJoin.Round))
+        for (e in M.EYES) {
+            val c = at(e); val w = M.EYE_W * k * sx; val h = M.EYE_H * k * sy
+            drawRoundRect(Color(M.EYE), Offset(c.x - w / 2, c.y - h / 2), androidx.compose.ui.geometry.Size(w, h),
+                androidx.compose.ui.geometry.CornerRadius(M.EYE_R * k, M.EYE_R * k))
+        }
+        drawCircle(Color.Black.copy(alpha = 0.3f), 2.1f * d, Offset(tx, ty))
+        drawCircle(Color.White, 1.6f * d, Offset(tx, ty))
+        if (ripple in 0f..1f) drawCircle(Color(0xFF1F4BD8).copy(alpha = 1 - ripple), radius = (4 + 12 * ripple) * d, center = Offset(tx, ty), style = Stroke(2.5f * d))
     }
 }
 

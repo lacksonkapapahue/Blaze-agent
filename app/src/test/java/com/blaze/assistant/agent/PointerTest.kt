@@ -39,22 +39,28 @@ class PointerTest {
     @Test fun alwaysOnAndEasyToGrab() {
         assertTrue(Pointer.enabled)                       // agent taps always show it; show_pointer is ignored
         assertTrue(Pointer.TOUCH_DP >= 56)
-        assertTrue(Pointer.BLOB_DP in 48..56)
-        // The blob fits in the window, and the tip marker sits up-left of it, outside the blob.
-        assertTrue(Pointer.BLOB_CENTER_DP + Pointer.BLOB_DP / 2f <= Pointer.TOUCH_DP)
-        assertTrue(Pointer.TIP_DP < Pointer.BLOB_CENTER_DP - Pointer.BLOB_DP / 2f + 4)
+        assertTrue(Pointer.MASCOT_DP in 48..56)
+        // The mascot fits in the window below its tip, and the tip (click point) sits near the top.
+        assertTrue(Pointer.TIP_Y_DP + Pointer.MASCOT_DP <= Pointer.TOUCH_DP)
+        assertTrue(Pointer.TIP_X_DP in 30f..40f)
     }
 
-    @Test fun sparkBlobIsTheIconArt() {
-        val b = com.blaze.assistant.phone.SparkBlob.bounds(com.blaze.assistant.phone.SparkBlob.blob)
-        assertTrue(b[2] - b[0] in 50f..58f); assertTrue(b[3] - b[1] in 50f..58f)
-        val sp = com.blaze.assistant.phone.SparkBlob.bounds(com.blaze.assistant.phone.SparkBlob.spark)
-        assertEquals(28f, sp[2] - sp[0], 0.01f)
-        // Walking it at 48 px centred on (100, 100) stays within ~half its size of the centre.
-        var minX = 1e9f; var maxX = -1e9f
-        com.blaze.assistant.phone.SparkBlob.walk(com.blaze.assistant.phone.SparkBlob.blob, 100f, 100f, 48f, move = { x, _ -> minX = minOf(minX, x); maxX = maxOf(maxX, x) },
-            cubic = { _, _, _, _, x, _ -> minX = minOf(minX, x); maxX = maxOf(maxX, x) })
-        assertTrue(minX > 70f && maxX < 130f && maxX - minX > 40f)
+    @Test fun mascotIsLukesFlame() {
+        val M = com.blaze.assistant.phone.Mascot
+        val b = M.bounds(M.body)
+        assertEquals(-1f, b[0], 0.01f); assertEquals(1f, b[2], 0.01f); assertEquals(1f, b[3], 0.01f)   // round body, radius 1
+        assertTrue(b[1] < -1.5f)                                                                        // the flame rises above it
+        assertTrue(M.TIP[0] > 0f && M.TIP[1] < -1.5f)                                                   // tip at the top right
+        assertEquals(M.HEIGHT, 1f - M.TIP[1], 0.01f)
+        assertEquals(2, M.EYES.size); assertTrue(M.EYES.all { it[1] < 0f && it[1] > -0.4f })
+        assertEquals(M.STOPS.size, M.COLORS.size)
+        assertTrue((M.COLORS.first() shr 16 and 0xFF) > 0xF0)          // orange (red-heavy) at the top
+        assertTrue((M.COLORS.last() and 0xFF) > 0xF0)                  // blue at the bottom
+        // Walking it anchored at the tip puts the tip exactly on the anchor, and squish keeps it there.
+        val p = M.at(M.TIP, 100f, 50f, 20f, 1.2f, 0.8f); assertEquals(100f, p[0], 0.001f); assertEquals(50f, p[1], 0.001f)
+        var maxY = -1e9f
+        M.walk(M.body, 100f, 50f, 20f, move = { _, y -> maxY = maxOf(maxY, y) }, cubic = { _, _, _, _, _, y -> maxY = maxOf(maxY, y) })
+        assertEquals(50f + M.HEIGHT * 20f, maxY, 0.6f)
     }
 
     @Test fun pulseAndSquishStayLight() {

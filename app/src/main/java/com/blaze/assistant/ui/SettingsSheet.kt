@@ -281,7 +281,7 @@ private fun ControlPage(a11yOn: Boolean, onOpenAccessibility: () -> Unit) {
     Spacer(Modifier.height(8.dp))
     ToggleRow("Phone control", "Open apps, tap, type and scroll for you", control) { control = !control; Settings.phoneControl = control }
     // v0.24.5: the pointer is always shown while Blaze controls apps (no switch; the old show_pointer pref is ignored).
-    Text("Blaze's spark-blob pointer is always on screen while it controls your phone. Touch the screen to pause it, drag the pointer, double-tap to click there.",
+    Text("Blaze's mascot pointer is always on screen while it controls your phone. Touch the screen to pause it, drag the pointer, double-tap to click there.",
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.weak))
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth().hairline(if (a11yOn) c.hair else c.accent).clickable(onClick = onOpenAccessibility).padding(16.dp),
