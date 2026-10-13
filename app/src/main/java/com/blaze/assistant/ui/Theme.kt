@@ -108,7 +108,37 @@ fun BlazeTheme(content: @Composable () -> Unit) {
     val sys = isSystemInDarkTheme()
     val dark = when (ThemeMode.mode.value) { "dark" -> true; "light" -> false; else -> sys }
     val c = if (dark) DarkColors else LightColors
-    CompositionLocalProvider(LocalBlaze provides c, content = content)
+    // v0.24.5: Material's own colours mapped to Blaze, so no default purple / lavender can leak into anything Material draws.
+    androidx.compose.material3.MaterialTheme(colorScheme = blazeScheme(dark)) {
+        CompositionLocalProvider(LocalBlaze provides c, content = content)
+    }
+}
+
+/** Material colour scheme from Blaze's tokens (v0.24.5): blue primary, orange secondary, Blaze surfaces; never purple. */
+fun blazeScheme(dark: Boolean): androidx.compose.material3.ColorScheme {
+    val blue = Color(0xFF4C7DFF); val orange = Color(0xFFFF9A3C)
+    return if (dark) androidx.compose.material3.darkColorScheme(
+        primary = blue, onPrimary = Color.White, primaryContainer = Color(0xFF1E2A4A), onPrimaryContainer = Color(0xFFDCE4FF),
+        secondary = orange, onSecondary = Color(0xFF1A1206), secondaryContainer = Color(0xFF3A2814), onSecondaryContainer = Color(0xFFFFE2C8),
+        tertiary = blue, onTertiary = Color.White, tertiaryContainer = Color(0xFF1E2A4A), onTertiaryContainer = Color(0xFFDCE4FF),
+        background = DarkColors.paper, onBackground = DarkColors.ink, surface = Color(0xFF16171A), onSurface = DarkColors.ink,
+        surfaceVariant = Color(0xFF2E2E33), onSurfaceVariant = DarkColors.sub, surfaceTint = Color.Transparent,
+        inverseSurface = LightColors.paper, inverseOnSurface = LightColors.ink, inversePrimary = Color(0xFF1F4BD8),
+        outline = Color(0x40F0F0EE), outlineVariant = Color(0x1FF0F0EE), scrim = Color.Black,
+        surfaceBright = Color(0xFF2E2E33), surfaceDim = Color(0xFF111214), surfaceContainerLowest = Color(0xFF0F1012),
+        surfaceContainerLow = Color(0xFF141518), surfaceContainer = Color(0xFF16171A), surfaceContainerHigh = Color(0xFF1C1D21),
+        surfaceContainerHighest = Color(0xFF232428), error = Color(0xFFFF6B5E), onError = Color.White)
+    else androidx.compose.material3.lightColorScheme(
+        primary = Color(0xFF1F4BD8), onPrimary = Color.White, primaryContainer = Color(0xFFE3E9FF), onPrimaryContainer = Color(0xFF0B1E5C),
+        secondary = Color(0xFFE8743B), onSecondary = Color.White, secondaryContainer = Color(0xFFFFE6D6), onSecondaryContainer = Color(0xFF4A2410),
+        tertiary = Color(0xFF1F4BD8), onTertiary = Color.White, tertiaryContainer = Color(0xFFE3E9FF), onTertiaryContainer = Color(0xFF0B1E5C),
+        background = LightColors.paper, onBackground = LightColors.ink, surface = Color(0xFFFFFFFF), onSurface = LightColors.ink,
+        surfaceVariant = Color(0xFFF1F1F0), onSurfaceVariant = LightColors.sub, surfaceTint = Color.Transparent,
+        inverseSurface = Color(0xFF16171A), inverseOnSurface = DarkColors.ink, inversePrimary = blue,
+        outline = Color(0x40111110), outlineVariant = Color(0x1F111110), scrim = Color.Black,
+        surfaceBright = Color.White, surfaceDim = Color(0xFFEDEDEC), surfaceContainerLowest = Color.White,
+        surfaceContainerLow = Color(0xFFFAFAFA), surfaceContainer = Color(0xFFF6F6F5), surfaceContainerHigh = Color(0xFFF1F1F0),
+        surfaceContainerHighest = Color(0xFFECECEB), error = Color(0xFFD93A2B), onError = Color.White)
 }
 
 /** Sun/moon: tap flips light and dark, long-press goes back to following the phone. */

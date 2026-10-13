@@ -1792,10 +1792,28 @@ When you finish, say what you did in one short sentence.
             return when (e) {
                 null -> { if (wasPaused) orient.pkg = ""; null }
                 is com.blaze.assistant.phone.Pointer.Event.Click -> {
-                    add(Role.STEP, "Clicking where you pointed")
-                    val ok = com.blaze.assistant.phone.BlazeAccessibilityService.instance?.tapAt(e.x, e.y) ?: false
+                    // v0.24.4: check before clicking: read what's under the tip, show "Click '…'?" for ~1.5 s (Cancel stops it),
+                    // or ask first when it's unreadable, ambiguous or risky (pay / send / delete…).
+                    val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
+                    val (label, n) = try { svc?.labelAt(e.x, e.y) ?: (null to 0) } catch (_: Exception) { null to 0 }
+                    val line = P.clickLine(label)
+                    val go = when (P.checkClick(label, n)) {
+                        com.blaze.assistant.phone.Pointer.ClickCheck.SHOW_THEN_CLICK -> P.showCheck(line)
+                        com.blaze.assistant.phone.Pointer.ClickCheck.ASK -> Agent.confirm(line,
+                            when { P.risky(label) -> "This looks like it pays, sends or deletes something."
+                                n > 1 -> "There's more than one thing under the pointer."
+                                else -> "I can't read what's under the pointer." }, "Click", always = P.risky(label))
+                    }
+                    if (!go) {
+                        add(Role.STEP, "Didn't click: you cancelled")
+                        orient.pkg = ""
+                        return "The user double-tapped the pointer${label?.let { " on \u201c$it\u201d" } ?: ""} but cancelled the click, so nothing was clicked. " +
+                            "Your planned $name was NOT done. Look at the screen below and carry on with the task from here."
+                    }
+                    add(Role.STEP, if (label != null) "Clicking \u201c${label.take(40)}\u201d where you pointed" else "Clicking where you pointed")
+                    val ok = svc?.tapAt(e.x, e.y) ?: false
                     orient.pkg = ""
-                    "The user paused Blaze, moved the pointer and double-tapped it, so Blaze clicked there (x=${e.x.toInt()}, y=${e.y.toInt()})" +
+                    "The user paused Blaze, moved the pointer and double-tapped it, so Blaze clicked there (x=${e.x.toInt()}, y=${e.y.toInt()}${label?.let { ", \u201c$it\u201d" } ?: ""})" +
                         (if (ok) "" else " but the click didn't go through") + ". Your planned $name was NOT done. Look at the screen below and carry on with the task from here."
                 }
                 com.blaze.assistant.phone.Pointer.Event.Stop -> { add(Role.STEP, "You stopped me"); job?.cancel(); "Stopped by the user." }

@@ -60,6 +60,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -238,6 +241,8 @@ object Overlay {
     private var cardView: View? = null
     private var cardOwner: OverlayOwner? = null
     private var cardWatch: kotlinx.coroutines.Job? = null
+    /** The banner shows until this time; a swipe sets it to 0 (minimised into the notification). */
+    @Volatile private var cardUntil = 0L
 
     /**
      * While Blaze works and you're in another app, a slim card pops up at the top for a few seconds
@@ -247,19 +252,19 @@ object Overlay {
         if (cardWatch != null) return
         val app = ctx.applicationContext
         cardWatch = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + com.blaze.assistant.device.CrashLog.guard).launch {
-            var wasBusy = false; var wasFg = Agent.inForeground; var popUntil = 0L
+            var wasBusy = false; var wasFg = Agent.inForeground
             while (true) {
                 val busy = Agent.busyChats.value.isNotEmpty()
                 val now = System.currentTimeMillis()
                 // Pop up briefly when a task starts (or you leave Blaze mid-task), then get out of the way.
                 // The ongoing notification keeps showing progress and Stop.
                 if (busy && (!wasBusy || (wasFg && !Agent.inForeground))) {
-                    popUntil = now + 3500
+                    cardUntil = now + 3500
                     if (!Agent.inForeground) com.blaze.assistant.notify.Notifier.working(Agent.lastStep())
                 }
-                if (!busy && wasBusy) popUntil = 0L
+                if (!busy && wasBusy) cardUntil = 0L
                 wasBusy = busy; wasFg = Agent.inForeground
-                val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app) && now < popUntil
+                val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app) && now < cardUntil
                 if (want && cardView == null) showCard(app) else if (!want && cardView != null) hideCard()
                 kotlinx.coroutines.delay(400)
             }
@@ -268,12 +273,17 @@ object Overlay {
 
     private fun showCard(ctx: Context) {
         val wm = ctx.getSystemService(WindowManager::class.java)
-        val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT,
+        // v0.24.5: the window is only as wide as the card (12 dp margins), so touches beside it reach the app below.
+        val dm = ctx.resources.displayMetrics
+        val lp = WindowManager.LayoutParams((dm.widthPixels - 24 * dm.density).toInt().coerceAtMost((520 * dm.density).toInt()), WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP; y = (36 * ctx.resources.displayMetrics.density).toInt() }
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = (36 * dm.density).toInt() }
         val owner = OverlayOwner().also { it.start() }
-        val v = composeView(ctx, owner) { TaskCard(onOpen = { hideCard(); openPanel(ctx, false) }, onStop = { Agent.stopAll() }) }
+        val v = composeView(ctx, owner) {
+            TaskCard(onOpen = { cardUntil = 0L; hideCard(); openApp(ctx, false) }, onStop = { Agent.stopAll() },
+                onMinimise = { cardUntil = 0L; hideCard(); com.blaze.assistant.notify.Notifier.working(Agent.lastStep()) })
+        }
         try { wm.addView(v, lp); cardView = v; cardOwner = owner } catch (_: Exception) { owner.destroy() }
     }
 
@@ -605,31 +615,85 @@ private fun PanelButton(label: String, onClick: () -> Unit) {
 }
 
 
-/** The slim "Blaze is working" card shown over other apps. */
+/** Where a swipe on the work banner sends it (v0.24.5). Pure (OverlayBannerTest / PointerTest). */
+enum class BannerSwipe { NONE, MINIMISE, OPEN }
+
+/** Up, left or right past [thresholdPx] minimises into the notification; down past it opens Blaze; a short drag springs back. */
+fun bannerSwipe(dx: Float, dy: Float, thresholdPx: Float): BannerSwipe = when {
+    dy > thresholdPx && dy > kotlin.math.abs(dx) -> BannerSwipe.OPEN
+    dy < -thresholdPx || kotlin.math.abs(dx) > thresholdPx * 1.4f -> BannerSwipe.MINIMISE
+    else -> BannerSwipe.NONE
+}
+
+/**
+ * The "Blaze is working" banner shown over other apps (v0.24.5 look): a fully rounded dark Blaze card with a subtle
+ * border and shadow, the mascot inside a spinning ring, the status in brand colours, and Stop as a rounded pill.
+ * Swipe up / left / right: it slides away and minimises into the ongoing notification. Swipe down or tap: opens Blaze.
+ */
 @Composable
-fun TaskCard(onOpen: () -> Unit, onStop: () -> Unit) {
-    run {
-        val c = LocalBlaze.current
-        val msgs by Agent.messages.collectAsState()
-        val busy by Agent.busyChats.collectAsState()
-        val stepRaw = msgs.lastOrNull { it.role == com.blaze.assistant.agent.Role.STEP }?.text ?: "Working"
-        // A plan checklist shows its current line; "2/5" tells you how far along it is.
-        val lines = stepRaw.lines()
-        val step = if (lines.size > 1) {
-            val done = lines.count { it.startsWith("\u2713") }
-            (lines.firstOrNull { it.startsWith("\u2192") }?.removePrefix("\u2192 ") ?: lines.last().drop(2)) + "  ·  $done/${lines.size}"
-        } else stepRaw
-        Row(Modifier.padding(horizontal = 12.dp).fillMaxWidth().background(c.paper).border(1.dp, c.ink).clickable(onClick = onOpen)
-            .padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            OrbFace(26.dp)
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
-                Label(if (busy.size > 1) "Blaze · ${busy.size} tasks" else "Blaze is working", color = c.accent, size = 9.sp)
-                Text(step, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
-            }
-            Box(Modifier.height(52.dp).width(64.dp).background(c.ink).clickable(onClick = onStop), contentAlignment = Alignment.Center) {
-                Label("Stop", color = c.paper, size = 10.sp) }
+fun TaskCard(onOpen: () -> Unit, onStop: () -> Unit, onMinimise: () -> Unit = {}, step0: String? = null, tasks0: Int? = null) {
+    val msgs by Agent.messages.collectAsState()
+    val busy by Agent.busyChats.collectAsState()
+    val stepRaw = step0 ?: msgs.lastOrNull { it.role == com.blaze.assistant.agent.Role.STEP }?.text ?: "Working"
+    val tasks = tasks0 ?: busy.size
+    // A plan checklist shows its current line; "2/5" tells you how far along it is.
+    val lines = stepRaw.lines()
+    val step = if (lines.size > 1) {
+        val done = lines.count { it.startsWith("\u2713") }
+        (lines.firstOrNull { it.startsWith("\u2192") }?.removePrefix("\u2192 ") ?: lines.last().drop(2)) + "  \u00b7  $done/${lines.size}"
+    } else stepRaw
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val ox = remember { androidx.compose.animation.core.Animatable(0f) }
+    val oy = remember { androidx.compose.animation.core.Animatable(0f) }
+    val fade = remember { androidx.compose.animation.core.Animatable(1f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val threshold = with(density) { 56.dp.toPx() }
+    val away = with(density) { 420.dp.toPx() }
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp)
+    Row(Modifier.fillMaxWidth()
+        .graphicsLayer { translationX = ox.value; translationY = oy.value; alpha = fade.value }
+        .pointerInput(Unit) {
+            detectDragGestures(
+                onDragEnd = {
+                    when (bannerSwipe(ox.value, oy.value, threshold)) {
+                        BannerSwipe.MINIMISE -> scope.launch {
+                            val tx = if (kotlin.math.abs(ox.value) > -oy.value) kotlin.math.sign(ox.value) * away else ox.value
+                            val ty = if (kotlin.math.abs(ox.value) > -oy.value) oy.value else -away / 2
+                            launch { fade.animateTo(0f, androidx.compose.animation.core.tween(180)) }
+                            launch { oy.animateTo(ty, androidx.compose.animation.core.tween(200)) }
+                            ox.animateTo(tx, androidx.compose.animation.core.tween(200))
+                            onMinimise()
+                        }
+                        BannerSwipe.OPEN -> scope.launch {
+                            launch { fade.animateTo(0f, androidx.compose.animation.core.tween(160)) }
+                            oy.animateTo(oy.value + threshold, androidx.compose.animation.core.tween(160))
+                            onOpen()
+                        }
+                        BannerSwipe.NONE -> scope.launch {
+                            launch { ox.animateTo(0f, androidx.compose.animation.core.spring()) }
+                            oy.animateTo(0f, androidx.compose.animation.core.spring())
+                        }
+                    }
+                },
+                onDragCancel = { scope.launch { ox.snapTo(0f); oy.snapTo(0f) } }
+            ) { ch, d -> ch.consume(); scope.launch { ox.snapTo(ox.value + d.x); oy.snapTo(oy.value + d.y) } }
         }
+        .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+        .background(DialogColors.surface, shape)
+        .border(1.dp, DialogColors.border, shape)
+        .clip(shape)
+        .clickable(onClick = onOpen)
+        .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        MascotMark(40.dp, spin = true)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(if (tasks > 1) "Blaze \u00b7 $tasks tasks" else "Blaze is working", maxLines = 1,
+                style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
+                    brush = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xFFFFB25A), Color(0xFF6FAEF2)))))
+            Text(step, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                style = TextStyle(fontFamily = Type.Sans, fontSize = 13.5.sp, color = DialogColors.title))
+        }
+        Spacer(Modifier.width(8.dp))
+        PillButton("Stop", primary = true, warm = true, onClick = onStop)
     }
 }

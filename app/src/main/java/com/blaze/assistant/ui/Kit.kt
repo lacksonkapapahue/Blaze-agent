@@ -1,6 +1,9 @@
 package com.blaze.assistant.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -220,6 +223,97 @@ fun KitSwitch(on: Boolean, onToggle: () -> Unit) {
     Box(Modifier.clickable(onClick = onToggle).padding(4.dp)) {
         Box(Modifier.width(40.dp).height(22.dp).background(if (on) c.ink else c.faint).hairline(if (on) c.ink else c.hair2)) {
             Box(Modifier.padding(start = if (on) 20.dp else 2.dp, top = 2.dp).size(18.dp).background(if (on) c.paper else c.weak))
+        }
+    }
+}
+
+// ---------------- v0.24.5: Blaze dialog and menu (no Material defaults anywhere) ----------------
+
+/** Dialog surface: always the dark Blaze card (Luke: matches the app; never Material's lavender). */
+object DialogColors {
+    val surface = Color(0xFF16171A)
+    val border = Color(0x1FF0F0EE)
+    val title = Color(0xFFF4F4F2)
+    val body = Color(0xA6F0F0EE)
+    val primary = Color(0xFF4C7DFF)          // brand blue (the mascot's lower half)
+    val primaryWarm = Color(0xFFFF9A3C)      // brand orange, for a warm / destructive-looking primary
+    val onPrimary = Color(0xFFFFFFFF)
+    val ghost = Color(0xCCF0F0EE)
+    val scrim = Color(0x99000000)
+}
+
+/**
+ * The shared Blaze dialog: a rounded dark card with a subtle border and shadow, paper-white title, muted body,
+ * a primary pill button (brand blue, or orange with [warm]) and an optional ghost secondary button.
+ */
+@Composable
+fun BlazeDialog(
+    title: String, body: String = "", confirm: String, onConfirm: () -> Unit,
+    dismiss: String? = null, onDismiss: () -> Unit, warm: Boolean = false,
+    content: (@Composable ColumnScope.() -> Unit)? = null,
+) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) { BlazeDialogCard(title, body, confirm, onConfirm, dismiss, onDismiss, warm, content) }
+}
+
+/** The card itself (also used by screenshots, which can't open a real dialog window). */
+@Composable
+fun BlazeDialogCard(
+    title: String, body: String = "", confirm: String, onConfirm: () -> Unit,
+    dismiss: String? = null, onDismiss: () -> Unit = {}, warm: Boolean = false,
+    content: (@Composable ColumnScope.() -> Unit)? = null,
+) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+    Column(Modifier.widthIn(max = 360.dp).fillMaxWidth()
+        .shadow(18.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
+        .background(DialogColors.surface, shape)
+        .border(1.dp, DialogColors.border, shape)
+        .padding(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 16.dp)) {
+        Text(title, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 24.sp, color = DialogColors.title))
+        if (body.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(body, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = DialogColors.body))
+        }
+        content?.let { Spacer(Modifier.height(12.dp)); it() }
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+            if (dismiss != null) PillButton(dismiss, primary = false, onClick = onDismiss)
+            PillButton(confirm, primary = true, warm = warm, onClick = onConfirm)
+        }
+    }
+}
+
+/** Rounded pill button for dialogs, menus and overlays: filled brand blue / orange, or a ghost. */
+@Composable
+fun PillButton(text: String, primary: Boolean, warm: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+    val bg = if (!primary) Color.Transparent else if (warm) DialogColors.primaryWarm else DialogColors.primary
+    Box(modifier.height(40.dp).widthIn(min = 72.dp).clip(shape).background(bg, shape)
+        .let { if (!primary) it.border(1.dp, DialogColors.border, shape) else it }
+        .clickable(onClick = onClick).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+        Text(text, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp,
+            color = if (primary) DialogColors.onPrimary else DialogColors.ghost))
+    }
+}
+
+/** The shared Blaze menu (replaces Material's DropdownMenu): a rounded dark card in a popup. */
+@Composable
+fun BlazeMenu(expanded: Boolean, onDismiss: () -> Unit, items: List<Pair<String, () -> Unit>>) {
+    if (!expanded) return
+    androidx.compose.ui.window.Popup(alignment = Alignment.TopEnd, onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(focusable = true)) {
+        BlazeMenuCard(items, onDismiss)
+    }
+}
+
+@Composable
+fun BlazeMenuCard(items: List<Pair<String, () -> Unit>>, onDismiss: () -> Unit = {}) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+    Column(Modifier.widthIn(min = 200.dp, max = 280.dp).shadow(12.dp, shape).background(DialogColors.surface, shape)
+        .border(1.dp, DialogColors.border, shape).padding(vertical = 6.dp)) {
+        items.forEach { (label, act) ->
+            Box(Modifier.fillMaxWidth().clickable { onDismiss(); act() }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(label, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = DialogColors.title))
+            }
         }
     }
 }
