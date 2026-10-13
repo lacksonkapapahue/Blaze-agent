@@ -243,6 +243,16 @@ fun ChatScreen() {
         }
     }
 
+    // v0.24.1: the composer's rotating placeholder, rebuilt from on-device data each time Blaze comes to the front.
+    var hints by remember { mutableStateOf(emptyList<String>()) }
+    var reducedMotion by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            reducedMotion = ComposerHintsSource.reducedMotion(ctx)
+            hints = try { ComposerHintsSource.load(ctx) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { emptyList() }
+        }
+    }
+
     // Shared from another app: lands in the message box for the user to send, never runs by itself
     // (any app can share text, so it could carry instructions the user never wrote).
     val shared by Agent.sharedDraft.collectAsState()
@@ -487,7 +497,7 @@ fun ChatScreen() {
                     plusOpen = plusOpen, chip = modeChip(work, approval), agents = bgAgents.count { it.live },
                     listening = voiceState == Voice.State.LISTENING, speaking = voiceState == Voice.State.SPEAKING,
                     onPlus = { plusOpen = !plusOpen; showViews = false }, onMic = { onMic() }, onSend = { send(input.text) }, onStop = { Agent.stop() },
-                    onChip = { plusOpen = true })
+                    onChip = { plusOpen = true }, hints = hints, animateHints = !reducedMotion)
             }
         }
 
