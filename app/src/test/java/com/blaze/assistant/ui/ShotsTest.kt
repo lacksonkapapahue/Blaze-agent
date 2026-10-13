@@ -569,6 +569,27 @@ class ShotsTest {
         }
     }
 
+    // v0.24.4: the spark-blob pointer on light, dark and busy backgrounds, gliding and clicking, plus the "Click '…'?" check.
+    @Test fun pointerBlob() = shot("44-pointer-blob") {
+        val G = androidx.compose.ui.graphics.Color
+        fun T(t: String, col: androidx.compose.ui.graphics.Color) = androidx.compose.material3.Text(t, style = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = col))
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().weight(1f).background(G(0xFFF4F4F4))) {
+                Column(Modifier.padding(top = 96.dp, start = 18.dp)) { T("Light app · Blaze gliding", G(0xFF1D1A16)) }
+                PointerGlyph(pulse = 1.06f, modifier = Modifier.padding(start = 150.dp, top = 140.dp))
+                Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = androidx.compose.ui.Alignment.TopCenter) { PointerCheck("Click \u2018Add to cart\u2019?") }
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(G(0xFF111110))) {
+                Column(Modifier.padding(top = 20.dp, start = 18.dp)) { T("Dark app · clicking (squish)", G(0xFFEDEDED)) }
+                PointerGlyph(ripple = 0.5f, modifier = Modifier.padding(start = 210.dp, top = 70.dp))
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(G(0xFF1F4BD8), G(0xFFE8743B), G(0xFF2E7D32))))) {
+                Column(Modifier.padding(top = 20.dp, start = 18.dp)) { T("Busy photo · paused (you have it)", G.White) }
+                PointerGlyph(paused = true, modifier = Modifier.padding(start = 120.dp, top = 70.dp))
+            }
+        }
+    }
+
     // v0.23.4: Settings › Brains / Auto, models per provider with cooling counts, one provider opened.
     @Test fun autoPool() = shot("38-auto-pool") {
         fun S(pid: String, name: String, n: Int, cool: Int, tools: Int, at: Long, err: String, next: Long) =

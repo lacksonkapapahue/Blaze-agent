@@ -20,19 +20,47 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The pointer as drawn by phone/Pointer.kt (same shape and colours), for Settings and screenshots. */
+/**
+ * The pointer as drawn by phone/Pointer.kt (v0.24.4: Blaze's spark blob with a white outline, soft shadow and a tip
+ * marker), from the same geometry ([com.blaze.assistant.phone.SparkBlob]), for screenshots. [ripple] 0..1 draws the
+ * click ring and the squish; [pulse] is the gliding scale.
+ */
 @Composable
-fun PointerGlyph(paused: Boolean = false, ripple: Float = -1f, modifier: Modifier = Modifier) {
-    Canvas(modifier.size(44.dp)) {
+fun PointerGlyph(paused: Boolean = false, ripple: Float = -1f, pulse: Float = 1f, modifier: Modifier = Modifier) {
+    val P = com.blaze.assistant.phone.Pointer
+    val B = com.blaze.assistant.phone.SparkBlob
+    Canvas(modifier.size(P.TOUCH_DP.dp)) {
         val d = density
-        val tx = 6 * d; val ty = 6 * d
-        if (ripple in 0f..1f) drawCircle(Color(0xFF1F4BD8).copy(alpha = 1 - ripple), radius = (4 + 14 * ripple) * d, center = Offset(tx, ty), style = Stroke(2.5f * d))
-        val p = Path().apply {
-            moveTo(tx, ty); lineTo(tx, ty + 22 * d); lineTo(tx + 6 * d, ty + 16.5f * d); lineTo(tx + 10 * d, ty + 25 * d)
-            lineTo(tx + 14 * d, ty + 23 * d); lineTo(tx + 10 * d, ty + 14.5f * d); lineTo(tx + 17 * d, ty + 14.5f * d); close()
+        val tx = P.TIP_DP * d; val ty = P.TIP_DP * d
+        val cx = P.BLOB_CENTER_DP * d; val cy = P.BLOB_CENTER_DP * d
+        val px = P.BLOB_DP * d
+        val (sq1, sq2) = P.squish(ripple)
+        val sx = sq1 * pulse; val sy = sq2 * pulse
+        fun path(sh: com.blaze.assistant.phone.SparkBlob.Shape, ox: Float = 0f, oy: Float = 0f) = Path().apply {
+            B.walk(sh, cx + ox, cy + oy, px, sx, sy, { x, y -> moveTo(x, y) }, { a1, b1, c1, d1, e1, f1 -> cubicTo(a1, b1, c1, d1, e1, f1) })
+            close()
         }
-        drawPath(p, if (paused) Color(0xFFE8743B) else Color(0xFF1F4BD8))
-        drawPath(p, Color.White, style = Stroke(2 * d, join = StrokeJoin.Round))
+        val accent = Color(0xFF1F4BD8)
+        drawLine(Color.White, Offset(tx, ty), Offset(cx - px * 0.28f, cy - px * 0.28f), strokeWidth = 2 * d, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        // Soft shadow: a few offset, fading copies under the blob.
+        for (i in 3 downTo 1) drawPath(path(B.blob, 0f, 0.6f * i * d), Color.Black.copy(alpha = 0.07f), style = Stroke(1.6f * i * d, join = StrokeJoin.Round))
+        val blob = path(B.blob)
+        drawPath(blob, Color(B.INK))
+        drawPath(blob, Color.White, style = Stroke(2.5f * d, join = StrokeJoin.Round))
+        drawPath(path(B.spark), Color(if (paused) B.SPARK_PAUSED else B.SPARK))
+        drawCircle(Color.Black.copy(alpha = 0.18f), 5.2f * d, Offset(tx, ty + 0.5f * d))
+        drawCircle(Color.White, 4.5f * d, Offset(tx, ty))
+        drawCircle(if (paused) Color(B.SPARK_PAUSED) else accent, 2.8f * d, Offset(tx, ty))
+        if (ripple in 0f..1f) drawCircle(accent.copy(alpha = 1 - ripple), radius = (5 + 12 * ripple) * d, center = Offset(tx, ty), style = Stroke(2.5f * d))
+    }
+}
+
+/** The "Click '…'?" check after a manual double-tap (phone/Pointer.kt showCheck draws it with plain Views). */
+@Composable
+fun PointerCheck(line: String) {
+    Row(Modifier.background(Color(0xFFFFFAF2)).padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(line, Modifier.padding(start = 4.dp, end = 10.dp), maxLines = 1, style = TextStyle(fontSize = 13.sp, color = Color(0xFF1D1A16)))
+        Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) { Text("Cancel", style = TextStyle(fontSize = 13.sp, color = Color(0xFF1F4BD8))) }
     }
 }
 

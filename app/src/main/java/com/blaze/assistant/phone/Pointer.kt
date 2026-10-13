@@ -30,8 +30,13 @@ import kotlinx.coroutines.withTimeoutOrNull
  * never clicks), double-tap it to have Blaze click right there, then Blaze looks and carries on.
  * A small bar offers Resume and Stop while paused.
  *
+ * v0.24.4: always on while Blaze controls apps (every tap, long-press, swipe and type focus glides it first), a 64 dp
+ * window drawn as Blaze's spark blob mascot (white outline, soft shadow, a tip marker where it clicks, a pulse while
+ * moving and a squish on click) that stays on screen until the task ends, and a manual double-tap is checked first: Blaze reads what's under the tip and shows
+ * "Click '…'?" for ~1.5 s (Cancel stops it), or asks when it's unclear or risky (pay / send / delete…).
+ *
  * Light on purpose (Galaxy A12): plain Views in accessibility overlay windows, no Compose, and it only
- * animates while gliding or rippling; idle in auto mode it hides after a few seconds.
+ * animates while gliding or rippling, and is a still picture otherwise.
  */
 object Pointer {
     enum class Mode { AUTO, PAUSED }
@@ -47,7 +52,45 @@ object Pointer {
 
     @Volatile var mode = Mode.AUTO
         private set
-    val enabled: Boolean get() = com.blaze.assistant.agent.Settings.bool("show_pointer", true)
+    /**
+     * v0.24.4 (Luke): the pointer is always shown while Blaze drives the phone; agent taps can't hide it. The old
+     * `show_pointer` pref is kept (backward compatible) but no longer read for agent gestures.
+     */
+    const val enabled: Boolean = true
+
+    /** The pointer window = its touch target, in dp (v0.24.4: 64 dp, was 44; Luke asked for at least ~56). */
+    const val TOUCH_DP = 64
+    /** The spark blob mascot drawn inside it (v0.24.4, replaces the arrow nobody could see), in dp. */
+    const val BLOB_DP = 48
+    /** Where the click lands: the tip marker, this far from the window's top-left corner, in dp. */
+    const val TIP_DP = 7
+    /** The blob's centre, from the window's top-left, in dp (the blob sits down-right of the tip). */
+    const val BLOB_CENTER_DP = TOUCH_DP - BLOB_DP / 2f - 2f
+
+    /** Light "I'm moving" pulse: 1.0 → 1.07 and back every 600 ms while gliding. */
+    fun pulseScale(ms: Long): Float = 1f + 0.035f * (1f - kotlin.math.cos(ms % 600 / 600f * 2f * Math.PI.toFloat()))
+    /** Squish on click over t = 0..1: wide and short, then back to round (scaleX, scaleY). */
+    fun squish(t: Float): Pair<Float, Float> {
+        val k = if (t !in 0f..1f) 0f else kotlin.math.sin(t * Math.PI.toFloat())
+        return (1f + 0.16f * k) to (1f - 0.18f * k)
+    }
+    /** How long the "Click '…'?" bubble shows before a manual double-tap clicks. */
+    const val CONFIRM_MS = 1_500L
+
+    /** What Blaze does with a manual double-tap after reading what's under the tip. */
+    enum class ClickCheck { SHOW_THEN_CLICK, ASK }
+
+    private val riskyRe = Regex("""\b(pay|payment|send|delete|remove|erase|buy|purchase|order|checkout|check out|transfer|withdraw|confirm|uninstall|post|publish|sign out|log ?out|subscribe|unsubscribe|reset|format|block|report|call)\b""", RegexOption.IGNORE_CASE)
+    /** A label that spends money, sends, deletes or can't be undone. */
+    fun risky(label: String?) = !label.isNullOrBlank() && riskyRe.containsMatchIn(label)
+    /** Blank or unreadable labels, or several different targets under the tip, are ambiguous: ask. */
+    fun checkClick(label: String?, candidates: Int = 1): ClickCheck =
+        if (label.isNullOrBlank() || label.trim().length < 2 || candidates > 1 || risky(label)) ClickCheck.ASK else ClickCheck.SHOW_THEN_CLICK
+    /** The one-line bubble: Click 'Send'? (label trimmed to 32 chars, one line). */
+    fun clickLine(label: String?): String {
+        val l = label.orEmpty().replace(Regex("\\s+"), " ").trim()
+        return if (l.isEmpty()) "Click here?" else "Click \u2018" + (if (l.length > 32) l.take(31).trimEnd() + "\u2026" else l) + "\u2019?"
+    }
 
     // ---------- pure rules (PointerTest) ----------
     /** Glide time: quick for short hops, never slow (120–420 ms), by distance in dp. */
@@ -78,7 +121,6 @@ object Pointer {
     @Volatile private var y = 0f
     private var density = 2f
     private var waiting: CompletableDeferred<Event>? = null
-    private val hide = Runnable { if (mode == Mode.AUTO) dot?.visibility = View.GONE }
     /** Called when the user takes over (pauses) or resumes, so the chat can say so. */
     @Volatile var onChange: ((Mode) -> Unit)? = null
 
@@ -90,7 +132,7 @@ object Pointer {
         val w = ctx.getSystemService(WindowManager::class.java) ?: return
         wm = w
         density = ctx.resources.displayMetrics.density
-        val size = (44 * density).toInt()
+        val size = (TOUCH_DP * density).toInt()
         val v = Dot(ctx, density)
         val lp = WindowManager.LayoutParams(size, size, type(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -135,30 +177,30 @@ object Pointer {
      * No-op (true) when the pointer is switched off.
      */
     suspend fun aim(ctx: Context, tx: Float, ty: Float): Boolean {
-        if (!enabled) return mode == Mode.AUTO
         if (mode == Mode.PAUSED) return false
         withContext(Dispatchers.Main) {
             ensure(ctx)
-            main.removeCallbacks(hide)
             dot?.visibility = View.VISIBLE
+            dot?.moving(true)
         }
         val fx = x.takeIf { it > 0 } ?: tx; val fy = y.takeIf { it > 0 } ?: (ty - 200 * density)
         val ms = glideMs(tx - fx, ty - fy, density)
         val start = SystemClock.uptimeMillis()
-        while (true) {
-            if (mode == Mode.PAUSED) return false
-            val t = ((SystemClock.uptimeMillis() - start).toFloat() / ms).coerceIn(0f, 1f)
-            val e = 1 - (1 - t) * (1 - t) * (1 - t)   // ease out
-            withContext(Dispatchers.Main) { place(fx + (tx - fx) * e, fy + (ty - fy) * e) }
-            if (t >= 1f) break
-            kotlinx.coroutines.delay(16)
-        }
+        try {
+            while (true) {
+                if (mode == Mode.PAUSED) return false
+                val t = ((SystemClock.uptimeMillis() - start).toFloat() / ms).coerceIn(0f, 1f)
+                val e = 1 - (1 - t) * (1 - t) * (1 - t)   // ease out
+                withContext(Dispatchers.Main) { place(fx + (tx - fx) * e, fy + (ty - fy) * e) }
+                if (t >= 1f) break
+                kotlinx.coroutines.delay(16)
+            }
+        } finally { main.post { dot?.moving(false) } }
         return mode == Mode.AUTO
     }
 
     /** The short "here it comes" ripple. False if the user paused during it. */
     suspend fun ripple(long: Boolean): Boolean {
-        if (!enabled) return mode == Mode.AUTO
         val v = dot ?: return mode == Mode.AUTO
         val ms = rippleMs(long)
         withContext(Dispatchers.Main) { v.ripple(ms) }
@@ -177,14 +219,15 @@ object Pointer {
             main.postDelayed({
                 lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
                 try { wm?.updateViewLayout(v, lp) } catch (_: Exception) { }
-                if (mode == Mode.AUTO) { main.removeCallbacks(hide); main.postDelayed(hide, 3000) }
             }, ms + 120)
         }
     }
 
+    /** Puts the pointer at (px, py) at once (end of a swipe), if it's on screen. */
+    fun jump(px: Float, py: Float) { main.post { if (dot != null) place(px, py) } }
+
     /** Swipes are drawn as a path for a moment. */
     fun showPath(ctx: Context, x1: Float, y1: Float, x2: Float, y2: Float, ms: Long) {
-        if (!enabled) return
         main.post {
             val w = ctx.getSystemService(WindowManager::class.java) ?: return@post
             trail?.let { try { w.removeView(it) } catch (_: Exception) { } }
@@ -199,9 +242,9 @@ object Pointer {
 
     // ---------- manual mode ----------
     fun pause(why: String) {
-        if (mode == Mode.PAUSED || !enabled) return
+        if (mode == Mode.PAUSED) return
         mode = Mode.PAUSED
-        main.post { main.removeCallbacks(hide); dot?.visibility = View.VISIBLE; dot?.paused = true; dot?.invalidate(); showBar() }
+        main.post { dot?.visibility = View.VISIBLE; dot?.paused = true; dot?.invalidate(); showBar() }
         com.blaze.assistant.device.CrashLog.write("Pointer: paused ($why)")
         onChange?.invoke(Mode.PAUSED)
     }
@@ -249,6 +292,38 @@ object Pointer {
         }
     }
 
+    /**
+     * The check after a manual double-tap: a one-line "Click '…'?" bubble where the pause bar was, with Cancel,
+     * for [ms]. True = go ahead and click; false = the user cancelled.
+     */
+    suspend fun showCheck(line: String, ms: Long = CONFIRM_MS): Boolean {
+        val v = dot ?: return true
+        val ctx = v.context
+        val w = wm ?: return true
+        val d = density
+        val result = CompletableDeferred<Boolean>()
+        var row: View? = null
+        withContext(Dispatchers.Main) {
+            val r = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(Color.parseColor("#FFFAF2")); elevation = 6 * d
+                setPadding((10 * d).toInt(), (6 * d).toInt(), (6 * d).toInt(), (6 * d).toInt())
+                addView(TextView(ctx).apply { text = line; textSize = 13f; maxLines = 1; setTextColor(Color.parseColor("#1D1A16"))
+                    setPadding((4 * d).toInt(), 0, (10 * d).toInt(), 0) })
+                addView(TextView(ctx).apply { text = "Cancel"; textSize = 13f; setTextColor(ACCENT)
+                    setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
+                    setOnClickListener { result.complete(false) } })
+            }
+            val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type(),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT)
+                .apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = (36 * d).toInt() }
+            try { w.addView(r, lp); row = r } catch (_: Exception) { }
+        }
+        val go = withTimeoutOrNull(ms) { result.await() } ?: true
+        withContext(Dispatchers.Main) { row?.let { try { w.removeView(it) } catch (_: Exception) { } } }
+        return go
+    }
+
     private fun showBar() {
         if (bar != null) return
         val v = dot ?: return
@@ -265,7 +340,7 @@ object Pointer {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#FFFAF2")); elevation = 6 * d
             setPadding((6 * d).toInt(), (4 * d).toInt(), (6 * d).toInt(), (4 * d).toInt())
-            addView(TextView(ctx).apply { text = "Paused · drag, double-tap to click"; textSize = 12f; setTextColor(Color.parseColor("#6B645B"))
+            addView(TextView(ctx).apply { text = "Paused \u00b7 drag, double-tap to click"; textSize = 12f; setTextColor(Color.parseColor("#6B645B"))
                 setPadding((8 * d).toInt(), 0, (8 * d).toInt(), 0) })
             addView(chip("Resume", true) { resume() })
             addView(chip("Stop", false) { stop() })
@@ -276,29 +351,64 @@ object Pointer {
         try { w.addView(row, lp); bar = row } catch (_: Exception) { }
     }
 
-    /** The pointer: an arrow with its tip on the target, Blaze blue with a white edge; a ring while rippling. */
+    /**
+     * The pointer (v0.24.4): Blaze's spark blob (same art as the app icon) with a white outline and a soft shadow,
+     * down-right of a small tip marker (accent dot in a white ring) that shows exactly where the click lands.
+     * It pulses lightly while gliding, squishes when it clicks, and the spark turns orange while the user has it.
+     * Stays on screen until the task ends (Pointer.done).
+     */
     private class Dot(ctx: Context, val d: Float) : View(ctx) {
-        val tipX = 6 * d; val tipY = 6 * d
+        val tipX = TIP_DP * d; val tipY = TIP_DP * d
+        private val cx = BLOB_CENTER_DP * d; private val cy = BLOB_CENTER_DP * d
+        private val blobPx = BLOB_DP * d
         var paused = false
         private var rippleStart = 0L; private var rippleMs = 0L
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT; style = Paint.Style.FILL }
-        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2 * d; strokeJoin = Paint.Join.ROUND }
+        private var moveStart = 0L
+        private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SparkBlob.INK; style = Paint.Style.FILL
+            setShadowLayer(4 * d, 0f, 1.5f * d, Color.argb(110, 0, 0, 0)) }
+        private val ink = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SparkBlob.INK; style = Paint.Style.FILL }
+        private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2.5f * d; strokeJoin = Paint.Join.ROUND }
+        private val sparkP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = SparkBlob.SPARK; style = Paint.Style.FILL }
+        private val tipFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT; style = Paint.Style.FILL }
+        private val tipRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.FILL
+            setShadowLayer(2 * d, 0f, 0.5f * d, Color.argb(120, 0, 0, 0)) }
+        private val stem = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 2 * d; strokeCap = Paint.Cap.ROUND }
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = ACCENT; style = Paint.Style.STROKE; strokeWidth = 2.5f * d }
-        private val arrow = Path().apply {
-            moveTo(tipX, tipY); lineTo(tipX, tipY + 22 * d); lineTo(tipX + 6 * d, tipY + 16.5f * d)
-            lineTo(tipX + 10 * d, tipY + 25 * d); lineTo(tipX + 14 * d, tipY + 23 * d); lineTo(tipX + 10 * d, tipY + 14.5f * d)
-            lineTo(tipX + 17 * d, tipY + 14.5f * d); close()
-        }
+        private val blobPath = Path(); private val sparkPath = Path()
+
+        init { setLayerType(LAYER_TYPE_SOFTWARE, null) }   // shadow layers on paths; the view is only 64 dp
+
+        fun moving(on: Boolean) { moveStart = if (on) SystemClock.uptimeMillis() else 0L; invalidate() }
         fun ripple(ms: Long) { rippleStart = SystemClock.uptimeMillis(); rippleMs = ms; invalidate() }
+
+        private fun build(p: Path, s: SparkBlob.Shape, size: Float, sx: Float, sy: Float) {
+            p.reset()
+            SparkBlob.walk(s, cx, cy, size, sx, sy, { x, y -> p.moveTo(x, y) }, { a, b, c2, d2, e, f -> p.cubicTo(a, b, c2, d2, e, f) })
+            p.close()
+        }
+
         override fun onDraw(c: Canvas) {
-            val t = if (rippleMs > 0) (SystemClock.uptimeMillis() - rippleStart).toFloat() / rippleMs else 2f
+            val now = SystemClock.uptimeMillis()
+            val t = if (rippleMs > 0) (now - rippleStart).toFloat() / rippleMs else 2f
+            var (sx, sy) = squish(t)
+            if (moveStart > 0) { val p = pulseScale(now - moveStart); sx *= p; sy *= p }
+            // Stem from the tip marker to the blob, then the tip marker itself.
+            c.drawLine(tipX, tipY, cx - blobPx * 0.28f, cy - blobPx * 0.28f, stem)
+            build(blobPath, SparkBlob.blob, blobPx, sx, sy)
+            build(sparkPath, SparkBlob.spark, blobPx, sx, sy)
+            c.drawPath(blobPath, shadow)
+            c.drawPath(blobPath, ink)
+            c.drawPath(blobPath, edge)
+            sparkP.color = if (paused) SparkBlob.SPARK_PAUSED else SparkBlob.SPARK
+            c.drawPath(sparkPath, sparkP)
+            c.drawCircle(tipX, tipY, 4.5f * d, tipRing)
+            tipFill.color = if (paused) SparkBlob.SPARK_PAUSED else ACCENT
+            c.drawCircle(tipX, tipY, 2.8f * d, tipFill)
             if (t <= 1f) {
                 ring.alpha = ((1 - t) * 255).toInt()
-                c.drawCircle(tipX, tipY, (4 + 14 * t) * d, ring)
-                postInvalidateOnAnimation()
+                c.drawCircle(tipX, tipY, (5 + 12 * t) * d, ring)
             } else rippleMs = 0
-            fill.color = if (paused) Color.parseColor("#E8743B") else ACCENT
-            c.drawPath(arrow, fill); c.drawPath(arrow, edge)
+            if (t <= 1f || moveStart > 0) postInvalidateOnAnimation()
         }
     }
 
