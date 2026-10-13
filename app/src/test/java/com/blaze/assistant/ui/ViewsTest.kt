@@ -12,10 +12,16 @@ import java.io.File
 class ViewsTest {
     @Test fun everyOldPageStillHasAView() {
         // The sidebar's pages before 0.12, and Desktop's /views list: none may disappear.
-        listOf("chats", "gallery", "browser", "routines", "memory", "commands", "usage", "settings",
+        // v0.24.0: "chats" (the Archive chat list) left with the conversation switcher.
+        listOf("gallery", "browser", "routines", "memory", "commands", "usage", "settings",
             "jobs", "schedule", "accounts", "doctor", "design", "router", "agents", "skills", "learn").forEach {
             assertNotNull("missing view $it", Views.find(it))
         }
+    }
+
+    @Test fun noConversationListView() {
+        assertNull(Views.find("chats")); assertNull(Views.find("archive")); assertNull(Views.find("history"))
+        assertTrue(Views.all.none { it.special == "chats" })
     }
 
     @Test fun aliasesAndSlash() {

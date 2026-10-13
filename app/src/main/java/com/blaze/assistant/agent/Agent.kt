@@ -392,6 +392,40 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         m.freshContext(null)
     }
 
+    /** v0.24.0 /clear: the last clear of the visible thread, kept in memory only so the snackbar can undo it. */
+    @Volatile private var lastClear: ClearScreen.Snapshot? = null
+
+    /**
+     * /clear: empties the visible thread so the chat starts empty. Nothing is forgotten: the history stays in the
+     * chat file, the journal (search_chat) and the long-chat index; Blaze starts a new context window there.
+     */
+    fun clearScreen(): ClearScreen.Result {
+        val s = cur
+        if (s.busy) return ClearScreen.Result.BUSY
+        if (ClearScreen.isEmpty(s.msgs)) return ClearScreen.Result.EMPTY
+        lastClear = ClearScreen.Snapshot(s.id, s.msgs, s.ctxFrom, s.lcSummary, s.lcUpto, s.history.length(), System.currentTimeMillis())
+        val w = ClearScreen.window(s.history.length())
+        s.ctxFrom = w.ctxFrom; s.lcSummary = w.lcSummary; s.lcUpto = w.lcUpto
+        s.msgs = emptyList()
+        s.persist(force = true)
+        return ClearScreen.Result.CLEARED
+    }
+
+    /** True while the last /clear can still be undone (same chat, nothing sent since, within a few seconds). */
+    fun canUndoClear(): Boolean = ClearScreen.canUndo(lastClear, cur.id, cur.msgs, cur.history.length(), System.currentTimeMillis())
+
+    /** Puts the cleared messages and context window back. */
+    fun undoClear(): Boolean {
+        val snap = lastClear ?: return false
+        val s = cur
+        if (!ClearScreen.canUndo(snap, s.id, s.msgs, s.history.length(), System.currentTimeMillis())) return false
+        s.ctxFrom = snap.ctxFrom; s.lcSummary = snap.lcSummary; s.lcUpto = snap.lcUpto
+        s.msgs = ClearScreen.restored(snap, s.msgs)
+        lastClear = null
+        s.persist(force = true)
+        return true
+    }
+
     /** The model's context window (Settings › context_tokens, else a guess from its name; 0 = unknown). */
     fun ctxWindow(): Int = LongChat.contextWindow(Settings.model, Settings.str("context_tokens", "0").toIntOrNull() ?: 0)
     /** When older turns fold into the rolling summary. */
@@ -877,8 +911,9 @@ When you finish, say what you did in one short sentence.
         }
 
         /** Save the current chat to disk (screenshots are dropped to keep files small). */
-        fun persist() {
-            if (msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
+        fun persist(force: Boolean = false) {
+            // force (v0.24.0 /clear): an emptied thread is saved too, so cleared messages don't come back on restart.
+            if (!force && msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
             val arr = JSONArray()
             for (m in msgs) {
                 arr.put(JSONObject().put("id", m.id).put("role", m.role.name).put("text", m.text)
@@ -893,7 +928,7 @@ When you finish, say what you did in one short sentence.
             }
             val hist = JSONArray()
             for (i in 0 until history.length()) hist.put(stripImages(history.getJSONObject(i)))
-            val firstUser = msgs.firstOrNull { it.role == Role.USER }?.text ?: msgs.first().text
+            val firstUser = msgs.firstOrNull { it.role == Role.USER }?.text ?: msgs.firstOrNull()?.text ?: title
             if (title.isEmpty()) title = firstUser.lineSequence().first().take(48)
             val preview = msgs.lastOrNull { it.role == Role.BLAZE }?.text ?: firstUser
             val doc = JSONObject().put("id", id).put("title", title).put("pinned", pinned)

@@ -50,6 +50,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -92,12 +97,12 @@ fun ShellTopBar(
             Spacer(Modifier.width(6.dp))
             Pill(mode, onMode)
             Spacer(Modifier.weight(1f))
-            Box(Modifier.size(40.dp).clickable(onClick = onSearch), contentAlignment = Alignment.Center) { SearchGlyph(c.ink) }
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onSearch).semantics { contentDescription = "Search" }, contentAlignment = Alignment.Center) { SearchGlyph(c.ink) }
             Box(Modifier.size(32.dp).clickable(onClick = onRouter), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(8.dp).background(if (routerOk) c.accent else c.weak))
+                Box(Modifier.size(8.dp).clip(CircleShape).background(if (routerOk) c.accent else c.weak))
             }
             Spacer(Modifier.width(4.dp))
-            Box(Modifier.size(34.dp).background(c.ink).clickable(onClick = onAvatar), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(34.dp).clip(CircleShape).background(c.ink).clickable(onClick = onAvatar).semantics { contentDescription = "Account menu" }, contentAlignment = Alignment.Center) {
                 Text(avatar.take(1).uppercase().ifBlank { "B" }, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 15.sp, color = c.paper))
             }
         }
@@ -106,20 +111,24 @@ fun ShellTopBar(
             Box(Modifier.size(6.dp).background(c.accent))
             Spacer(Modifier.width(8.dp))
             Label(viewChip.uppercase(), color = c.ink, size = 10.sp, modifier = Modifier.weight(1f))
-            Row(Modifier.hairline(c.hair).clickable(onClick = onExit).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.clip(RoundedCornerShape(16.dp)).background(c.faint).clickable(onClick = onExit).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Label("✕  Exit", color = c.ink, size = 10.sp)
             }
         }
     }
 }
 
+/**
+ * Chat | Projects. It only switches tabs (v0.24.0: no conversation list behind a tap or long-press on Chat).
+ */
 @Composable
 private fun Pill(mode: String, onMode: (String) -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.hairline(c.hair).padding(2.dp)) {
+    Row(Modifier.clip(RoundedCornerShape(20.dp)).background(c.faint).padding(3.dp)) {
         listOf("chat" to "Chat", "projects" to "Projects").forEach { (id, label) ->
             val on = mode == id
-            Box(Modifier.background(if (on) c.ink else Color.Transparent).clickable { onMode(id) }.padding(horizontal = 12.dp, vertical = 7.dp)) {
+            Box(Modifier.clip(RoundedCornerShape(17.dp)).background(if (on) c.ink else Color.Transparent)
+                .clickable(onClickLabel = "Switch to $label") { onMode(id) }.padding(horizontal = 14.dp, vertical = 7.dp)) {
                 Text(label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = if (on) c.paper else c.sub))
             }
         }
@@ -145,7 +154,7 @@ data class MenuItem(val id: String, val label: String, val sub: String = "")
 fun AvatarMenu(name: String, email: String, items: List<MenuItem>, onPick: (String) -> Unit, onLongPick: (String) -> Unit = {}, onDismiss: () -> Unit) {
     val c = LocalBlaze.current
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)).clickable(remember { MutableInteractionSource() }, null, onClick = onDismiss)) {
-        Column(Modifier.align(Alignment.TopEnd).padding(top = 60.dp, end = 10.dp).width(268.dp).background(c.paper).hairline(c.hair)
+        Column(Modifier.align(Alignment.TopEnd).padding(top = 60.dp, end = 10.dp).width(268.dp).clip(RoundedCornerShape(16.dp)).background(c.raised)
             .clickable(remember { MutableInteractionSource() }, null) { }) {
             Column(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Text(name.ifBlank { "Not signed in" }, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -215,42 +224,49 @@ fun ViewsSheet(badges: Map<String, String>, onPick: (BlazeView) -> Unit, onDismi
 
 // ---------------------------------------------------------------- search
 
+/**
+ * Search (v0.24.0): views by name, and a one-tap "ask Blaze" that searches every past conversation with
+ * search_chat (there is no chat list to browse any more).
+ */
 @Composable
-fun SearchScreen(chats: List<ChatMeta>, onChat: (String) -> Unit, onView: (BlazeView) -> Unit, onDismiss: () -> Unit, initial: String = "", autoFocus: Boolean = true) {
+fun SearchScreen(onView: (BlazeView) -> Unit, onAsk: (String) -> Unit, onDismiss: () -> Unit, initial: String = "", autoFocus: Boolean = true) {
     val c = LocalBlaze.current
     var q by remember { mutableStateOf(initial) }
     val focus = remember { FocusRequester() }
     if (autoFocus) LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Exception) { } }
-    val views = remember(q) { if (q.isBlank()) emptyList() else Views.filter(q).take(5) }
-    val found = remember(q, chats) {
-        if (q.isBlank()) chats.take(12) else chats.filter { it.title.contains(q, true) || it.preview.contains(q, true) }.take(30)
-    }
+    val views = remember(q) { if (q.isBlank()) Views.all.take(6) else Views.filter(q).take(8) }
     Column(Modifier.fillMaxSize().background(c.paper)) {
-        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 6.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable(onClick = onDismiss), contentAlignment = Alignment.Center) {
+        Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onDismiss).semantics { contentDescription = "Back" }, contentAlignment = Alignment.Center) {
                 Text("←", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
             }
-            Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 12.dp, vertical = 11.dp)) {
-                if (q.isEmpty()) Text("Search chats and views", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
-                BasicTextField(q, { q = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink), modifier = Modifier.fillMaxWidth().focusRequester(focus))
-            }
-        }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            if (views.isNotEmpty()) {
-                Label("Views", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp))
-                views.forEach { v ->
-                    Row(Modifier.fillMaxWidth().clickable { onView(v) }.padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(5.dp).background(c.accent)); Spacer(Modifier.width(12.dp))
-                        Text(v.name, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
-                        Spacer(Modifier.width(10.dp))
-                        Text(v.desc, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-                    }
+            Row(Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(c.bubble).padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                SearchGlyph(c.sub, 15.dp)
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f)) {
+                    if (q.isEmpty()) Text("Search views, or ask about past chats", maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+                    BasicTextField(q, { q = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
+                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.ink), modifier = Modifier.fillMaxWidth().focusRequester(focus))
                 }
             }
-            Label(if (q.isBlank()) "Recent chats" else "Chats", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp))
-            found.forEach { ch -> ChatRow(ch, busy = false) { onChat(ch.id) } }
-            if (found.isEmpty()) Text("No chats match.", modifier = Modifier.padding(20.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
+            Label("Past conversations", size = 9.sp, modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 8.dp))
+            if (q.isNotBlank()) SoftPill("Ask Blaze what you said about \u201c${q.trim().take(40)}\u201d", lead = "↳") {
+                onAsk("Search our past conversations for \u201c${q.trim()}\u201d and tell me what we said.")
+            } else Text("Type a word and Blaze looks through every conversation you've had, old ones included.",
+                modifier = Modifier.padding(start = 4.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.sub))
+            Label(if (q.isBlank()) "Views" else "Matching views", size = 9.sp, modifier = Modifier.padding(start = 4.dp, top = 22.dp, bottom = 6.dp))
+            views.forEach { v ->
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { onView(v) }.padding(horizontal = 4.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(c.accent)); Spacer(Modifier.width(12.dp))
+                    Text(v.name, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
+                    Spacer(Modifier.width(10.dp))
+                    Text(v.desc, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
+                }
+            }
+            if (views.isEmpty()) Text("No view matches.", modifier = Modifier.padding(4.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
         }
     }
 }
@@ -268,30 +284,6 @@ fun ChatRow(ch: ChatMeta, busy: Boolean, current: Boolean = false, chip: String 
         if (ch.pinned) { Spacer(Modifier.width(8.dp)); Box(Modifier.size(5.dp).background(c.accent)); Spacer(Modifier.width(8.dp)) }
         if (busy) Label("Working", color = c.accent, size = 9.sp)
         else if (chip.isNotBlank()) Label(chip, color = c.sub, size = 9.sp)
-    }
-}
-
-// ---------------------------------------------------------------- recent chats drawer (Chat mode rail)
-
-@Composable
-fun RecentRail(chats: List<ChatMeta>, busy: Set<String>, current: String, onNew: () -> Unit, onChat: (String) -> Unit, onAll: () -> Unit, onClose: () -> Unit) {
-    val c = LocalBlaze.current
-    Column(Modifier.width(304.dp).fillMaxSize().background(c.paper).hairline(c.hair).clickable(remember { MutableInteractionSource() }, null) { }) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Label("Conversation", color = c.ink, size = 10.sp, modifier = Modifier.weight(1f))
-            Label("×", size = 16.sp, modifier = Modifier.clickable(onClick = onClose).padding(8.dp))
-        }
-        Box(Modifier.padding(horizontal = 14.dp).fillMaxWidth().height(46.dp).background(c.ink).clickable(onClick = onNew), contentAlignment = Alignment.Center) {
-            Label("+  Fresh start", color = c.paper, size = 11.sp)
-        }
-        Spacer(Modifier.height(8.dp))
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            chats.take(40).forEach { ch -> ChatRow(ch, ch.id in busy, ch.id == current) { onChat(ch.id) } }
-            if (chats.isEmpty()) Text("Say hi to start", modifier = Modifier.padding(20.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
-        }
-        Row(Modifier.fillMaxWidth().hairlineTop(c.hair).clickable(onClick = onAll).padding(horizontal = 20.dp, vertical = 14.dp)) {
-            Label("Archive  →", color = c.accent, size = 10.sp)
-        }
     }
 }
 
@@ -319,12 +311,12 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
     val count = if (n == 1) "1 step" else "$n steps"
     val time = if (startAt > 0 && end >= startAt) " · " + formatDuration(end - startAt) else ""
     val pulse = if (live) rememberInfiniteTransition(label = "p").animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a").value else 1f
-    // v0.19.0: Desktop's raised card; a live one gets a blue edge and a 3dp blue bar on the left (like .card.confirm).
-    Column(Modifier.fillMaxWidth().widthIn(max = 520.dp).background(c.raised).hairline(if (live) c.accent.copy(alpha = 0.55f) else c.hair2)
-        .let { if (live) it.drawBehind { drawRect(c.accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) } else it }) {
+    // v0.24.0: inline with the thread, no outline: a soft rounded strip on Blaze's side; a live one gets an accent wash.
+    Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+        .background(if (live) c.accentSoft else c.bubble.copy(alpha = 0.6f))) {
         Row(Modifier.fillMaxWidth().clickable(enabled = n > 0) { open = !open }.padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(7.dp).alpha(pulse).background(if (live) c.accent else c.weak))
+            Box(Modifier.size(7.dp).alpha(pulse).clip(CircleShape).background(if (live) c.accent else c.weak))
             Spacer(Modifier.width(10.dp))
             Text((if (live) "Working" else "Worked") + (if (n > 0) " · $count" else "") + time, modifier = Modifier.weight(1f), maxLines = 1,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = if (live) c.ink else c.sub))
@@ -341,15 +333,15 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
         if (meter.isNotBlank()) Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1,
             modifier = Modifier.padding(start = 29.dp, end = 12.dp, bottom = 10.dp))
         AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Column(Modifier.fillMaxWidth().hairlineTop(c.hair).background(c.faint).padding(vertical = 4.dp)) {
+            Column(Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 6.dp)) {
                 steps.forEachIndexed { i, s ->
                     val running = live && i == n - 1
                     val nextAt = steps.getOrNull(i + 1)?.at ?: if (live) end else endAt
                     val dur = if (s.at > 0 && nextAt >= s.at) formatDuration(nextAt - s.at) else ""
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.Top) {
                         // Desktop's step marks: filled blue when done, a pulsing blue outline while running.
-                        Box(Modifier.padding(top = 5.dp).size(8.dp).let { m ->
-                            if (running) m.alpha(pulse).border(1.5.dp, c.accent) else m.background(c.accent.copy(alpha = 0.85f)) })
+                        Box(Modifier.padding(top = 5.dp).size(8.dp).clip(CircleShape).let { m ->
+                            if (running) m.alpha(pulse).border(1.5.dp, c.accent, CircleShape) else m.background(c.accent.copy(alpha = 0.85f)) })
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(s.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = if (running) c.sub else c.body))
@@ -371,7 +363,8 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
 @Composable
 fun FreshChatOffer(onFresh: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().widthIn(max = 520.dp).hairline(c.accent.copy(alpha = 0.55f)).clickable(onClick = onFresh).padding(horizontal = 12.dp, vertical = 10.dp),
+    Row(Modifier.padding(top = 10.dp, end = 28.dp).widthIn(max = 340.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.accentSoft)
+        .clickable(onClick = onFresh).padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("This chat is getting long", style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = c.ink))
@@ -379,25 +372,6 @@ fun FreshChatOffer(onFresh: () -> Unit) {
         }
         Spacer(Modifier.width(10.dp))
         Label("Fresh chat →", color = c.accent, size = 9.sp, maxLines = 1)
-    }
-}
-
-// ---------------------------------------------------------------- bubbles
-
-/** User message: right-aligned ink bubble (paper text). */
-@Composable
-fun UserBubble(text: String, quoted: String = "") {
-    val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        Column(Modifier.widthIn(max = 300.dp).background(c.ink).padding(horizontal = 14.dp, vertical = 10.dp)) {
-            if (quoted.isNotEmpty()) {
-                Text(quoted, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 6.dp),
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.paper.copy(alpha = 0.65f)))
-            }
-            androidx.compose.foundation.text.selection.SelectionContainer {
-                Text(text, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp, color = c.paper))
-            }
-        }
     }
 }
 
@@ -418,17 +392,20 @@ fun plusItems(work: String, approval: String, model: String, hasClipImage: Boole
     add(PlusItem("approval", if (approval == "autopilot") "Autopilot" else "Auto", if (approval == "autopilot") "Works on without asking · tap for Auto" else "Asks before risky steps · tap for Autopilot", on = approval == "autopilot"))
     add(PlusItem("model", "Model", model))
     add(PlusItem("views", "Views", "Memory, jobs, design, accounts…"))
-    // One mind: outside projects there is one conversation; "Fresh start" clears the context, nothing is deleted.
-    add(if (inProject) PlusItem("new", "New chat", "A new thread in this project") else PlusItem("new", "Fresh start", "Clear the context · nothing is deleted"))
+    // One mind: outside projects there is one conversation. v0.24.0: "Clear screen" (/clear) empties it, nothing is forgotten.
+    if (inProject) add(PlusItem("new", "New chat", "A new thread in this project"))
+    add(PlusItem("clear", "Clear screen", "Empty this chat · nothing is forgotten"))
 }
 
 @Composable
 fun PlusMenu(items: List<PlusItem>, onPick: (String) -> Unit) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.ink).heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(c.raised)
+        .heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(top = 8.dp)) {
+        Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 4.dp).size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(c.hair))
         items.forEach { it ->
-            Row(Modifier.fillMaxWidth().clickable { onPick(it.id) }.padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(6.dp).background(if (it.on) c.accent else c.weak))
+            Row(Modifier.fillMaxWidth().clickable { onPick(it.id) }.padding(horizontal = 18.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(if (it.on) c.accent else c.weak))
                 Spacer(Modifier.width(14.dp))
                 Text(it.label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
                 Spacer(Modifier.width(10.dp))
@@ -446,47 +423,49 @@ fun modeChip(work: String, approval: String): String {
 }
 
 /**
- * One bar: + on the left, the text field (with a mode chip only when not default), mic, Send/Stop.
+ * v0.24.0: a messaging pill. + on the left inside the pill, the text field, the mic, and the round Send / Stop
+ * button attached at the pill's end. A mode chip shows above it only when not default.
  */
 @Composable
 fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boolean, canSend: Boolean, plusOpen: Boolean,
              chip: String, agents: Int, listening: Boolean, speaking: Boolean,
              onPlus: () -> Unit, onMic: () -> Unit, onSend: () -> Unit, onStop: () -> Unit, onChip: () -> Unit = {}) {
     val c = LocalBlaze.current
-    Box(Modifier.fillMaxWidth().background(c.paper).padding(horizontal = 12.dp, vertical = 10.dp)) {
-        Column(Modifier.fillMaxWidth().hairline(if (value.text.isNotEmpty() || busy) c.ink.copy(alpha = 0.35f) else c.hair)) {
-            if (chip.isNotBlank() || agents > 0) Row(Modifier.padding(start = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (chip.isNotBlank()) Box(Modifier.background(c.accent).clickable(onClick = onChip).padding(horizontal = 8.dp, vertical = 3.dp)) {
-                    Label(chip, color = c.paper, size = 9.sp)
-                }
-                if (agents > 0) Label((if (chip.isNotBlank()) "   " else "") + "$agents AGENT" + (if (agents > 1) "S" else "") + " WORKING", color = c.accent, size = 9.sp)
+    Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp)) {
+        if (chip.isNotBlank() || agents > 0) Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (chip.isNotBlank()) Box(Modifier.clip(RoundedCornerShape(12.dp)).background(c.accent).clickable(onClick = onChip).padding(horizontal = 10.dp, vertical = 4.dp)) {
+                Label(chip, color = c.onAccent, size = 9.sp)
             }
-            Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.Bottom) {
-                Box(Modifier.size(44.dp).background(if (plusOpen) c.ink else Color.Transparent).clickable(onClick = onPlus), contentAlignment = Alignment.Center) {
-                    Text(if (plusOpen) "×" else "+", style = TextStyle(fontFamily = Type.Display, fontSize = 24.sp, color = if (plusOpen) c.paper else c.ink))
+            if (agents > 0) Label((if (chip.isNotBlank()) "   " else "") + "$agents AGENT" + (if (agents > 1) "S" else "") + " WORKING", color = c.accent, size = 9.sp)
+        }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(c.bubble).heightIn(min = 52.dp).padding(4.dp),
+            verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.size(44.dp).clip(CircleShape).background(if (plusOpen) c.ink else Color.Transparent).clickable(onClick = onPlus)
+                .semantics { contentDescription = if (plusOpen) "Close menu" else "Attach and more" }, contentAlignment = Alignment.Center) {
+                Text(if (plusOpen) "×" else "+", style = TextStyle(fontFamily = Type.Display, fontSize = 24.sp, color = if (plusOpen) c.paper else c.sub))
+            }
+            Box(Modifier.weight(1f).padding(start = 2.dp, end = 6.dp, top = 12.dp, bottom = 12.dp)) {
+                if (value.text.isEmpty()) Text(if (listening) "Listening…" else "Message Blaze, or type /", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+                BasicTextField(value = value, onValueChange = onValue,
+                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink),
+                    cursorBrush = SolidColor(c.accent), maxLines = 6,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { if (canSend && !busy) onSend() }),
+                    modifier = Modifier.fillMaxWidth())
+            }
+            if (value.text.isEmpty() && !busy) {
+                val micOn = listening || speaking
+                Box(Modifier.size(44.dp).clip(CircleShape).background(if (micOn) c.accent else Color.Transparent).clickable(onClick = onMic)
+                    .semantics { contentDescription = if (speaking) "Stop speaking" else if (listening) "Stop listening" else "Talk" }, contentAlignment = Alignment.Center) {
+                    MicMark(if (micOn) c.onAccent else c.sub, speaking)
                 }
-                Box(Modifier.weight(1f).padding(horizontal = 6.dp, vertical = 12.dp)) {
-                    if (value.text.isEmpty()) Text(if (listening) "Listening…" else "Ask Blaze, or type /", maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
-                    BasicTextField(value = value, onValueChange = onValue,
-                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink),
-                        cursorBrush = SolidColor(c.accent), maxLines = 6,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { if (canSend && !busy) onSend() }),
-                        modifier = Modifier.fillMaxWidth())
-                }
-                if (value.text.isEmpty() && !busy) {
-                    val micOn = listening || speaking
-                    Box(Modifier.size(44.dp).background(if (micOn) c.accent else Color.Transparent).clickable(onClick = onMic), contentAlignment = Alignment.Center) {
-                        MicMark(if (micOn) c.paper else c.ink, speaking)
-                    }
-                }
-                Spacer(Modifier.width(4.dp))
-                val enabled = busy || canSend
-                Box(Modifier.height(44.dp).background(if (busy) c.accent else if (enabled) c.ink else c.faint)
-                    .clickable(enabled = enabled) { if (busy) onStop() else onSend() }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                    Label(if (busy) "Stop" else "Send", color = if (enabled) c.paper else c.weak, size = 11.sp)
-                }
+            }
+            val enabled = busy || canSend
+            Box(Modifier.size(44.dp).clip(CircleShape).background(if (busy) c.accent else if (enabled) c.ink else c.hair)
+                .clickable(enabled = enabled) { if (busy) onStop() else onSend() }
+                .semantics { contentDescription = if (busy) "Stop" else "Send" }, contentAlignment = Alignment.Center) {
+                SendMark(if (busy) c.onAccent else if (enabled) c.paper else c.paper.copy(alpha = 0.9f), stop = busy)
             }
         }
     }

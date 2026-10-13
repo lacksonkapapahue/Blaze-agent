@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.23.5 (versionCode 70) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
+v0.24.0 (versionCode 72) is the current build on `main`. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -35,7 +35,10 @@ update normally. Because the name went down, CI also publishes the same APK as `
 1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
 
 ## One mind
-One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/mind.db` holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats are read-only in **Archive** (`/views`). Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.
+One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/mind.db` holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats stay on disk and in the journal (Blaze finds them with `search_chat`); since v0.24.0 there is no chat list or Archive screen, and `/clear` empties the screen without forgetting anything. Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.
+
+## Messaging-style chat (v0.24.0)
+The chat reads like a messaging app in Blaze's classic theme: your messages are ink bubbles on the right, Blaze's are soft bubbles on the left, runs from one side group tightly with asymmetric corners and one quiet timestamp, and the composer is a pill with a round Send button. The top **Chat | Projects** toggle only switches tabs. `/clear` (or + › Clear screen) empties the screen, with Undo for a few seconds.
 
 ## Background browser and phone control
 Blaze's browser works in the background (offscreen tabs). When a page needs something only you have, an **Action required** card appears in the chat (and a notification if you're away); what you type goes straight into the page, the AI only sees `{{secret:…}}` placeholders, and it's saved per site in **Settings › Saved logins** (Keystore-encrypted; one-time codes never). Sites that refuse passwords get Google/passkey options instead. Phone control follows an orient loop: a compact look at the screen before acting and a check after each step. A visible pointer shows where Blaze is about to tap; touch the screen to pause, drag the pointer, double-tap it to click there (Settings › Phone control › Show the pointer).

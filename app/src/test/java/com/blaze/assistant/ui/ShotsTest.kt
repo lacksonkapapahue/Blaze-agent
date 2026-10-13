@@ -88,26 +88,48 @@ class ShotsTest {
         ChatMeta("c3", "Afro beat for the intro", t0, false, "Make me an afro beat"),
         ChatMeta("c4", "Fix the WiFi", t0, false, "My phone keeps dropping WiFi"))
 
+    /** v0.24.0 messaging thread: grouped bubbles, quiet times, light inline work cards. Same components as ChatScreen. */
     @Composable
-    private fun Chat(plus: Boolean = false, views: Boolean = false, chip: String = "", input: String = "") {
-        Column(Modifier.fillMaxSize()) {
-            ShellTopBar("chat", {}, {}, {}, routerOk = true, onRouter = {}, avatar = "Luke", onAvatar = {}, mood = Mood.ACTING)
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                UserBubble("Make me a one-page portfolio site and show it to me")
-                WorkCard(doneSteps, live = false, startAt = t0 + 9_000, endAt = t0 + 9_000 + 191_000)
-                AnswerBody(1, "Done. Your portfolio is in **~/site/index.html** with a hero, three project cards and a contact form.\n\n" +
-                    "| Section | What's in it |\n|---|---|\n| Hero | Name, one line, photo |\n| Projects | 3 cards |\n| Contact | Email form |")
-                UserBubble("What's on Friday?")
-                WorkCard(liveSteps, live = true, startAt = t0 + 90_000, endAt = 0, status = "Reading 3 new emails", now = t0 + 90_000 + 72_000,
-                    meter = "in 4.2k · out 0.6k")
+    private fun ThreadSample(busy: Boolean = true) {
+        val gap: @Composable (GroupPos, Boolean) -> Unit = { p, first -> Spacer(Modifier.height(Bubbles.gapAbove(p, first))) }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 14.dp)) {
+            UserBubble("Hey Blaze", pos = GroupPos.FIRST)
+            gap(GroupPos.LAST, false)
+            UserBubble("Make me a one-page portfolio site and show it to me", pos = GroupPos.LAST)
+            MetaLine(Side.ME, "09:41", listOf("Copy" to {}, "Retry" to {}))
+            gap(GroupPos.FIRST, false)
+            WorkCard(doneSteps, live = false, startAt = t0 + 9_000, endAt = t0 + 9_000 + 191_000)
+            gap(GroupPos.MIDDLE, false)
+            BlazeReply(1, "Done. Your portfolio is in **~/site/index.html** with a hero, three project cards and a contact form.\n\n" +
+                "| Section | What's in it |\n|---|---|\n| Hero | Name, one line, photo |\n| Projects | 3 cards |\n| Contact | Email form |", GroupPos.MIDDLE)
+            gap(GroupPos.LAST, false)
+            BlazeReply(2, "Want a dark version too?", GroupPos.LAST)
+            MetaLine(Side.BLAZE, "09:44", listOf("Copy" to {}, "Quote" to {}, "Retry" to {}), chip = "Memory updated")
+            gap(GroupPos.SINGLE, false)
+            UserBubble("What's on Friday?", quoted = "Want a dark version too?", pos = GroupPos.SINGLE)
+            MetaLine(Side.ME, "09:46", listOf("Copy" to {}, "Retry" to {}))
+            gap(GroupPos.SINGLE, false)
+            if (busy) WorkCard(liveSteps, live = true, startAt = t0 + 90_000, endAt = 0, status = "Reading 3 new emails", now = t0 + 90_000 + 72_000,
+                meter = "in 4.2k · out 0.6k")
+            else {
+                BlazeReply(3, "Friday: **CIT102 lab at 10:00**, then the NET103 quiz at 14:00. Nothing in the evening.", GroupPos.SINGLE)
+                MetaLine(Side.BLAZE, "09:46", listOf("Copy" to {}, "Quote" to {}, "Retry" to {}))
+                SoftPill("Remind me Thursday night", lead = "↳") {}
             }
-            if (plus || views) SheetScrim {}
+        }
+    }
+
+    @Composable
+    private fun Chat(plus: Boolean = false, views: Boolean = false, chip: String = "", input: String = "", busy: Boolean = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, routerOk = true, onRouter = {}, avatar = "Luke", onAvatar = {}, mood = if (busy) Mood.ACTING else Mood.IDLE)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                ThreadSample(busy)
+                if (plus || views) SheetScrim {}
             }
             if (views) ViewsSheet(mapOf("agents" to "1 LIVE"), onPick = {}, onDismiss = {}, autoFocus = false)
             if (plus) PlusMenu(plusItems("plan", "autopilot", "Auto (free)", false)) {}
-            Composer(TextFieldValue(input), {}, busy = !plus && !views, canSend = input.isNotEmpty(), plusOpen = plus, chip = chip, agents = 0,
+            Composer(TextFieldValue(input), {}, busy = busy && !plus && !views, canSend = input.isNotEmpty(), plusOpen = plus, chip = chip, agents = 0,
                 listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {})
         }
     }
@@ -137,7 +159,35 @@ class ShotsTest {
             Box(Modifier.weight(1f)) { DesignView("~/site/index.html", busy = false, status = "", onAsk = {}, onOpenInBrowser = {}, home = File("/home"), preview = false) }
         }
     }
-    @Test fun search() = shot("08-search") { SearchScreen(chats, onChat = {}, onView = {}, onDismiss = {}, initial = "me", autoFocus = false) }
+    @Test fun search() = shot("08-search") { SearchScreen(onView = {}, onAsk = {}, onDismiss = {}, initial = "lamp", autoFocus = false) }
+
+    // v0.24.0: messaging-style chat (idle, typing), /clear with its undo bar, and the ask_user card inline.
+    @Test fun messaging() = shot("39-messaging") { Chat(busy = false, input = "Thanks!") }
+    @Test fun messagingDark() = shot("40-messaging-dark", dark = true) { Chat(busy = false) }
+    @Test fun clearUndo() = shot("41-clear-undo") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                Welcome(needsSetup = false, onSetup = {}) {}
+                UndoBar("Chat cleared \u00b7 nothing is forgotten", onUndo = {})
+            }
+            Composer(TextFieldValue(""), {}, busy = false, canSend = false, plusOpen = false, chip = "", agents = 0,
+                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {})
+        }
+    }
+    @Test fun questionInline() = shot("42-question-inline", dark = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {}, mood = Mood.ACTING)
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp)) {
+                UserBubble("Book me a bus to Lusaka on Friday")
+                Spacer(Modifier.height(16.dp))
+                WorkCard(listOf(step(61, "Searching buses Ndola → Lusaka"), step(62, "Comparing 3 times")), live = false, startAt = t0, endAt = t0 + 18_000)
+            }
+            QuestionView("Which bus should I book for Friday?", listOf("06:00 · Mazhandu · K250", "09:30 · Power Tools · K230", "14:00 · Juldan · K240"))
+            Composer(TextFieldValue(""), {}, busy = true, canSend = false, plusOpen = false, chip = "", agents = 0,
+                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {})
+        }
+    }
 
     @Test fun router() = shot("09-router") {
         Column(Modifier.fillMaxSize()) {
@@ -165,7 +215,7 @@ class ShotsTest {
                 UserBubble("Where did we land on the lamp prices?")
                 WorkCard(listOf(step(21, "Looking back through this chat for \u201clamp prices\u201d"), step(22, "Reading an earlier message")), live = false,
                     startAt = t0, endAt = t0 + 14_000, meter = "in 26.9k · out 0.4k", meterHigh = true)
-                AnswerBody(23, "On turn 41 we set **$24.99** for the moon lamp and **$19.99** for the mini, with free shipping over $35.")
+                BlazeReply(23, "On turn 41 we set **$24.99** for the moon lamp and **$19.99** for the mini, with free shipping over $35.")
                 FreshChatOffer {}
             }
         }
@@ -408,7 +458,7 @@ class ShotsTest {
                 UserBubble("Make me flashcards on CIT102 loops")
                 WorkCard(listOf(step(51, "Skills: study-flashcards, tutor"), step(52, "Making flashcards", "flashcards {\"action\":\"add\",\"deck\":\"CIT102 loops\"}"),
                     step(53, "Opening Learn")), live = false, startAt = t0, endAt = t0 + 21_000, open0 = true)
-                AnswerBody(54, "Made the **CIT102 loops** deck in Learn: 12 cards. It's open now; cards come back right before you'd forget them.")
+                BlazeReply(54, "Made the **CIT102 loops** deck in Learn: 12 cards. It's open now; cards come back right before you'd forget them.")
             }
         }
     }

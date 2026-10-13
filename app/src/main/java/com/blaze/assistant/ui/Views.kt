@@ -7,6 +7,8 @@ import org.json.JSONObject
 /**
  * Every screen Blaze has, in one place. Nothing was deleted in the 0.12 redesign: pages left the
  * sidebar and live here, reachable from /views, their own /command, Search, and open_view.
+ * v0.24.0: the Archive (old chat list) is gone with the conversation switcher; old chats stay on disk and in
+ * the journal, so Blaze still finds them with search_chat / search_past_chats.
  *
  * [page] = a settings page id ("" = the settings list); [special] = a screen that isn't a settings page.
  */
@@ -15,7 +17,6 @@ data class BlazeView(val id: String, val name: String, val desc: String, val pag
 
 object Views {
     val all = listOf(
-        BlazeView("chats", "Archive", "Chats from before one mind, read-only", special = "chats", aliases = listOf("history", "archive")),
         BlazeView("projects", "Projects", "Ongoing efforts with their own threads, brief and instructions", special = "projects", aliases = listOf("project")),
         BlazeView("design", "Design", "Live preview of anything visual: 3D scenes, art, sites, UI mockups, diagrams, charts, posters, slides", special = "design", aliases = listOf("preview", "studio", "3d", "designs")),
         BlazeView("memory", "Memory", "What Blaze remembers and has learned", page = "memory", aliases = listOf("learning")),
@@ -71,7 +72,7 @@ object Views {
 
     fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", TOOL)
         .put("description", "Switch Blaze's own screen to one of its views: design (live preview of anything visual: a 3D scene, art, a site, UI mockup, diagram, chart, poster or slides; with no target it shows the current design; make or change designs with the design tool), " +
-            "learn (flashcard decks; open it after flashcards add), memory, jobs, schedule, projects, agents, accounts, router (models/keys), skills, gallery, browser, doctor, usage, settings, chats (Archive). " +
+            "learn (flashcard decks; open it after flashcards add), memory, jobs, schedule, projects, agents, accounts, router (models/keys), skills, gallery, browser, doctor, usage, settings. " +
             "Output that fits a view is made there and the view opened, never dumped in chat. " +
             "The user can always tap Exit to come back to the chat. For design pass target = the file path (e.g. ~/site/index.html) or URL to preview, or nothing for the current design.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()

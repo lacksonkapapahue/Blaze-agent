@@ -499,7 +499,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
         if (text.isBlank()) return
         val openApp = { s: String -> octx.startActivity(android.content.Intent(octx, com.blaze.assistant.MainActivity::class.java)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        val cmd = CommandRunner.run(octx, text.trim(), openSettings = { openApp(it) }, openChats = { openApp("") }, listen = { })
+        val cmd = CommandRunner.run(octx, text.trim(), openSettings = { openApp(it) }, listen = { })
         if (cmd == "") { text = ""; return }
         if (mood == Mood.IDLE) { Agent.send(cmd ?: text); text = "" }
     }
