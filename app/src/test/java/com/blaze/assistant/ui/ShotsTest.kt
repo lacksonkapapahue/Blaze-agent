@@ -569,7 +569,7 @@ class ShotsTest {
         }
     }
 
-    // v0.24.4: the spark-blob pointer on light, dark and busy backgrounds, gliding and clicking, plus the "Click '…'?" check.
+    // v0.24.5: the spark-blob pointer on light, dark and busy backgrounds, gliding and clicking, plus the "Click '…'?" check.
     @Test fun pointerBlob() = shot("44-pointer-blob") {
         val G = androidx.compose.ui.graphics.Color
         fun T(t: String, col: androidx.compose.ui.graphics.Color) = androidx.compose.material3.Text(t, style = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = col))
