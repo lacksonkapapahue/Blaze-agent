@@ -25,6 +25,10 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // v0.24.7: one Blaze window. "Open Blaze" from the hold-Home panel starts MainActivity through
+        // startAssistantActivity, which Android puts in a separate (assistant) task even with singleTask, so two Blaze
+        // cards showed in Recents. If another task already holds MainActivity, hand it this intent and close this copy.
+        if (savedInstanceState == null && joinExistingTask()) return
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT)
@@ -46,6 +50,28 @@ class MainActivity : FragmentActivity() {
                 .setIcon(android.graphics.drawable.Icon.createWithResource(this, applicationInfo.icon))
                 .setIntent(android.content.Intent(this, MainActivity::class.java).setAction(ACTION_CALL)).build())
         } catch (_: Exception) { }
+    }
+
+    /** True when an older Blaze task was brought to the front and this duplicate task is being closed. */
+    private fun joinExistingTask(): Boolean {
+        val am = getSystemService(android.app.ActivityManager::class.java) ?: return false
+        val tasks = try { am.appTasks } catch (_: Exception) { return false }
+        val rows = tasks.mapNotNull { t ->
+            try {
+                val info = t.taskInfo
+                @Suppress("DEPRECATION")
+                val id = if (android.os.Build.VERSION.SDK_INT >= 29) info.taskId else info.id
+                TaskDedupe.Row(id, info.baseActivity?.className ?: info.baseIntent?.component?.className)
+            } catch (_: Exception) { null }
+        }
+        val keep = TaskDedupe.keep(taskId, rows, MainActivity::class.java.name) ?: return false
+        val other = tasks.getOrNull(rows.indexOfFirst { it.id == keep }) ?: return false
+        return try {
+            handle(intent)
+            other.moveToFront()
+            finishAndRemoveTask()
+            true
+        } catch (_: Exception) { false }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -72,8 +98,9 @@ class MainActivity : FragmentActivity() {
             // Never sent on its own: another app could share instructions the user didn't write.
             // It waits in the message box until the user taps Send.
             if (stream != null) {
-                lifecycleScope.launch {
-                    val a = com.blaze.assistant.agent.Attachments.load(this@MainActivity, stream)
+                // App scope: this activity may be a duplicate that closes right away (joinExistingTask).
+                kotlinx.coroutines.MainScope().launch {
+                    val a = com.blaze.assistant.agent.Attachments.load(applicationContext, stream)
                     Agent.sharedDraft.value = Agent.SharedDraft(shared, a)
                 }
                 return

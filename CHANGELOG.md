@@ -2,6 +2,17 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.24.7: Magic Hand (point at anything on screen), one Blaze task in Recents
+- **Magic Hand**: the new hand button in the quick assistant panel (hold Home) summons Blaze's mascot as a pointer you move yourself over any app (`phone/MagicHand.kt`). Drag it and the element under the flame tip lights up; the dock at the bottom shows what it's on, the menu, Blaze's answer, the confirm card and Close (`phone/MagicHandUi.kt`, state in `phone/MagicHandState.kt`). **Closing the dock stops everything**: the windows, a question in flight, whatever the hand carries and a teach recording.
+- **Point & ask**: double-tap the hand for the menu (the v0.24.6 browser pointer tiles and its element → action mapping, `BrowserMenuMapper`, plus Carry / Watch / Drop). Ask, Explain, Describe and the like send the element's words and a screenshot crop around it (Magic Hand's windows hidden while it captures) to Blaze; the answer shows in the dock.
+- **Circle to grab**: draw a circle with the hand; the circled area is read with on-device OCR (ML Kit, bundled model, no network), falling back to the accessibility text, then Copy, Translate, Search (DuckDuckGo), Save (to memory) or Carry.
+- **Carry & drop**: carry text across apps and double-tap a text box to drop it; it's always confirmed first, then typed with SET_TEXT (or the clipboard and Paste). "Drop in chat" hands it to Blaze.
+- **Teach mode**: Teach in the dock records your own taps, typing and screen changes (accessibility click / text-changed events, newly added to the service config), then a review card (name, remove last, discard) saves it as a workflow, `tested: false`. Passwords are never recorded.
+- **Watch this**: hold the hand on a price, score or status and confirm; Blaze re-reads it hourly and whenever its app comes to the front, and notifies when it changes. Settings › Advanced › **Watches** lists them, each removable.
+- **Rules**: the hand never taps or types without a yes; in Private (private chat or a private browser tab in front) it captures nothing: no screenshot, OCR, teach, watch or question; copy, carry and drop still work.
+- **Two Blaze tasks in Recents** fixed (`TaskDedupe`).
+- Tests: `MagicHandTest`, `MagicHandStateTest`, `TaskDedupeTest`; screenshots 48–52 (dock, menu, grab, teach review, watches). No database changes; prefs unchanged.
+
 ## v0.24.5: Blaze's real mascot (pointer, launcher and notification icons), always-on pointer, Blaze-themed dialogs and work banner
 Luke couldn't see the old arrow pointer at all, wanted it on screen the whole time Blaze drives the phone, and sent the real mascot: a flame / teardrop with its tip at the top right, orange at the top to bright blue at the bottom, two dark rounded eyes and a soft orange / blue glow.
 - **The mascot, drawn as vectors** (`phone/Mascot.kt`: one shape in body units, traced from Luke's art; the gradient, cyan middle, eyes and glow colours). v0.24.4's invented "spark blob" is gone everywhere.

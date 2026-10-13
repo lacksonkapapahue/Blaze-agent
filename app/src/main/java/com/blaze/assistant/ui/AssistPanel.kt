@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Stop
@@ -74,10 +75,10 @@ import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.voice.Voice
 import kotlinx.coroutines.launch
 
-/** Header buttons of the assistant panel, in order (pure, tested). Compact shows only Show more and Close. */
+/** Header buttons of the assistant panel, in order (pure, tested). Compact shows Magic Hand, Show more and Close (v0.24.7: the hand). */
 object PanelButtons {
-    enum class B(val desc: String) { NEW("New chat"), PIN("Pin the floating orb"), OPEN("Open Blaze"), MORE("Show more"), LESS("Show less"), CLOSE("Close") }
-    fun of(compact: Boolean): List<B> = if (compact) listOf(B.MORE, B.CLOSE) else listOf(B.NEW, B.PIN, B.OPEN, B.LESS, B.CLOSE)
+    enum class B(val desc: String) { HAND("Magic Hand: point at anything on screen"), NEW("New chat"), PIN("Pin the floating orb"), OPEN("Open Blaze"), MORE("Show more"), LESS("Show less"), CLOSE("Close") }
+    fun of(compact: Boolean): List<B> = if (compact) listOf(B.HAND, B.MORE, B.CLOSE) else listOf(B.HAND, B.NEW, B.PIN, B.OPEN, B.LESS, B.CLOSE)
 }
 
 /**
@@ -178,11 +179,17 @@ private fun AssistPanelBody(autoListen: Boolean, onClose: () -> Unit, onPin: () 
                 PanelButtons.of(compact).forEach { b ->
                     Spacer(Modifier.width(4.dp))
                     GlassIconButton(when (b) {
+                        PanelButtons.B.HAND -> Icons.Rounded.PanTool
                         PanelButtons.B.NEW -> Icons.Rounded.AddComment; PanelButtons.B.PIN -> Icons.Rounded.PushPin
                         PanelButtons.B.OPEN -> Icons.Rounded.OpenInFull; PanelButtons.B.MORE -> Icons.Rounded.UnfoldMore
                         PanelButtons.B.LESS -> Icons.Rounded.UnfoldLess; PanelButtons.B.CLOSE -> Icons.Rounded.Close
                     }, b.desc, size = 36.dp, bg = Glass.raised) {
                         when (b) {
+                            PanelButtons.B.HAND -> {
+                                // v0.24.7: summon Magic Hand over the app underneath; the panel gets out of the way.
+                                val err = com.blaze.assistant.phone.MagicHand.summon(ctx)
+                                if (err != null) note = err else { Voice.cancelListening(); onClose() }
+                            }
                             PanelButtons.B.NEW -> { Voice.cancelListening(); Agent.clear(); text = "" }
                             PanelButtons.B.PIN -> onPin()
                             PanelButtons.B.OPEN -> onExpand()
