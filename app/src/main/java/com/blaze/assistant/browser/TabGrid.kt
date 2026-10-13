@@ -74,15 +74,13 @@ fun TabGrid(startPrivate: Boolean, onDone: () -> Unit) {
             var menu by remember { mutableStateOf(false) }
             Box {
                 Box(Modifier.size(44.dp).clip(CircleShape).clickable { menu = true }, contentAlignment = Alignment.Center) { T("⋮", g.ink, 22) }
-                androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    androidx.compose.material3.DropdownMenuItem(text = { androidx.compose.material3.Text(if (priv) "Close all private tabs" else "Close all tabs") }, onClick = {
-                        menu = false; BrowserEngine.closeAll(priv)
+                com.blaze.assistant.ui.BlazeMenu(menu, onDismiss = { menu = false }, items = listOf(
+                    (if (priv) "Close all private tabs" else "Close all tabs") to {
+                        BrowserEngine.closeAll(priv)
                         if (BrowserEngine.normalTabs().isEmpty()) BrowserEngine.newTab(ctx)
                         if (!priv) onDone()
-                    })
-                    androidx.compose.material3.DropdownMenuItem(text = { androidx.compose.material3.Text(if (priv) "New private tab" else "New tab") }, onClick = {
-                        menu = false; BrowserEngine.newTab(ctx, isPrivate = priv); onDone() })
-                }
+                    },
+                    (if (priv) "New private tab" else "New tab") to { BrowserEngine.newTab(ctx, isPrivate = priv); onDone() }))
             }
             Box(Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).clickable {
                 if (cur?.isPrivate != priv) list.lastOrNull()?.let { BrowserEngine.current = BrowserEngine.tabs.indexOf(it) }

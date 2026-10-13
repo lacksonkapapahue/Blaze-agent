@@ -613,6 +613,32 @@ class ShotsTest {
         }
     }
 
+    // v0.24.5: the "Leave private chat?" dialog in the Blaze dialog look (dark card, pill buttons), over a dimmed chat.
+    @Test fun privateLeaveDialog() = shot("46-private-leave-dialog", dark = true) {
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF26262A))) {
+            Text("Private chat", Modifier.padding(24.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color(0xFFF0F0EE)))
+            Box(Modifier.fillMaxSize().background(DialogColors.scrim).padding(24.dp), contentAlignment = Alignment.Center) {
+                BlazeDialogCard(com.blaze.assistant.agent.PrivateChat.LEAVE_TITLE, com.blaze.assistant.agent.PrivateChat.LEAVE_TEXT,
+                    confirm = "Leave", onConfirm = {}, dismiss = "Stay", warm = true)
+            }
+        }
+    }
+
+    // v0.24.5: the floating work banner (rounded dark card, mascot in a spinning ring, Stop pill) over a light and a dark app, and the Blaze menu.
+    @Test fun workBanner() = shot("47-work-banner") {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFFF4F4F4)).padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
+                TaskCard(onOpen = {}, onStop = {}, step0 = "Opening YouTube and searching \u201clofi\u201d", tasks0 = 1)
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFF111110)).padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TaskCard(onOpen = {}, onStop = {}, step0 = "Comparing prices at 3 shops", tasks0 = 2)
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) { BlazeMenuCard(listOf("Close all tabs" to {}, "New tab" to {})) }
+                }
+            }
+        }
+    }
+
     // v0.23.4: Settings › Brains / Auto, models per provider with cooling counts, one provider opened.
     @Test fun autoPool() = shot("38-auto-pool") {
         fun S(pid: String, name: String, n: Int, cool: Int, tools: Int, at: Long, err: String, next: Long) =

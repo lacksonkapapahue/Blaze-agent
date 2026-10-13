@@ -563,12 +563,10 @@ fun ChatScreen() {
             BackHandler { showSearch = false }
         }
         if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
-        if (confirmLeavePrivate) androidx.compose.material3.AlertDialog(
-            onDismissRequest = { confirmLeavePrivate = false },
-            title = { Text(com.blaze.assistant.agent.PrivateChat.LEAVE_TITLE) },
-            text = { Text(com.blaze.assistant.agent.PrivateChat.LEAVE_TEXT) },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmLeavePrivate = false; Agent.leavePrivate() }) { Text("Leave") } },
-            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmLeavePrivate = false }) { Text("Stay") } })
+        if (confirmLeavePrivate) BlazeDialog(
+            title = com.blaze.assistant.agent.PrivateChat.LEAVE_TITLE, body = com.blaze.assistant.agent.PrivateChat.LEAVE_TEXT,
+            confirm = "Leave", onConfirm = { confirmLeavePrivate = false; Agent.leavePrivate() }, warm = true,
+            dismiss = "Stay", onDismiss = { confirmLeavePrivate = false })
         if (!onboard && gate) SetupGateScreen(onOpenPage = { settingsPage = it }, onDone = { gate = false })
         if (onboard) SetupFlow(setupPage) { prompt ->
             onboard = false; setupPage = 0
