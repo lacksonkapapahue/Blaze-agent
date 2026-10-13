@@ -13,11 +13,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
 import com.blaze.assistant.MainActivity
 import com.blaze.assistant.R
 import com.blaze.assistant.agent.Agent
 
-/** System notifications: a live "working" one with Stop, and replies you can answer inline. */
+/** System notifications: one combined ongoing status line with Stop (v0.25.0), and replies you can answer inline. */
 object Notifier {
     private const val CH_WORK = "blaze_work"
     private const val CH_REPLY = "blaze_reply"
@@ -36,10 +37,16 @@ object Notifier {
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
+        // v0.25.0: update downloads ride in the one status line (with Stop).
+        try {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main).launch {
+                com.blaze.assistant.update.Updater.state.collect { st -> updateFrom(st) }
+            }
+        } catch (_: Throwable) { }
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = app.getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(CH_WORK, "Blaze working", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Shows what Blaze is doing on your phone, with a Stop button"
+            nm.createNotificationChannel(NotificationChannel(CH_WORK, "Blaze status", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "What Blaze is doing right now (thinking, browsing, downloading an update, waiting for you), with a Stop button"
                 setShowBadge(false)
             })
             nm.createNotificationChannel(NotificationChannel(CH_REPLY, "Blaze replies", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -71,25 +78,72 @@ object Notifier {
         PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
     )
 
-    /** Ongoing notification while Blaze acts. [step] is the latest step, e.g. "Opening YouTube". */
-    fun working(step: String) {
-        if (!allowed()) return
-        val n = NotificationCompat.Builder(app, CH_WORK)
+    // ---------- v0.25.0: one combined ongoing status notification ----------
+    @Volatile private var stBusy = false
+    @Volatile private var stStep = ""
+    @Volatile private var stNeeds = ""
+    @Volatile private var stUpdatePct: Int? = null
+    @Volatile private var stUpdateLabel = ""
+    /** True while Blaze is on screen: agent work isn't shown (the chat shows it), downloads and needs still are. */
+    @Volatile var appVisible = false
+
+    /** The current input of the status notification (tests, diagnostics). */
+    fun statusInput(): StatusNote.Input = StatusNote.Input(stBusy && !appVisible, stStep, if (appVisible) "" else stNeeds, stUpdatePct, stUpdateLabel)
+
+    private fun refresh() {
+        if (!::app.isInitialized) return
+        val line = StatusNote.line(statusInput())
+        if (line == null || !allowed()) { try { NotificationManagerCompat.from(app).cancel(ID_WORK) } catch (_: Exception) { }; return }
+        val b = NotificationCompat.Builder(app, CH_WORK)
             .setSmallIcon(R.drawable.ic_stat_blaze)
             .setColor(ACCENT)
-            .setContentTitle("Blaze is working")
-            .setContentText(step)
+            .setContentTitle(line.title)
+            .setContentText(line.text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setProgress(0, 0, true)
+            .setSilent(true)
             .setContentIntent(openApp())
-            .addAction(0, "Stop", broadcast(ActionReceiver.STOP))
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .build()
-        try { NotificationManagerCompat.from(app).notify(ID_WORK, n) } catch (_: SecurityException) { }
+        line.progress?.let { p -> if (p < 0) b.setProgress(0, 0, true) else b.setProgress(100, p, false) }
+        if (line.stop) b.addAction(0, "Stop", broadcast(ActionReceiver.STOP))
+        try { NotificationManagerCompat.from(app).notify(ID_WORK, b.build()) } catch (_: SecurityException) { }
     }
 
-    fun doneWorking() = NotificationManagerCompat.from(app).cancel(ID_WORK)
+    /** Agent work in progress. [step] is the latest step, e.g. "Opening YouTube". */
+    fun working(step: String) { stBusy = true; stStep = step; refresh() }
+
+    /** Agent work finished or stopped (an update download, if any, keeps showing). */
+    fun doneWorking() { stBusy = false; stStep = ""; stNeeds = ""; refresh() }
+
+    /** "Needs you: …" in the status line (a question, a confirm, a secure form). Blank clears it. */
+    fun needs(what: String) { stNeeds = what; refresh() }
+
+    /** Update progress: [pct] 0..100, -1 indeterminate, null = no update running. */
+    fun update(pct: Int?, label: String = "") { stUpdatePct = pct; stUpdateLabel = label; refresh() }
+
+    /** The app came to the front (true) or went to the background (false). */
+    fun visible(v: Boolean) { appVisible = v; refresh() }
+
+    /** Stop: cancels agent work and any update download, then clears the line. */
+    fun stopEverything() {
+        try { Agent.stopAll() } catch (_: Exception) { }
+        try { com.blaze.assistant.update.Updater.stop() } catch (_: Exception) { }
+        stBusy = false; stStep = ""; stNeeds = ""; stUpdatePct = null; stUpdateLabel = ""
+        refresh()
+    }
+
+    /** Maps the updater's state onto the status line. */
+    fun updateFrom(st: com.blaze.assistant.update.Updater.State) {
+        when (st) {
+            is com.blaze.assistant.update.Updater.State.Checking -> update(-1, "Checking for an update…")
+            is com.blaze.assistant.update.Updater.State.Downloading -> update(st.pct, "Blaze v${st.version}")
+            is com.blaze.assistant.update.Updater.State.Installing -> update(-1, "Installing Blaze v${st.version}…")
+            else -> if (stUpdatePct != null) update(null)
+        }
+    }
+
+    /** Test hook: reset the status state. */
+    internal fun resetStatus() { stBusy = false; stStep = ""; stNeeds = ""; stUpdatePct = null; stUpdateLabel = ""; appVisible = false }
 
     /** Blaze's reply, with an inline Reply box. */
     fun reply(raw: String, isError: Boolean, chatId: String? = null) {
@@ -172,6 +226,7 @@ object Notifier {
 
     private const val ID_QUESTION = 7
     fun question(q: String) {
+        needs(q)
         if (!allowed()) return
         val n = NotificationCompat.Builder(app, CH_REPLY).setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
             .setContentTitle("Blaze needs an answer").setContentText(q)
@@ -179,12 +234,13 @@ object Notifier {
             .setAutoCancel(true).setContentIntent(openApp()).setPriority(NotificationCompat.PRIORITY_HIGH).build()
         try { NotificationManagerCompat.from(app).notify(ID_QUESTION, n) } catch (_: SecurityException) { }
     }
-    fun clearQuestion() = try { NotificationManagerCompat.from(app).cancel(ID_QUESTION) } catch (_: Exception) { }
+    fun clearQuestion() { try { needs(""); NotificationManagerCompat.from(app).cancel(ID_QUESTION) } catch (_: Exception) { } }
 
     fun clearReplies() = NotificationManagerCompat.from(app).cancel(ID_REPLY)
 
     /** Approval request with Allow / Don't buttons. */
     fun confirm(title: String, detail: String, action: String) {
+        needs(title)
         if (!allowed()) return
         val n = NotificationCompat.Builder(app, CH_REPLY)
             .setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
@@ -198,7 +254,7 @@ object Notifier {
         try { NotificationManagerCompat.from(app).notify(ID_CONFIRM, n) } catch (_: SecurityException) { }
     }
 
-    fun clearConfirm() = NotificationManagerCompat.from(app).cancel(ID_CONFIRM)
+    fun clearConfirm() { needs(""); NotificationManagerCompat.from(app).cancel(ID_CONFIRM) }
 
     /** True when Blaze may post notifications (always below Android 13; a granted permission on 13+). */
     fun canPost(): Boolean = ::app.isInitialized && allowed()
@@ -209,6 +265,7 @@ object Notifier {
      * the permission); the form still waits in the chat.
      */
     fun actionRequired(title: String, site: String): Boolean {
+        if (::app.isInitialized) needs("sign in to ${site.take(40)}")
         if (!canPost()) return false
         val open = PendingIntent.getActivity(app, ID_ACTION, Intent(app, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP).putExtra(EXTRA_OPEN_FORM, true),
@@ -223,7 +280,7 @@ object Notifier {
         return try { NotificationManagerCompat.from(app).notify(ID_ACTION, n); true } catch (_: SecurityException) { false }
     }
 
-    fun clearAction() = try { NotificationManagerCompat.from(app).cancel(ID_ACTION) } catch (_: Exception) { }
+    fun clearAction() { try { needs(""); NotificationManagerCompat.from(app).cancel(ID_ACTION) } catch (_: Exception) { } }
 }
 
 class ActionReceiver : BroadcastReceiver() {
@@ -239,7 +296,7 @@ class ActionReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
-            STOP -> { Agent.stopAll(); Notifier.doneWorking() }
+            STOP -> Notifier.stopEverything()
             DO -> intent.getStringExtra("prompt")?.let { p ->
                 androidx.core.app.NotificationManagerCompat.from(ctx).cancel(8)
                 Agent.doFromHeadsUp(intent.getStringExtra(EXTRA_CHAT), intent.getStringExtra(EXTRA_CONTEXT), p)

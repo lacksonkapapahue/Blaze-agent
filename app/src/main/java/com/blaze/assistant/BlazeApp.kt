@@ -37,6 +37,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.agent.BgAgents.init(this)
         com.blaze.assistant.routine.Routines.init(this)
         com.blaze.assistant.notify.Notifier.init(this)
+        try { com.blaze.assistant.update.Updater.checkInBackground(this) } catch (_: Throwable) { }
         Settings.tellIfSecretsDropped()
         com.blaze.assistant.voice.Voice.init(this)
         // Wake word starts from the screen (MainActivity/assistant) and at boot: starting a

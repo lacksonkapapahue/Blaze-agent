@@ -103,7 +103,7 @@ class MainActivity : FragmentActivity() {
     override fun onResume() {
         super.onResume(); Agent.inForeground = true
         com.blaze.assistant.agent.SelfControl.activity = java.lang.ref.WeakReference(this)
-        Notifier.clearReplies(); Notifier.doneWorking()
+        Notifier.clearReplies(); Notifier.visible(true)
         com.blaze.assistant.voice.WakeWordService.start(this)
     }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -120,6 +120,7 @@ class MainActivity : FragmentActivity() {
     override fun onPause() {
         Agent.inForeground = false
         if (Agent.mood.value != com.blaze.assistant.agent.Mood.IDLE) Notifier.working(Agent.lastStep())
+        Notifier.visible(false)
         super.onPause()
     }
 }

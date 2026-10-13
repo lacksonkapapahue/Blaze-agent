@@ -280,6 +280,15 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         s.msgs = s.msgs.map { if (it.id == id) it.copy(meta = meta) else it }
     }
 
+    /** v0.25.0: true when the visible chat already has a card with this meta (one update card at a time). */
+    fun hasCard(meta: String): Boolean = cur.msgs.any { it.meta == meta }
+
+    /** v0.25.0: removes app cards with this meta from every open chat (the update card when it finishes). */
+    fun removeCard(meta: String) {
+        val all = (sessions.values + cur).toSet()
+        all.forEach { s -> if (s.msgs.any { it.meta == meta }) { s.msgs = s.msgs.filterNot { it.meta == meta }; try { s.persist() } catch (_: Throwable) { } } }
+    }
+
     /** A line from the app itself (command results, help). Shown, not sent to the model. */
     fun note(text: String, asReply: Boolean = false) { cur.note(text, asReply) }
 
@@ -2016,7 +2025,7 @@ When you finish, say what you did in one short sentence.
                 }
                 com.blaze.assistant.update.Updater.TOOL -> {
                     if (this === cur) com.blaze.assistant.update.Updater.showCard()
-                    com.blaze.assistant.update.Updater.run(app, args.optBoolean("install", true))
+                    com.blaze.assistant.update.Updater.fromTool(app, args.optBoolean("install", true))
                 }
                 in Learning.toolNames -> {
                     add(Role.STEP, when (name) { "run_skill" -> "Replaying skill \"${args.optString("name")}\""; "skill_manage" -> "Saving a skill"; else -> "Searching past chats" })

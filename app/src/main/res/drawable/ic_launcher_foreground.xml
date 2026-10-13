@@ -1,6 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v0.25.0: the spark blob. A soft paper blob with Blaze's accent spark in the middle (inside the 66dp safe zone). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#FCFCFC" android:pathData="M39,33h6v6h-6z M45,33h6v6h-6z M51,33h6v6h-6z M57,33h6v6h-6z M39,39h6v6h-6z M63,39h6v6h-6z M39,45h6v6h-6z M63,45h6v6h-6z M39,51h6v6h-6z M45,51h6v6h-6z M51,51h6v6h-6z M57,51h6v6h-6z M39,57h6v6h-6z M63,57h6v6h-6z M39,63h6v6h-6z M63,63h6v6h-6z M39,69h6v6h-6z M45,69h6v6h-6z M51,69h6v6h-6z M57,69h6v6h-6z" />
-    <path android:fillColor="#6B8CFF" android:pathData="M75,69h6v6h-6z" />
+    <path android:fillColor="#FCFCFC" android:pathData="M54,28 C68,27.5 80.5,37 81,50.5 C81.5,64.5 72.5,79.5 56.5,80 C41.5,80.5 27.5,72.5 27,57.5 C26.5,42.5 38.5,28.5 54,28 Z" />
+    <path android:fillColor="#6B8CFF" android:pathData="M54,40 C55.6,49.6 58.4,52.4 68,54 C58.4,55.6 55.6,58.4 54,68 C52.4,58.4 49.6,55.6 40,54 C49.6,52.4 52.4,49.6 54,40 Z" />
 </vector>
