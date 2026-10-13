@@ -2,6 +2,12 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.24.9: rich replies
+- **ChatGPT-style replies** (`ui/RichReplies.kt` rules, `ui/RichBlocks.kt` drawing, wired into `AnswerBody`): a numbered list whose items start with a **bold title** becomes a **step-flow card** (numbered orange → blue dots joined by a line); a picture on its own line right before a paragraph sits **beside that section's text**; **image groups**: up to 3 pictures side by side, 4 or more collapse into a **stacked, slightly tilted deck** you swipe through (or tap the arrows) with a **card-flip** animation, an instant swap when Android's *Remove animations* is on (animator duration scale 0); **inline diagrams**: ```mermaid blocks drawn by mermaid.ink, ```graphviz / ```dot / ```plantuml / ```d2 by kroki.io (free, keyless). In a private chat no diagram source leaves the phone (shown as code).
+- Pictures load on a background thread (≤ 12 MB, downsampled to ≤ 1400 px, small memory cache) with a rounded placeholder and the alt text if they can't.
+- The system prompt gets a short static RICH REPLIES block so models use the formats only when they help and only with real image URLs. Pref `rich_replies` (default on) turns it all off.
+- Tests `RichRepliesTest`; screenshots `53-rich-steps`, `54-rich-deck`. No database changes; prefs backward compatible.
+
 ## v0.24.8: rounded everything (no square UI)
 - **Shape tokens** (`ui/Theme.kt` `BlazeShapes`: xs 8, small 12, medium 16, large 24 dp, pill; Material's shapes mapped to them) and the brand gradient `BlazeBrush` for primary buttons; `BlazeButton` / `BlazeTextField` / `BlazeCard` and a rounded `ui/Kit.kt` (rows, tags, buttons as sentence-case pills, switches, search, segmented). `Modifier.hairline` now follows a rounded shape and clips to it.
 - **Brand mark** is the mascot in a dark circle (was the square pixel "B"); Projects restyled.

@@ -684,6 +684,8 @@ When you finish, say what you did in one short sentence.
             append(CoreSkills.promptBlock())
             // v0.23.0: the always-present VIEWS block (static, so it stays in the cached prefix).
             append(ViewRouter.PROMPT)
+            // v0.24.9: rich replies (steps, section pictures, image groups, diagrams); static, so it stays cached.
+            append(com.blaze.assistant.ui.RichReplies.PROMPT)
             // Speed plan step 2: everything above stays identical turn after turn, so providers can
             // reuse their cached prefix. Everything that changes (clock, memory, device) goes last.
             append("\n\n")

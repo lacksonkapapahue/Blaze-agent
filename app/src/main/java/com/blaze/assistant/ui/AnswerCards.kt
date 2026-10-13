@@ -129,11 +129,22 @@ fun AnswerBody(key: Long, src: String) {
     val fold = Settings.foldAnswers
     val segs = remember(src) { AnswerCards.parse(src) }
     val report = fold && AnswerCards.isReport(src)
+    // v0.24.9 rich replies: steps, section pictures, image rows / decks and diagrams on top of the cards (pref rich_replies, default on).
+    val priv = com.blaze.assistant.agent.Agent.privateChat.value
+    val rich = Settings.bool("rich_replies", true)
+    val blocks = remember(src, priv, rich) { if (rich) RichReplies.expand(segs, priv) else segs.map { RichReplies.Block.Plain(it) } }
+    val scale = animatorScale()
     val body: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            segs.forEachIndexed { i, s ->
+            blocks.forEachIndexed { i, b ->
                 val inner = fold && !report
-                when (s) {
+                when (b) {
+                    is RichReplies.Block.Steps -> RichSteps(b.steps) { MdText(it) }
+                    is RichReplies.Block.Image -> RichPicture(b.img, Modifier.fillMaxWidth(), ratio = 16f / 10f)
+                    is RichReplies.Block.ImageText -> RichImageText(b.img, b.md) { MdText(it) }
+                    is RichReplies.Block.Images -> RichImageGroup(b.imgs, scale)
+                    is RichReplies.Block.Diagram -> RichDiagram(b)
+                    is RichReplies.Block.Plain -> when (val s = b.seg) {
                     is AnswerCards.Seg.Text -> MdText(s.md)
                     is AnswerCards.Seg.Lists ->
                         if (inner) FoldCard("$key-$i", "List · ${s.items} items", s.md) { MdText(s.md) } else MdText(s.md)
@@ -147,6 +158,7 @@ fun AnswerBody(key: Long, src: String) {
                         val rows = (s.rows.size - 1).coerceAtLeast(0)
                         if (inner && rows > AnswerCards.TABLE_ROWS) FoldCard("$key-$i", "Table · $rows rows", s.raw) { TableGrid(s.rows) }
                         else TableGrid(s.rows)
+                    }
                     }
                 }
             }
