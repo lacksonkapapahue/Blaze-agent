@@ -112,9 +112,11 @@
 - **Merged:** PR #44 (draft, squashed locally): branch `rounded-everything` head bd29b38 (green, run 38484210819) → main 93ee9ad. Release v0.24.8 is created by the main build (https://github.com/lacksonkapapahue/Blaze-agent/releases/tag/v0.24.8). PR closed with a note.
 - **What:** `BlazeShapes` / `BlazeBrush` tokens, rounded kit, mascot brand mark, Projects restyle; audit rounded the remaining square surfaces (selected rows, detail panels, progress bars, dashes, edge / bin particles, tap highlight, memory accent bar); `ui/NoSquareTest` fails on RectangleShape / CutCornerShape / RoundedCornerShape(0…) in app sources.
 
-## rich-replies (v0.24.9, versionCode 81) — in progress
-- **Branch:** `rich-replies` from main 93ee9ad. `ui/RichReplies.kt` (pure: blocks, deck maths, diagram URLs, PROMPT), `ui/RichBlocks.kt` (RichSteps, RichPicture, RichImageText, RichImageGroup/RichDeck with card flip, RichDiagram, `animatorScale()`), wired into `AnswerBody` (`ui/AnswerCards.kt`), prompt line in `Agent.systemPrompt`. Tests `RichRepliesTest`; shots 53, 54.
-- **Next:** CI green on the PR → merge → confirm release v0.24.9.
+## rich-replies (v0.24.9, versionCode 81) — done
+- **Merged:** PR #47, branch `rich-replies` head 5f294de (green, run 38485862913), squash merge c1d6831 on main; release https://github.com/lacksonkapapahue/Blaze-agent/releases/tag/v0.24.9 (created by the main Build APK run). Screenshots `53-rich-steps`, `54-rich-deck` reviewed.
+- **What:** `ui/RichReplies.kt` (pure: blocks, deck maths, flip, diagram URLs, PROMPT), `ui/RichBlocks.kt` (RichSteps, RichPicture + `RichImages` loader/cache, RichImageText, RichImageGroup / RichDeck with card flip, instant when animator scale is 0, RichDiagram via mermaid.ink / kroki.io, never in Private), wired into `AnswerBody`; static RICH REPLIES prompt block after the VIEWS block. Pref `rich_replies` (default on, no UI yet). Tests `RichRepliesTest`.
+- **Left (needs the A12):** ask "how do I turn on battery saver" (expect a step-flow card), "show me 5 photos of Victoria Falls" (deck: swipe, flip; then turn on Remove animations and check it swaps instantly), "draw a flowchart of my morning" (mermaid diagram). Check real Wikimedia URLs load on mobile data.
 
 ## Next release
-- **v0.25.0 = "VPN that just works"** (rollover after .9).
+- **v0.25.0 = "VPN that just works"** (rollover after .9; versionCode 82). Branch from main c1d6831 (or newer).
+- **Next command:** `cd work/Blaze-agent && git checkout main && git pull && git checkout -b vpn-just-works`
