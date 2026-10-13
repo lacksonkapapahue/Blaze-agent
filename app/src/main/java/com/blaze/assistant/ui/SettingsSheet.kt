@@ -57,48 +57,65 @@ import androidx.compose.runtime.rememberCoroutineScope
 /** Settings, grouped into pages. [page] null = the category list. */
 data class SettingsPage(val id: String, val title: String, val sub: String)
 
-/** The four that matter, shown first; the rest sit under Advanced. */
-val essentialPages = setOf("account", "ai", "persona", "voice", "control", "connections", "desktop", "privacy")
+/**
+ * v0.24.4: Settings is cut to seven rows: Brain, Voice, Permissions, Account, Updates, About, Advanced.
+ * Every older page still exists (and keeps its prefs) behind Advanced; the BlazeRouter dashboard is gone
+ * (its prefs stay; Brain picks Auto or a fixed model).
+ */
+val essentialPages = listOf("ai", "voice", "permissions", "account", "updates", "about", "advanced")
 
-val settingsPages = listOf(
-    SettingsPage("account", "Blaze account", "Sign in, shared with Blaze Desktop"),
-    SettingsPage("router", "BlazeRouter", "Model router with presets and a dashboard"),
-    SettingsPage("ai", "Brain (classic editor)", "Free sign-ins; models and keys for power users"),
-    SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
+/** The top-level rows. */
+val topPages = listOf(
+    SettingsPage("ai", "Brain", "Which AI answers: Auto (free) or your own model and keys"),
+    SettingsPage("voice", "Voice", "Hey Blaze, spoken replies, default assistant"),
+    SettingsPage("permissions", "Permissions", "Phone control, notifications, mic, overlay"),
+    SettingsPage("account", "Account", "Blaze account and connected apps"),
+    SettingsPage("updates", "Updates", "Check for a newer Blaze; updates run in the background"),
+    SettingsPage("about", "About", "Version and what Blaze keeps on this phone"),
+    SettingsPage("advanced", "Advanced", "Everything else, page by page"),
+)
+
+/** Pages under Advanced (the old list without the router dashboard). */
+val advancedPages = listOf(
     SettingsPage("connections", "Connected accounts", "Google, GitHub, Spotify, Notion, Slack"),
     SettingsPage("desktop", "Blaze Desktop", "Pair with Blaze on your computer"),
-    SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
-    SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
-    SettingsPage("terminal", "Terminal", "A real shell, jobs, Termux"),
-    SettingsPage("dashboard", "Dashboard", "Local web dashboard and analytics"),
+    SettingsPage("terminal", "Terminal", "A real shell, jobs, Linux, Termux"),
+    SettingsPage("control", "Phone control", "Accessibility, skills, the pointer"),
     SettingsPage("persona", "Personality", "How Blaze talks"),
-    SettingsPage("control", "Phone control", "Accessibility, skills, permissions"),
-    SettingsPage("commands", "Slash commands", "Your own /commands and prompt skills"),
-    SettingsPage("skills", "Skill library", "Research, email, plans, docs, code: on, off, restore"),
-    SettingsPage("voice", "Voice & wake word", "Hey Blaze, spoken replies, default assistant"),
-    SettingsPage("orb", "Floating orb", "Keep Blaze over other apps"),
-    SettingsPage("routines", "Routines", "Things Blaze does on a schedule"),
+    SettingsPage("feel", "Look & feel", "Tap highlights, sounds, compact panel"),
     SettingsPage("memory", "Memory & learning", "What Blaze remembers and has learned"),
+    SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
+    SettingsPage("logins", "Saved logins", "Sign-ins from Blaze's secure form, encrypted on this phone"),
+    SettingsPage("proactive", "Proactive & triggers", "Speak up on its own, when-X-do-Y"),
+    SettingsPage("routines", "Routines", "Things Blaze does on a schedule"),
+    SettingsPage("specialists", "Specialists", "Sub-agents Blaze can delegate to"),
+    SettingsPage("skills", "Skill library", "Research, email, plans, docs, code: on, off, restore"),
+    SettingsPage("commands", "Slash commands", "Your own /commands and prompt skills"),
+    SettingsPage("orb", "Floating orb", "Keep Blaze over other apps"),
     SettingsPage("learn", "Learn", "Flashcards, Google Classroom, low-data mode"),
     SettingsPage("seller", "Seller", "Brand kit, weekly store digest, replies from your PC"),
     SettingsPage("logs", "Life logs", "Transcribe what the mic hears into memory, brainstorms"),
     SettingsPage("replies", "Notification replies", "Chat logs and replies from notifications, auto-reply"),
+    SettingsPage("dashboard", "Dashboard", "Local web dashboard and analytics"),
     SettingsPage("usage", "Usage", "Tokens and estimated cost"),
-    SettingsPage("privacy", "Privacy & safety", "App lock, approvals"),
-    SettingsPage("logins", "Saved logins", "Sign-ins from Blaze's secure form, encrypted on this phone"),
     SettingsPage("device", "Device & diagnostics", "Phone health, self-check, crash report"),
-    SettingsPage("backup", "Backup", "Export or import everything")
+    SettingsPage("backup", "Backup", "Export or import everything"),
 )
+
+val settingsPages = topPages + advancedPages
 
 @Composable
 fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalBlaze.current
     // An unknown page id falls back to the list instead of a blank screen.
-    var page by remember { mutableStateOf(start?.takeIf { s -> settingsPages.any { it.id == s } }
+    var page by remember { mutableStateOf((if (start == "router") "ai" else start)?.takeIf { s -> settingsPages.any { it.id == s } }
         ?: start?.let { com.blaze.assistant.agent.settingsPageFor(it) }?.takeIf { it.isNotEmpty() }) }
     // Opened straight onto a page (from the sidebar or a /command): back closes settings.
     val direct = remember { page != null }
-    fun back() { if (page != null && !direct) page = null else onDismiss() }
+    fun back() {
+        if (page != null && !direct) page = if (page in essentialPages || page == null) null else if (advancedPages.any { it.id == page }) "advanced" else null
+        else onDismiss()
+    }
     BackHandler { back() }
     val current = settingsPages.firstOrNull { it.id == page }
 
@@ -114,6 +131,10 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
             when (page) {
                 null -> SettingsList { page = it }
+                "permissions" -> { PermissionsPage { page = it }; ControlPage(a11yOn, onOpenAccessibility) }
+                "updates" -> UpdatesPage()
+                "about" -> AboutPage()
+                "advanced" -> AdvancedList { page = it }
                 "ai" -> {
                     BrainCard()
                     var adv by remember { mutableStateOf(Settings.providerId != com.blaze.assistant.agent.Providers.AUTO) }
@@ -140,7 +161,6 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "terminal" -> TerminalPage()
                 "dashboard" -> DashboardPage()
                 "backup" -> BackupSection()
-                "router" -> RouterPage(onClassic = { page = "ai" })
                 "learn" -> LearnPage()
                 "seller" -> SellerPage()
                 "logs" -> LifeLogsPage()
@@ -152,36 +172,37 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
     }
 }
 
-/** The settings list (v0.19.0): Desktop's grouped rows, essentials first, the rest under Advanced. */
+/** The settings list (v0.24.4): seven rows. Everything else is one tap away under Advanced. */
 @Composable
 fun SettingsList(advanced0: Boolean = false, onPage: (String) -> Unit) {
     val c = LocalBlaze.current
-    var advanced by remember { mutableStateOf(advanced0) }
     Spacer(Modifier.height(10.dp))
-    GroupHead("Essentials \u00b7 %02d".format(essentialPages.size), "What most people set once: sign-in, brain, voice, phone control.")
-    val ess = settingsPages.filter { it.id in essentialPages }
     Rows {
-        ess.forEachIndexed { i, sp ->
+        topPages.forEachIndexed { i, sp ->
             KitRow(sp.title, sp.sub, n = i + 1, first = i == 0, onClick = { onPage(sp.id) }) {
                 Text("\u2192", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
             }
         }
     }
-    Spacer(Modifier.height(18.dp))
-    val more = settingsPages.filter { it.id !in essentialPages }
-    GroupHead("Advanced \u00b7 %02d".format(more.size), if (advanced) "Everything else Blaze can do, page by page." else "") {
-        KitButton(if (advanced) "Hide" else "Show all", Btn.GHOST) { advanced = !advanced }
-    }
-    if (advanced) Rows {
-        more.forEachIndexed { i, sp ->
-            KitRow(sp.title, sp.sub, n = ess.size + i + 1, first = i == 0, onClick = { onPage(sp.id) }) {
+    if (advanced0) { Spacer(Modifier.height(18.dp)); AdvancedList(onPage) }
+    Spacer(Modifier.height(22.dp))
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
+}
+
+/** Advanced: every other page, unchanged. */
+@Composable
+fun AdvancedList(onPage: (String) -> Unit) {
+    val c = LocalBlaze.current
+    Spacer(Modifier.height(10.dp))
+    GroupHead("Advanced \u00b7 %02d".format(advancedPages.size), "Everything else Blaze can do, page by page.")
+    Rows {
+        advancedPages.forEachIndexed { i, sp ->
+            KitRow(sp.title, sp.sub, n = i + 1, first = i == 0, onClick = { onPage(sp.id) }) {
                 Text("\u2192", style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
             }
         }
     }
-    Spacer(Modifier.height(22.dp))
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    Label("Blaze " + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault(""), color = c.weak, size = 10.sp)
 }
 
 @Composable
@@ -242,6 +263,8 @@ private fun AiPage() {
     }
     Spacer(Modifier.height(10.dp))
     ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
+    var tech by remember { mutableStateOf(com.blaze.assistant.agent.ReplyChips.showTech()) }
+    ToggleRow("Show technical details", "Timings, data used, model names and the token meter under replies (hidden by default)", tech) { tech = !tech; Settings.setBool(com.blaze.assistant.agent.ReplyChips.PREF, tech) }
     ToggleRow("Show every step", "List each tool call as it happens, instead of one plain line and \"Worked for 12s\"", showSteps) { showSteps = !showSteps; Settings.showSteps = showSteps }
     ToggleRow("Background agents", "Blaze can hand long work to an agent and keep chatting (${com.blaze.assistant.agent.BgAgents.cap()} at a time on this phone)", bgAgents) { bgAgents = !bgAgents; Settings.setBool("bg_agents", bgAgents) }
     ToggleRow("Mode switches", "Show Plan/Build and Auto/Autopilot above the message box", modeBar) { modeBar = !modeBar; Settings.setBool("mode_bar", modeBar) }
@@ -257,9 +280,9 @@ private fun ControlPage(a11yOn: Boolean, onOpenAccessibility: () -> Unit) {
     var control by remember { mutableStateOf(Settings.phoneControl) }
     Spacer(Modifier.height(8.dp))
     ToggleRow("Phone control", "Open apps, tap, type and scroll for you", control) { control = !control; Settings.phoneControl = control }
-    var pointer by remember { mutableStateOf(Settings.bool("show_pointer", true)) }
-    ToggleRow("Show the pointer", "See where Blaze is about to tap. Touch the screen to pause it, drag the pointer, double-tap to click there", pointer) {
-        pointer = !pointer; Settings.setBool("show_pointer", pointer); if (!pointer) com.blaze.assistant.phone.Pointer.done() }
+    // v0.24.5: the pointer is always shown while Blaze controls apps (no switch; the old show_pointer pref is ignored).
+    Text("Blaze's spark-blob pointer is always on screen while it controls your phone. Touch the screen to pause it, drag the pointer, double-tap to click there.",
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.weak))
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth().hairline(if (a11yOn) c.hair else c.accent).clickable(onClick = onOpenAccessibility).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {

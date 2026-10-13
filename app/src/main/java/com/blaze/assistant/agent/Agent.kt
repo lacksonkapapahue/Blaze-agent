@@ -229,7 +229,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         _thinking.value = s.thinking
         _status.value = s.status
         _meter.value = s.meter
-        Settings.lastChatId = s.id
+        if (!s.isPrivate) Settings.lastChatId = s.id
+        _private.value = s.isPrivate
         // Forget idle chats in the background; working ones stay until they finish.
         sessions.values.removeAll { it !== s && !it.busy }
     }
@@ -273,11 +274,51 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Reads chat files in the background so the UI never waits on disk. */
     fun refreshChats() { io.launch { val l = ChatStore.list(); _chats.value = l } }
 
+    // ---------- v0.24.4: private chat ----------
+    private val _private = MutableStateFlow(false)
+    /** True while the visible chat is a private one. */
+    val privateChat: StateFlow<Boolean> = _private
+    /** The thread to go back to when the private chat closes. */
+    @Volatile private var beforePrivate: String = Mind.MAIN
+
+    /** Opens a new private chat (memory only). The chat you were in is saved and stays as it was. */
+    fun enterPrivate() {
+        if (cur.isPrivate) return
+        cur.persist()
+        beforePrivate = cur.id
+        val s = Session(PrivateChat.PREFIX + newId())
+        s.title = "Private"; s.titleSource = Titles.MANUAL
+        s.add(Role.STEP, "Private chat \u00b7 nothing here is saved or learned, and it disappears when you leave")
+        show(s)
+    }
+
+    /** Closes the private chat (stops it if it's working) and throws it away. Nothing was ever saved. */
+    fun leavePrivate() {
+        val p = cur
+        if (!p.isPrivate) return
+        p.stop()
+        p.msgs = emptyList()
+        sessions.remove(p.id)
+        val back = beforePrivate
+        val s = (if (back != Mind.MAIN && !PrivateChat.isPrivateId(back)) load(back) else null) ?: mainSession()
+        show(s)
+        sessions.remove(p.id)
+    }
+
     /** A card drawn by the app (e.g. the update card), marked by its meta. Not sent to the model. */
     fun card(text: String, meta: String) {
         val s = cur
         val id = s.add(Role.BLAZE, text)
         s.msgs = s.msgs.map { if (it.id == id) it.copy(meta = meta) else it }
+    }
+
+    /** v0.24.4: true when the visible chat already has a card with this meta (one update card at a time). */
+    fun hasCard(meta: String): Boolean = cur.msgs.any { it.meta == meta }
+
+    /** v0.24.4: removes app cards with this meta from every open chat (the update card when it finishes). */
+    fun removeCard(meta: String) {
+        val all = (sessions.values + cur).toSet()
+        all.forEach { s -> if (s.msgs.any { it.meta == meta }) { s.msgs = s.msgs.filterNot { it.meta == meta }; try { s.persist() } catch (_: Throwable) { } } }
     }
 
     /** A line from the app itself (command results, help). Shown, not sent to the model. */
@@ -769,6 +810,8 @@ When you finish, say what you did in one short sentence.
      * one) never stops it or sends its answer to the wrong place.
      */
     class Session(val id: String) {
+        /** v0.24.4: a private chat (memory only: nothing saved or learned). */
+        val isPrivate: Boolean get() = PrivateChat.isPrivateId(id)
         /** Set when this chat is a background agent's (B1…). */
         var agentId: String? = null
         var agentPlan = false
@@ -920,6 +963,7 @@ When you finish, say what you did in one short sentence.
         /** Save the current chat to disk (screenshots are dropped to keep files small). */
         fun persist(force: Boolean = false) {
             // force (v0.24.0 /clear): an emptied thread is saved too, so cleared messages don't come back on restart.
+            if (isPrivate) return   // v0.24.4: private chats are never written anywhere
             if (!force && msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
             val arr = JSONArray()
             for (m in msgs) {
@@ -1120,7 +1164,7 @@ When you finish, say what you did in one short sentence.
                 }
             } else { from = maxOf(windowStart(), base); windowed = from > base }
             lastRung = rung
-            val sys = systemPrompt(lastUserText()) + Modes.promptLine(agentPlan) +
+            val sys = systemPrompt(lastUserText()) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
@@ -1238,7 +1282,7 @@ When you finish, say what you did in one short sentence.
         suspend fun runLoop() {
             val bytes0 = DataMeter.used()
             try {
-                val allTools0 = tools().apply { put(ToolRouter.loadTool()) }
+                val allTools0 = tools().apply { put(ToolRouter.loadTool()) }.let { if (isPrivate) PrivateChat.filterTools(it) else it }
                 // Agents don't start or steer other agents; Plan keeps only read-only tools.
                 val allTools = Modes.filterTools(if (agentId == null) allTools0 else JSONArray().apply {
                     for (i in 0 until allTools0.length()) allTools0.getJSONObject(i).let { t -> if (t.optJSONObject("function")?.optString("name") !in BgAgents.leadOnly) put(t) } }, agentPlan)
@@ -1585,7 +1629,7 @@ When you finish, say what you did in one short sentence.
 
         /** Runs specialists: non-phone ones in parallel, phone ones one after another. */
         suspend fun delegate(tasks: JSONArray): String = kotlinx.coroutines.coroutineScope {
-            val all = tools()
+            val all = tools().let { if (isPrivate) PrivateChat.filterTools(it) else it }
             val jobs = (0 until minOf(tasks.length(), 6)).map { i ->
                 val o = tasks.getJSONObject(i)
                 val spec = Specialists.byId(o.optString("specialist")) ?: Specialists.builtIn.first()
@@ -1699,6 +1743,7 @@ When you finish, say what you did in one short sentence.
             // Plan mode is enforced here, at dispatch, not only in the prompt.
             Modes.block(name, args, agentPlan).takeIf { it.isNotEmpty() }?.let { add(Role.STEP, "Plan mode: skipped ${name.replace('_', ' ')}"); return it }
             if (agentId != null && name in BgAgents.leadOnly) return "Error: background agents can't start or steer other agents. Do the work yourself."
+            if (isPrivate && PrivateChat.blocked(name)) return PrivateChat.REFUSAL
             // Visible pointer (v0.21.0): while the user has the pointer, screen actions wait for them.
             if (name in Orient.acting && com.blaze.assistant.phone.Pointer.enabled) pointerGate(name)?.let { return it }
             // Orient loop (v0.20.0): know where we are before acting on the screen.
@@ -2050,7 +2095,7 @@ When you finish, say what you did in one short sentence.
                 }
                 com.blaze.assistant.update.Updater.TOOL -> {
                     if (this === cur) com.blaze.assistant.update.Updater.showCard()
-                    com.blaze.assistant.update.Updater.run(app, args.optBoolean("install", true))
+                    com.blaze.assistant.update.Updater.fromTool(app, args.optBoolean("install", true))
                 }
                 in Learning.toolNames -> {
                     add(Role.STEP, when (name) { "run_skill" -> "Replaying skill \"${args.optString("name")}\""; "skill_manage" -> "Saving a skill"; else -> "Searching past chats" })
@@ -2192,7 +2237,7 @@ When you finish, say what you did in one short sentence.
                     val expect = st.optString("expect")
                     if (fail == null && expect.isNotBlank() && svc.waitFor(expect, 3500) == null) fail = "expected \u201c$expect\u201d to appear but it didn't"
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { fail = "error: ${e.message}" }
-                Traces.log(svc.currentPkg(), st, fail == null, System.currentTimeMillis() - t0, fail ?: "")
+                if (!isPrivate) Traces.log(svc.currentPkg(), st, fail == null, System.currentTimeMillis() - t0, fail ?: "")
                 if (fail != null && st.optBoolean("optional")) { state[i] = 4; replace(boardId, Role.STEP, board()); continue }
                 if (fail != null) {
                     state[i] = 3; replace(boardId, Role.STEP, board())
@@ -2212,6 +2257,7 @@ When you finish, say what you did in one short sentence.
          * saved, and turns with nothing durable no longer cost a request.
          */
         fun learnAfterTurn() {
+            if (isPrivate) return   // v0.24.4: nothing is learned from a private chat (no title, memories, skills)
             val reply = msgs.lastOrNull { it.role == Role.BLAZE } ?: return
             if (reply.meta.startsWith("\u26a1")) return
             val lastUser = msgs.indexOfLast { it.role == Role.USER }; if (lastUser < 0) return
@@ -2274,8 +2320,10 @@ When you finish, say what you did in one short sentence.
                     Voice.speak(rest.ifBlank { " " }, queue = true)
                 } else Voice.speak(last.text)
             }
-            try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
+            if (!isPrivate) try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
             if (this === cur && (inForeground || overlayOpen)) return
+            // v0.24.4: a private chat's words never land in the notification shade.
+            if (isPrivate) { Notifier.reply("Blaze answered in your private chat.", last.role == Role.ERROR, id); return }
             // A chat you left kept working: say which one finished.
             Notifier.reply(if (this === cur) last.text else "${title.ifBlank { "A chat" }}: ${last.text}", last.role == Role.ERROR, id)
         }

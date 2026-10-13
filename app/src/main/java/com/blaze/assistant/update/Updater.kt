@@ -13,6 +13,7 @@ import com.blaze.assistant.connect.Connectors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -56,15 +57,76 @@ object Updater {
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("install", JSONObject().put("type", "boolean").put("description", "Install if newer (default true)")))))
 
-    /** The /update command: show the card and start. */
+    /** v0.24.4: the update runs in the background (its own scope, not the chat turn) so it can be stopped on its own. */
+    @Volatile private var job: kotlinx.coroutines.Job? = null
+
+    /** The /update command: show the (one) card and start in the background. */
     fun start(ctx: Context) {
         showCard()
-        scope.launch { run(ctx.applicationContext, true) }
+        launch(ctx, true)
     }
 
-    fun showCard() = Agent.card("Blaze update", CARD)
+    private fun launch(ctx: Context, install: Boolean) {
+        if (job?.isActive == true) return
+        val app = ctx.applicationContext
+        job = scope.launch { run(app, install) }
+    }
 
-    fun retry(ctx: Context) { scope.launch { run(ctx.applicationContext, true) } }
+    /** One update card at a time: never a second one in the chat. */
+    fun showCard() { if (!Agent.hasCard(CARD)) Agent.card("Blaze update", CARD) }
+
+    fun retry(ctx: Context) { showCard(); launch(ctx, true) }
+
+    /**
+     * The update_blaze tool: a check answers right away; an install starts in the background and returns, so the
+     * chat isn't held while it downloads (progress is on the card and in the status notification, with Stop).
+     */
+    suspend fun fromTool(ctx: Context, install: Boolean): String {
+        if (!install) return run(ctx.applicationContext, false)
+        val s = _state.value
+        if (s is State.Checking || s is State.Downloading || s is State.Installing) return "An update is already running in the background."
+        showCard()
+        launch(ctx, true)
+        return "Started updating Blaze in the background. Progress is on the update card and in the notification (with Stop); Android asks the user to confirm the install at the end."
+    }
+
+    /** Stop (from the notification or the card): cancels the download and removes the card. */
+    fun stop() {
+        job?.cancel(); job = null
+        val s = _state.value
+        if (s is State.Checking || s is State.Downloading || s is State.Installing || s is State.NeedsPermission) _state.value = State.Idle
+        Agent.removeCard(CARD)
+    }
+
+    /** True when the card should go away by itself: the update finished (or there was nothing to do). */
+    fun finished(s: State): Boolean = s is State.Done || s is State.UpToDate
+
+    private val KEY_LAST_CHECK = "update_last_check"
+
+    /**
+     * v0.24.4 background updates: at most once a day, on launch, a quiet check. If a newer Blaze is published the
+     * single update card appears with Install; nothing is downloaded until the user taps it.
+     */
+    fun checkInBackground(ctx: Context) {
+        val now = System.currentTimeMillis()
+        val last = try { com.blaze.assistant.agent.Settings.str(KEY_LAST_CHECK, "0").toLongOrNull() ?: 0L } catch (_: Exception) { return }
+        if (now - last < 24 * 3600_000L || job?.isActive == true) return
+        try { com.blaze.assistant.agent.Settings.setStr(KEY_LAST_CHECK, now.toString()) } catch (_: Exception) { }
+        val app = ctx.applicationContext
+        job = scope.launch {
+            run(app, false)
+            if (_state.value is State.Ready) showCard() else _state.value = State.Idle
+        }
+    }
+
+    init {
+        // The card disappears a moment after the update finishes (or when there was nothing to update).
+        scope.launch {
+            _state.collect { st ->
+                if (finished(st)) { kotlinx.coroutines.delay(if (st is State.Done) 1500 else 4000); if (finished(_state.value)) Agent.removeCard(CARD) }
+            }
+        }
+    }
 
     fun installed(ctx: Context): String = try {
         ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "0"
@@ -151,6 +213,7 @@ object Updater {
                 c.inputStream.use { inp -> f.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
+                        ensureActive()   // Stop cancels between chunks
                         val n = inp.read(buf); if (n < 0) break
                         out.write(buf, 0, n); got += n
                         val pct = if (total > 0) (got * 100 / total).toInt().coerceIn(0, 100) else 0
@@ -168,7 +231,11 @@ object Updater {
         } catch (e: UpdateError) { fail(e.message ?: "Update failed.") }
         catch (e: java.net.UnknownHostException) { fail("No internet connection. Connect and tap Retry.") }
         catch (e: java.net.SocketTimeoutException) { fail("GitHub is taking too long to answer. Tap Retry.") }
-        catch (e: kotlinx.coroutines.CancellationException) { _state.value = State.Idle; throw e }
+        catch (e: kotlinx.coroutines.CancellationException) {
+            _state.value = State.Idle
+            try { File(ctx.cacheDir, "update").listFiles()?.forEach { it.delete() } } catch (_: Exception) { }
+            throw e
+        }
         catch (e: Exception) { fail("The update didn't work: ${e.message ?: e.javaClass.simpleName}. Tap Retry.") }
     }
 

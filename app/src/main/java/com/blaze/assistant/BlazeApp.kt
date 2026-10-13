@@ -11,6 +11,10 @@ class BlazeApp : Application() {
         com.blaze.assistant.device.CrashLog.init(this)
         com.blaze.assistant.device.CrashLog.shieldMainThread()
         Settings.init(this)
+        // v0.24.4: back up prefs and data once per build before the setup gate (or anything after it) runs.
+        try {
+            if (!com.blaze.assistant.setup.SetupGate.isDone()) com.blaze.assistant.setup.SetupGate.backup(this, com.blaze.assistant.update.Updater.installedCode(this))
+        } catch (_: Throwable) { }
         // v0.23.4: Auto's per-provider model lists and per-model cooldowns (new files, no prefs changes).
         try { com.blaze.assistant.agent.ProviderCatalog.init(filesDir); com.blaze.assistant.agent.ModelMemory.init(filesDir) } catch (_: Exception) { }
         try { com.blaze.assistant.agent.Projects.load() } catch (_: Exception) { }
@@ -37,6 +41,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.agent.BgAgents.init(this)
         com.blaze.assistant.routine.Routines.init(this)
         com.blaze.assistant.notify.Notifier.init(this)
+        try { com.blaze.assistant.update.Updater.checkInBackground(this) } catch (_: Throwable) { }
         Settings.tellIfSecretsDropped()
         com.blaze.assistant.voice.Voice.init(this)
         // Wake word starts from the screen (MainActivity/assistant) and at boot: starting a

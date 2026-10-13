@@ -39,6 +39,7 @@ object ChatStore {
     fun load(id: String): JSONObject? = try { JSONObject(file(id).readText()) } catch (_: Exception) { null }
 
     fun save(o: JSONObject) {
+        if (PrivateChat.isPrivateId(o.optString("id"))) return   // v0.24.4: private chats are never written
         try {
             val f = file(o.getString("id"))
             val tmp = File(dir, f.name + ".tmp")
