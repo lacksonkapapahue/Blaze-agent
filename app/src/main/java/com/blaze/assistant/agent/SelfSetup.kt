@@ -106,7 +106,7 @@ object SelfSetup {
  */
 fun settingsPageFor(raw: String): String {
     val ids = com.blaze.assistant.ui.settingsPages.map { it.id }
-    val alias = mapOf("brain" to "ai", "model" to "ai", "models" to "ai", "keys" to "ai", "provider" to "ai",
+    val alias = mapOf("router" to "ai", "blazerouter" to "ai", "update" to "updates", "upgrade" to "updates", "permission" to "permissions", "version" to "about", "brain" to "ai", "model" to "ai", "models" to "ai", "keys" to "ai", "provider" to "ai",
         "wake" to "voice", "speech" to "voice", "tts" to "voice", "call" to "voice", "mic" to "voice", "speak" to "voice",
         "term" to "terminal", "shell" to "terminal", "termux" to "terminal", "linux" to "terminal",
         "look" to "feel", "theme" to "feel", "sounds" to "feel", "accounts" to "connections", "connected" to "connections",

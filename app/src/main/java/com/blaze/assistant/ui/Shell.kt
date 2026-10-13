@@ -92,20 +92,20 @@ fun ShellTopBar(
     routerOk: Boolean, onRouter: () -> Unit, avatar: String, onAvatar: () -> Unit,
     mood: Mood = Mood.IDLE, viewChip: String = "", onExit: () -> Unit = {},
     /** v0.24.2: private chat on (ghost filled + "Private" pill) and the ghost button. */
-    private: Boolean = false, onGhost: () -> Unit = {},
+    isPrivate: Boolean = false, onGhost: () -> Unit = {},
 ) {
     val c = LocalBlaze.current
     Column(Modifier.fillMaxWidth().background(c.paper).hairlineBottom(c.hair)) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 10.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clickable(onClick = onLogo), contentAlignment = Alignment.Center) { BrandMark(mood, 26.dp) }
             Spacer(Modifier.width(6.dp))
-            if (private) PrivatePill(onGhost) else Pill(mode, onMode)
+            if (isPrivate) PrivatePill(onGhost) else Pill(mode, onMode)
             Spacer(Modifier.weight(1f))
             Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onSearch).semantics { contentDescription = "Search" }, contentAlignment = Alignment.Center) { SearchGlyph(c.ink) }
             // v0.24.2: the router status dot is gone (no router dashboard); the ghost opens / leaves a private chat.
-            Box(Modifier.size(40.dp).clip(CircleShape).background(if (private) c.ink else Color.Transparent).clickable(onClick = onGhost)
-                .semantics { contentDescription = if (private) "Leave private chat" else "Private chat" }, contentAlignment = Alignment.Center) {
-                GhostGlyph(if (private) c.paper else c.ink, filled = private, eyes = c.ink)
+            Box(Modifier.size(40.dp).clip(CircleShape).background(if (isPrivate) c.ink else Color.Transparent).clickable(onClick = onGhost)
+                .semantics { contentDescription = if (isPrivate) "Leave private chat" else "Private chat" }, contentAlignment = Alignment.Center) {
+                GhostGlyph(if (isPrivate) c.paper else c.ink, filled = isPrivate, eyes = c.ink)
             }
             Spacer(Modifier.width(4.dp))
             Box(Modifier.size(34.dp).clip(CircleShape).background(c.ink).clickable(onClick = onAvatar).semantics { contentDescription = "Account menu" }, contentAlignment = Alignment.Center) {

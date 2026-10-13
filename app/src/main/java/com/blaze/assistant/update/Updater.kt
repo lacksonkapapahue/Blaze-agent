@@ -115,7 +115,7 @@ object Updater {
         val app = ctx.applicationContext
         job = scope.launch {
             run(app, false)
-            if (_state.value is State.Ready) showCard() else if (_state.value !is State.Failed) _state.value = State.Idle else _state.value = State.Idle
+            if (_state.value is State.Ready) showCard() else _state.value = State.Idle
         }
     }
 

@@ -408,7 +408,7 @@ fun ChatScreen() {
                 onAvatar = { avatarMenu = true }, mood = mood,
                 viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
                 onExit = { exitView() },
-                private = isPrivate,
+                isPrivate = isPrivate,
                 onGhost = { if (isPrivate) confirmLeavePrivate = true else { exitView(); shellMode = "chat"; Agent.enterPrivate() } })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (shellMode == "projects") {
