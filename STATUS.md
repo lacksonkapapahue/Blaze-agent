@@ -1,6 +1,7 @@
 # Blaze Android status
 
 - **Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release.**
+- **Rollover rule (Luke 2026-10-14): after a patch of .9 the next release rolls over: patch back to 0, minor +1 (0.24.9 → 0.25.0).** Planned: v0.24.7 Magic Hand (#45), v0.24.8 rounded-everything (#44), v0.24.9 rich replies, then **v0.25.0 = "VPN that just works"** (the release after rich replies).
 
 ## simplify-day (v0.24.4, versionCode 76)
 - **Branch:** `simplify-icons-notify`, PR #40 (https://github.com/lacksonkapapahue/Blaze-agent/pull/40). Planned as "v0.25.0", then "v0.24.2"; shipped as v0.24.4 (versionCode 76) because v0.24.3 (#41) landed on main first and the rule is patch +1 per release.
