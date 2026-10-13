@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.24.2 (versionCode 74) is the current build on `main`. Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
+v0.24.4 (versionCode 76) is the current build on `main`. Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -37,7 +37,7 @@ update normally. Because the name went down, CI also publishes the same APK as `
 ## One mind
 One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/mind.db` holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats stay on disk and in the journal (Blaze finds them with `search_chat`); since v0.24.0 there is no chat list or Archive screen, and `/clear` empties the screen without forgetting anything. Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.
 
-## Simpler day to day (v0.24.2)
+## Simpler day to day (v0.24.4)
 - **Icon:** the spark blob (paper blob, accent spark) on the launcher, with a themed monochrome version; every notification uses a monochrome blob.
 - **One status notification:** "Thinking…", "Browsing…", "Downloading update 42%" or "Needs you: …", with **Stop** (cancels the agent work and any update download). Life logs and the wake word keep their own microphone notifications; routines and terminal jobs keep their own foreground notifications.
 - **Background updates:** a quiet daily check; downloads run in the background with Stop; one update card that disappears when the update finishes.
@@ -60,6 +60,9 @@ Settings › Notification replies: with notification access on, Blaze reads chat
 
 ## Life logs
 Say "start logs" / "live logs" (or `/logs`, Settings › Life logs): a foreground service with a persistent notification (Pause, Stop) transcribes what the mic hears on the phone for free (Vosk small English model, shared with the wake word and downloaded once; Android's SpeechRecognizer until then). Only text is saved, as journal chunks (kind `life_log`) split by silence or topic; the idle review turns them into memories marked "(inferred)". "Brainstorm with me" (`/brainstorm`) writes ideas, decisions and next steps to the chat and memory when it stops. Pauses during calls, while another app records, while Blaze listens or speaks, and below 15% battery unless charging.
+
+## Core skills and specialists
+Six bundled **core skills** shape every turn and can't be switched off (they're listed first in Skills, marked "core"): `blaze-voice` (answer first, short and specific, one pick, warm and honest), `blaze-task-workflow` (goal → clarify only if it changes the result → look it up → plan with the cheapest tool → verify → deliver), `blaze-views` (output goes into its view), `blaze-specialists` (pick the specialist, split big work into parallel briefs, steer, merge), `blaze-workflow-builder` (save multi-step or recurring tasks as workflows with trigger, steps and checks via `save_workflow`) and `blaze-coding-workflow` (read first, small diffs, build and test, clean commits). Their "Pinned" rules go into the system prompt every turn (~1,500 tokens, from the shipped assets); the full skills are matched per turn like any other. Each request is also matched to a specialist (Shopper, Booker, Coder, Researcher, Tutor, Designer, Writer, Planner, Inbox, Phone operator or one you made): its skill packs are attached, `delegate` is offered, and "Specialist: …" shows on the work card. Code: `agent/CoreSkills.kt`, `agent/SpecialistMatch.kt`, `SkillPacks.saveWorkflow`.
 
 ## Views + skills
 Blaze always uses its views: flashcards and quizzes go into a **Learn** deck, pages into **Design**, reminders into **Schedule**, pictures and beats into the **Gallery**, methods into **Skills**, facts into **Memory**; the view opens and the chat gets a short answer. Each request is matched to its view on the phone (no extra model call), and to the skills that fit it (bundled, your own and learned; switched-off skills are skipped); the best 1-3 are read in full and shown as "Skills: …" on the work card. Code: `agent/ViewRouter.kt`, `agent/SkillMatch.kt`. Blaze never claims it made, changed or opened something in a view unless that view's tool actually worked this turn (`agent/ClaimGuard.kt`), and leaked reasoning tokens from some free models are stripped from replies (`agent/ReplyClean.kt`).

@@ -2,6 +2,11 @@
  "format": 1,
  "skills": [
   {
+   "name": "blaze-voice",
+   "version": 1,
+   "sha256": "15f43fc690b216642c6de25ffe18e3fee31cc48367ae779e4e1c1e120e24f46c"
+  },
+  {
    "name": "deep-research",
    "version": 1,
    "sha256": "971702c8de39058dd31f9856b7912e0460e2ac85056a5e167e6a08d5e19e5c3e"
@@ -256,6 +261,31 @@
    "name": "study-flashcards",
    "version": 1,
    "sha256": "7a7b52116b49e230093c24192636f0d1aa405ab385c8fc67476b9038a2f8c4b7"
+  },
+  {
+   "name": "blaze-task-workflow",
+   "version": 1,
+   "sha256": "9e786948eba2d9deed6308f8287902c44fd6702c63587eeb24301232a728cf71"
+  },
+  {
+   "name": "blaze-coding-workflow",
+   "version": 1,
+   "sha256": "759b8e19d982d2a97b008507e9a803563c868c298ee6ec414dcb64751c9ca712"
+  },
+  {
+   "name": "blaze-views",
+   "version": 1,
+   "sha256": "bdd3fae21423900c4a38276dc756ee55ec9ab29f7071113df7e3be5a7c0d21c1"
+  },
+  {
+   "name": "blaze-workflow-builder",
+   "version": 1,
+   "sha256": "85c424f987fd2a5c9d8f8ff7e8a3cb3858331379df149d03f299e771f5c3fd55"
+  },
+  {
+   "name": "blaze-specialists",
+   "version": 1,
+   "sha256": "aa1fe1f4c39eac02602c8fa7dc202c0581d1f59ad7ad46fe7ac3b0889ef7bee5"
   }
  ]
 }

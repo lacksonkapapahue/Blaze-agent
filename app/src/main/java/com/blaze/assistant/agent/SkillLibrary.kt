@@ -17,8 +17,9 @@ import java.security.MessageDigest
  */
 object SkillLibrary {
     data class Bundled(val name: String, val version: Int, val sha: String, val files: List<String> = listOf("SKILL.md"))
+    /** [core] = one of [CoreSkills.NAMES] (v0.24.3): always on, can't be switched off or deleted, shown first. */
     data class Row(val name: String, val description: String, val bundled: Boolean, val on: Boolean,
-                   val edited: Boolean, val installed: Boolean, val update: Boolean)
+                   val edited: Boolean, val installed: Boolean, val update: Boolean, val core: Boolean = false)
 
     private lateinit var app: Context
     private fun root() = File(com.blaze.assistant.terminal.Terminal.home(), "skills").apply { mkdirs() }
@@ -60,6 +61,7 @@ object SkillLibrary {
                 val rec = m.optJSONObject(b.name)
                 val f = File(root(), "${b.name}/SKILL.md")
                 when {
+                    CoreSkills.isCore(b.name) && (rec?.optBoolean("deleted") == true || !f.exists()) -> install(b, m)   // core: always there
                     rec?.optBoolean("deleted") == true -> {}                       // you deleted it: stay gone
                     !f.exists() -> if (rec == null) install(b, m) else m.put(b.name, rec.put("deleted", true))
                     rec == null -> {                                               // a skill of the same name you made yourself
@@ -77,8 +79,9 @@ object SkillLibrary {
     // ---------- on / off ----------
 
     private fun offSet(): Set<String> = Settings.str("skills_off").split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-    fun isOn(dirName: String) = dirName !in offSet()
+    fun isOn(dirName: String) = CoreSkills.isCore(dirName) || dirName !in offSet()
     fun setOn(dirName: String, on: Boolean) {
+        if (CoreSkills.isCore(dirName) && !on) return                       // core skills can't be switched off
         val s = offSet().toMutableSet(); if (on) s -= dirName else s += dirName
         Settings.setStr("skills_off", s.sorted().joinToString(","))
     }
@@ -86,6 +89,7 @@ object SkillLibrary {
     // ---------- delete / restore ----------
 
     fun delete(dirName: String) {
+        if (CoreSkills.isCore(dirName)) return                              // core skills can't be deleted (Restore original resets edits)
         File(root(), dirName).deleteRecursively()
         com.blaze.assistant.connect.SkillSync.localChange()
         val m = manifest()
@@ -110,10 +114,10 @@ object SkillLibrary {
             val cur = runCatching { sha(File(p.dir, "SKILL.md").readText()) }.getOrDefault("")
             val edited = b != null && rec != null && cur != rec.optString("sha")
             Row(p.dir.name, p.description, b != null, isOn(p.dir.name), edited, true,
-                b != null && rec != null && b.version > rec.optInt("version"))
+                b != null && rec != null && b.version > rec.optInt("version"), CoreSkills.isCore(p.dir.name))
         }
         val missing = bundled.filter { b -> packs.none { it.dir.name == b.name } }.map { b ->
-            Row(b.name, "", true, false, false, false, false)
+            Row(b.name, "", true, false, false, false, false, CoreSkills.isCore(b.name))
         }
         return out + missing
     }

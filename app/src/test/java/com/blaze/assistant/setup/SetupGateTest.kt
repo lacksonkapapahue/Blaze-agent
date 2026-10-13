@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** v0.24.2 dependency gate: upgraded users with missing dependencies get it; complete users don't. */
+/** v0.24.4 dependency gate: upgraded users with missing dependencies get it; complete users don't. */
 class SetupGateTest {
     private val all = SetupGate.deps.associate { it.id to true }
 

@@ -61,7 +61,7 @@ import com.blaze.assistant.setup.SetupGate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** v0.24.2: a setup step's mark: a still ring (to do), a spinning ring (working on it), a checkmark (done). */
+/** v0.24.4: a setup step's mark: a still ring (to do), a spinning ring (working on it), a checkmark (done). */
 enum class Mark { TODO, WORKING, DONE }
 
 @Composable
@@ -145,7 +145,7 @@ fun setupFix(ctx: Context, id: String, ask: (String) -> Unit, openPage: (String)
 }
 
 /**
- * The dependency gate (v0.24.2): only the missing steps, as columns. Required ones must be finished before the
+ * The dependency gate (v0.24.4): only the missing steps, as columns. Required ones must be finished before the
  * app opens; optional ones have Later. When nothing is left the done pref is set and this never shows again.
  */
 @Composable
@@ -206,7 +206,7 @@ fun SetupGateScreen(onOpenPage: (String) -> Unit, onDone: () -> Unit) {
     }
 }
 
-/** Settings › Permissions (v0.24.2): every dependency with its mark; tap to fix. */
+/** Settings › Permissions (v0.24.4): every dependency with its mark; tap to fix. */
 @Composable
 fun PermissionsPage(onOpenPage: (String) -> Unit = {}) {
     val ctx = LocalContext.current
@@ -227,7 +227,7 @@ fun PermissionsPage(onOpenPage: (String) -> Unit = {}) {
     Spacer(Modifier.height(14.dp))
 }
 
-/** Settings › Updates (v0.24.2): the one update card plus the check button. Updates run in the background. */
+/** Settings › Updates (v0.24.4): the one update card plus the check button. Updates run in the background. */
 @Composable
 fun UpdatesPage() {
     val ctx = LocalContext.current
@@ -242,7 +242,7 @@ fun UpdatesPage() {
     }
 }
 
-/** Settings › About (v0.24.2). */
+/** Settings › About (v0.24.4). */
 @Composable
 fun AboutPage() {
     val c = LocalBlaze.current

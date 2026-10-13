@@ -1,7 +1,7 @@
 package com.blaze.assistant.agent
 
 /**
- * v0.24.2: the line under a reply shows only what matters to a person ("Memory updated", "Skill saved",
+ * v0.24.4: the line under a reply shows only what matters to a person ("Memory updated", "Skill saved",
  * "Heads-up · 14:02"). Technical parts (timings, "instant/on-device", data used, token meters, model ids,
  * "New context") are hidden unless Settings › Advanced › Show technical details (`show_tech_lines`) is on.
  * The stored meta is untouched, so turning it on shows everything again.

@@ -11,7 +11,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.device.CrashLog.init(this)
         com.blaze.assistant.device.CrashLog.shieldMainThread()
         Settings.init(this)
-        // v0.24.2: back up prefs and data once per build before the setup gate (or anything after it) runs.
+        // v0.24.4: back up prefs and data once per build before the setup gate (or anything after it) runs.
         try {
             if (!com.blaze.assistant.setup.SetupGate.isDone()) com.blaze.assistant.setup.SetupGate.backup(this, com.blaze.assistant.update.Updater.installedCode(this))
         } catch (_: Throwable) { }

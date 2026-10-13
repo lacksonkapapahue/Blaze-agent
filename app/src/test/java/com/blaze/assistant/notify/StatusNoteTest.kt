@@ -5,7 +5,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** v0.24.2: the one combined status notification. */
+/** v0.24.4: the one combined status notification. */
 class StatusNoteTest {
     @Test fun nothingRunningMeansNoNotification() {
         assertNull(StatusNote.line(StatusNote.Input()))
@@ -21,7 +21,7 @@ class StatusNoteTest {
     }
 
     @Test fun updateDownloadShowsPercentWithStop() {
-        val l = StatusNote.line(StatusNote.Input(updatePct = 42, updateLabel = "Blaze v0.24.2"))!!
+        val l = StatusNote.line(StatusNote.Input(updatePct = 42, updateLabel = "Blaze v0.24.4"))!!
         assertEquals("Downloading update 42%", l.title); assertEquals(42, l.progress); assertTrue(l.stop)
         assertEquals("Checking for an update…", StatusNote.line(StatusNote.Input(updatePct = -1, updateLabel = "Checking for an update…"))!!.title)
     }
@@ -42,7 +42,7 @@ class StatusNoteTest {
         Notifier.resetStatus()
         Notifier.working("Opening youtube.com")
         assertEquals("Browsing…", StatusNote.line(Notifier.statusInput())!!.title)
-        Notifier.update(55, "Blaze v0.24.2")
+        Notifier.update(55, "Blaze v0.24.4")
         assertTrue(StatusNote.line(Notifier.statusInput())!!.text.endsWith("Downloading update 55%"))
         Notifier.doneWorking()
         assertEquals("Downloading update 55%", StatusNote.line(Notifier.statusInput())!!.title)

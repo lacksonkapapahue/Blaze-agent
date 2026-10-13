@@ -3,7 +3,7 @@ package com.blaze.assistant.agent
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** v0.24.2: technical lines under replies are hidden by default. */
+/** v0.24.4: technical lines under replies are hidden by default. */
 class ReplyChipsTest {
     @Test fun hidesTechnicalParts() {
         assertEquals("", ReplyChips.visible("\u26a1 instant \u00b7 12 ms", false))

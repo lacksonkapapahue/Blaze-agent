@@ -18,7 +18,7 @@ import com.blaze.assistant.MainActivity
 import com.blaze.assistant.R
 import com.blaze.assistant.agent.Agent
 
-/** System notifications: one combined ongoing status line with Stop (v0.24.2), and replies you can answer inline. */
+/** System notifications: one combined ongoing status line with Stop (v0.24.4), and replies you can answer inline. */
 object Notifier {
     private const val CH_WORK = "blaze_work"
     private const val CH_REPLY = "blaze_reply"
@@ -37,7 +37,7 @@ object Notifier {
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
-        // v0.24.2: update downloads ride in the one status line (with Stop).
+        // v0.24.4: update downloads ride in the one status line (with Stop).
         try {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main).launch {
                 com.blaze.assistant.update.Updater.state.collect { st -> updateFrom(st) }
@@ -78,7 +78,7 @@ object Notifier {
         PendingIntent.FLAG_UPDATE_CURRENT or (if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE)
     )
 
-    // ---------- v0.24.2: one combined ongoing status notification ----------
+    // ---------- v0.24.4: one combined ongoing status notification ----------
     @Volatile private var stBusy = false
     @Volatile private var stStep = ""
     @Volatile private var stNeeds = ""

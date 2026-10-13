@@ -228,7 +228,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
     }
 }
 
-/** One setup step: a raised card with a ring on the right that spins while it's being set up and turns into a checkmark (v0.24.2). */
+/** One setup step: a raised card with a ring on the right that spins while it's being set up and turns into a checkmark (v0.24.4). */
 @Composable
 private fun SetupRow(title: String, sub: String, on: Boolean, working: Boolean = false, onClick: () -> Unit) {
     val c = LocalBlaze.current

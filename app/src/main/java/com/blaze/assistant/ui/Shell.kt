@@ -91,7 +91,7 @@ fun ShellTopBar(
     mode: String, onMode: (String) -> Unit, onLogo: () -> Unit, onSearch: () -> Unit,
     routerOk: Boolean, onRouter: () -> Unit, avatar: String, onAvatar: () -> Unit,
     mood: Mood = Mood.IDLE, viewChip: String = "", onExit: () -> Unit = {},
-    /** v0.24.2: private chat on (ghost filled + "Private" pill) and the ghost button. */
+    /** v0.24.4: private chat on (ghost filled + "Private" pill) and the ghost button. */
     isPrivate: Boolean = false, onGhost: () -> Unit = {},
 ) {
     val c = LocalBlaze.current
@@ -102,7 +102,7 @@ fun ShellTopBar(
             if (isPrivate) PrivatePill(onGhost) else Pill(mode, onMode)
             Spacer(Modifier.weight(1f))
             Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onSearch).semantics { contentDescription = "Search" }, contentAlignment = Alignment.Center) { SearchGlyph(c.ink) }
-            // v0.24.2: the router status dot is gone (no router dashboard); the ghost opens / leaves a private chat.
+            // v0.24.4: the router status dot is gone (no router dashboard); the ghost opens / leaves a private chat.
             Box(Modifier.size(40.dp).clip(CircleShape).background(if (isPrivate) c.ink else Color.Transparent).clickable(onClick = onGhost)
                 .semantics { contentDescription = if (isPrivate) "Leave private chat" else "Private chat" }, contentAlignment = Alignment.Center) {
                 GhostGlyph(if (isPrivate) c.paper else c.ink, filled = isPrivate, eyes = c.ink)
@@ -141,7 +141,7 @@ private fun Pill(mode: String, onMode: (String) -> Unit) {
     }
 }
 
-/** v0.24.2: shown instead of Chat | Projects while a private chat is open. Tapping it offers to leave. */
+/** v0.24.4: shown instead of Chat | Projects while a private chat is open. Tapping it offers to leave. */
 @Composable
 private fun PrivatePill(onLeave: () -> Unit) {
     val c = LocalBlaze.current
@@ -153,7 +153,7 @@ private fun PrivatePill(onLeave: () -> Unit) {
     }
 }
 
-/** v0.24.2: the private-chat ghost: a rounded head, wavy hem, two eyes. */
+/** v0.24.4: the private-chat ghost: a rounded head, wavy hem, two eyes. */
 @Composable
 fun GhostGlyph(color: Color, filled: Boolean = false, size: androidx.compose.ui.unit.Dp = 20.dp, eyes: Color = Color.Black) {
     Canvas(Modifier.size(size)) {

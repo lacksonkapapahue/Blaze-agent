@@ -9,7 +9,7 @@ import androidx.core.content.ContextCompat
 import java.io.File
 
 /**
- * v0.24.2 dependency setup gate. On launch (new users after the first-run flow, and users who upgraded), Blaze
+ * v0.24.4 dependency setup gate. On launch (new users after the first-run flow, and users who upgraded), Blaze
  * checks which dependencies are missing and shows the setup columns for just those. Required ones block the
  * app until they're done; optional ones have "Later". Once everything is resolved `setup_deps_done` is set and
  * the gate never runs again. Before the gate first runs, prefs and user data are backed up (see [backup]).

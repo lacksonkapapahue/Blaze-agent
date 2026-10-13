@@ -177,7 +177,7 @@ fun ChatScreen() {
     var setupPage by rememberSaveable { mutableStateOf(0) }
     val galleryOpen by GalleryUi.open.collectAsState()
     LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
-    // v0.24.2: the dependency gate. Upgraded (and new) users finish whatever required setup is missing; never again once done.
+    // v0.24.4: the dependency gate. Upgraded (and new) users finish whatever required setup is missing; never again once done.
     var gate by remember { mutableStateOf(!onboard && com.blaze.assistant.setup.SetupGate.shouldGate(ctx)) }
     // Blaze opening one of its own settings pages (setup help).
     val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
@@ -390,7 +390,7 @@ fun ChatScreen() {
 
     if (inCall) { CallScreen(onHangUp = { inCall = false }); return }
     val me = account.user
-    // v0.24.2 private chat: confirm before leaving (the chat is thrown away).
+    // v0.24.4 private chat: confirm before leaving (the chat is thrown away).
     val isPrivate by Agent.privateChat.collectAsState()
     var confirmLeavePrivate by remember { mutableStateOf(false) }
     BackHandler(enabled = isPrivate && !confirmLeavePrivate) { confirmLeavePrivate = true }
@@ -647,7 +647,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                     when (item) {
                         is Item.Steps -> {
                             val st by Agent.status.collectAsState()
-                            // v0.24.2: the token meter is a technical line; shown only with Show technical details on.
+                            // v0.24.4: the token meter is a technical line; shown only with Show technical details on.
                             val m = if (Settings.longChat && (com.blaze.assistant.agent.ReplyChips.showTech() || meter?.high == true) && (item.live || item.key == lastStepsKey)) meter else null
                             WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
                                 meter = m?.text.orEmpty(), meterHigh = m?.high == true)
@@ -827,7 +827,7 @@ private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, o
     val clip = LocalClipboardManager.current
     val ctx = LocalContext.current
     val usedUp = m.meta.startsWith("usedup:")
-    // v0.24.2: technical parts of the chip (timings, data, model ids) are hidden unless Show technical details is on.
+    // v0.24.4: technical parts of the chip (timings, data, model ids) are hidden unless Show technical details is on.
     val chip = if (usedUp) "" else com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech())
     if (chipOnly && chip.isBlank()) return
     if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }

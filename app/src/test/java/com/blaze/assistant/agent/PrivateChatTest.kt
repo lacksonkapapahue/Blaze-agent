@@ -12,7 +12,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import java.io.File
 
-/** v0.24.2 private chat: nothing is persisted (chat file, journal, long-chat index) and nothing is learned. */
+/** v0.24.4 private chat: nothing is persisted (chat file, journal, long-chat index) and nothing is learned. */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [33], application = android.app.Application::class)
 class PrivateChatTest {

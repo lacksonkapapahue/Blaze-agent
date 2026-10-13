@@ -388,10 +388,12 @@ class ShotsTest {
     @Test fun memoryList() = shot("17-memory-list") { SettingsFrame("Memory & learning") { MemoryPage(mems, mode0 = "list", select0 = 12, query0 = "") } }
 
     @Test fun skills() = shot("18-skills") {
-        fun r(n: String, d: String, bundled: Boolean = true, on: Boolean = true, edited: Boolean = false, installed: Boolean = true, update: Boolean = false) =
-            com.blaze.assistant.agent.SkillLibrary.Row(n, d, bundled, on, edited, installed, update)
+        fun r(n: String, d: String, bundled: Boolean = true, on: Boolean = true, edited: Boolean = false, installed: Boolean = true, update: Boolean = false, core: Boolean = false) =
+            com.blaze.assistant.agent.SkillLibrary.Row(n, d, bundled, on, edited, installed, update, core)
         SettingsFrame("Skill library") {
             SkillLibraryPage(listOf(
+                r("blaze-voice", "How Blaze sounds in every reply: answer first, short, one clear pick.", core = true),
+                r("blaze-specialists", "Pick the matching specialist, split big work into parallel briefs.", core = true),
                 r("homeglow-weekly", "Monday numbers for the HomeGlow store: orders, revenue, top post.", bundled = false),
                 r("deep-research", "Search widely, read the sources, cite every claim with a link."),
                 r("study-planner", "Exam date and topics in, a day-by-day plan in Schedule out.", update = true),

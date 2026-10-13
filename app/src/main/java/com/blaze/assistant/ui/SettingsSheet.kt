@@ -58,7 +58,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 data class SettingsPage(val id: String, val title: String, val sub: String)
 
 /**
- * v0.24.2: Settings is cut to seven rows: Brain, Voice, Permissions, Account, Updates, About, Advanced.
+ * v0.24.4: Settings is cut to seven rows: Brain, Voice, Permissions, Account, Updates, About, Advanced.
  * Every older page still exists (and keeps its prefs) behind Advanced; the BlazeRouter dashboard is gone
  * (its prefs stay; Brain picks Auto or a fixed model).
  */
@@ -172,7 +172,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
     }
 }
 
-/** The settings list (v0.24.2): seven rows. Everything else is one tap away under Advanced. */
+/** The settings list (v0.24.4): seven rows. Everything else is one tap away under Advanced. */
 @Composable
 fun SettingsList(advanced0: Boolean = false, onPage: (String) -> Unit) {
     val c = LocalBlaze.current

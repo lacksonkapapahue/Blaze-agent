@@ -3,7 +3,7 @@ package com.blaze.assistant.agent
 import org.json.JSONArray
 
 /**
- * v0.24.2 private chat: a thread that lives in memory only. Nothing is saved (no chat file, no journal, no
+ * v0.24.4 private chat: a thread that lives in memory only. Nothing is saved (no chat file, no journal, no
  * long-chat index), nothing is learned (no memories, skills, titles or traces) and memory-writing tools are
  * removed from the model's list. Leaving it (after a confirm) throws it away.
  */

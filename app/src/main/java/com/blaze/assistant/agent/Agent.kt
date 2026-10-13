@@ -274,7 +274,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Reads chat files in the background so the UI never waits on disk. */
     fun refreshChats() { io.launch { val l = ChatStore.list(); _chats.value = l } }
 
-    // ---------- v0.24.2: private chat ----------
+    // ---------- v0.24.4: private chat ----------
     private val _private = MutableStateFlow(false)
     /** True while the visible chat is a private one. */
     val privateChat: StateFlow<Boolean> = _private
@@ -312,10 +312,10 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         s.msgs = s.msgs.map { if (it.id == id) it.copy(meta = meta) else it }
     }
 
-    /** v0.24.2: true when the visible chat already has a card with this meta (one update card at a time). */
+    /** v0.24.4: true when the visible chat already has a card with this meta (one update card at a time). */
     fun hasCard(meta: String): Boolean = cur.msgs.any { it.meta == meta }
 
-    /** v0.24.2: removes app cards with this meta from every open chat (the update card when it finishes). */
+    /** v0.24.4: removes app cards with this meta from every open chat (the update card when it finishes). */
     fun removeCard(meta: String) {
         val all = (sessions.values + cur).toSet()
         all.forEach { s -> if (s.msgs.any { it.meta == meta }) { s.msgs = s.msgs.filterNot { it.meta == meta }; try { s.persist() } catch (_: Throwable) { } } }
@@ -676,6 +676,12 @@ When you finish, say what you did in one short sentence.
             if (Settings.followups) append("\nAt the very end of each final answer (never when calling tools), add one line exactly like <<follow-ups: first | second | third>> with three short next requests (max 6 words each) written as the user would say them. Skip it for routines.")
             append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
             append("\nEverything you create that keeps running (alarms, timers, routines, triggers, calendar events, jobs) gets an ID like R4. To change, stop or delete one, call processes to find the ID, then process(id, action). Only use action=details when the user asks for specifics.")
+            // v0.24.3: the core skills' pinned rules (voice, task workflow, views, specialists, workflows, coding), every turn,
+            // read from the shipped assets and static, so they stay in the cached prefix.
+            if (CoreSkills.loader == null) CoreSkills.loader = {
+                CoreSkills.NAMES.mapNotNull { n -> runCatching { n to app.assets.open("skills/$n/SKILL.md").bufferedReader().use { it.readText() } }.getOrNull() }.toMap()
+            }
+            append(CoreSkills.promptBlock())
             // v0.23.0: the always-present VIEWS block (static, so it stays in the cached prefix).
             append(ViewRouter.PROMPT)
             // Speed plan step 2: everything above stays identical turn after turn, so providers can
@@ -804,7 +810,7 @@ When you finish, say what you did in one short sentence.
      * one) never stops it or sends its answer to the wrong place.
      */
     class Session(val id: String) {
-        /** v0.24.2: a private chat (memory only: nothing saved or learned). */
+        /** v0.24.4: a private chat (memory only: nothing saved or learned). */
         val isPrivate: Boolean get() = PrivateChat.isPrivateId(id)
         /** Set when this chat is a background agent's (B1…). */
         var agentId: String? = null
@@ -845,6 +851,7 @@ When you finish, say what you did in one short sentence.
         /** v0.23.0: the view this turn must use (keyword classifier) and the skills looked up for it. */
         @Volatile var turnView: ViewRouter.Spec? = null
         @Volatile var turnSkills: SkillMatch.Result = SkillMatch.Result.NONE
+        @Volatile var turnSpecs: List<Specialists.Spec> = emptyList()
         /** v0.23.2: tool calls that succeeded this turn (the claim guard checks replies against them). */
         val turnOk = java.util.Collections.synchronizedList(mutableListOf<ClaimGuard.Call>())
         /** v0.23.2: the last turn made, changed or opened a design (so a short edit next is a follow-on). */
@@ -956,7 +963,7 @@ When you finish, say what you did in one short sentence.
         /** Save the current chat to disk (screenshots are dropped to keep files small). */
         fun persist(force: Boolean = false) {
             // force (v0.24.0 /clear): an emptied thread is saved too, so cleared messages don't come back on restart.
-            if (isPrivate) return   // v0.24.2: private chats are never written anywhere
+            if (isPrivate) return   // v0.24.4: private chats are never written anywhere
             if (!force && msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
             val arr = JSONArray()
             for (m in msgs) {
@@ -1161,7 +1168,7 @@ When you finish, say what you did in one short sentence.
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
-                (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills)
+                (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs)
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i
@@ -1300,6 +1307,14 @@ When you finish, say what you did in one short sentence.
                 var claimNudged = false
                 turnView?.let { groupsOn += it.groups }
                 turnSkills = SkillMatch.forTurn(userNow)
+                // v0.24.3 specialists: the matching specialist(s) bring their skill packs and the delegate tool.
+                turnSpecs = if (routine || agentId != null || !Settings.bool("specialists_on", true)) emptyList()
+                    else try { SpecialistMatch.match(userNow, Specialists.all()) } catch (_: Exception) { emptyList() }
+                if (turnSpecs.isNotEmpty()) {
+                    turnSkills = SpecialistMatch.attach(turnSkills, turnSpecs, SkillMatch.cached())
+                    groupsOn += "extras"
+                    add(Role.STEP, SpecialistMatch.cardLine(turnSpecs))
+                }
                 SkillMatch.cardLine(turnSkills).takeIf { it.isNotBlank() }?.let { add(Role.STEP, it) }
                 var learnNudged = false
                 var tools = ToolRouter.select(allTools, groupsOn)
@@ -1637,7 +1652,8 @@ When you finish, say what you did in one short sentence.
         private suspend fun runSpecialist(spec: Specialists.Spec, task: String, all: JSONArray): String {
             val tools = Specialists.filter(all, spec)
             val msgs = JSONArray()
-                .put(JSONObject().put("role", "system").put("content", "You are Blaze's ${spec.name} specialist. ${spec.prompt}\nIt is ${SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())}." +
+                .put(JSONObject().put("role", "system").put("content", "You are Blaze's ${spec.name} specialist. ${spec.prompt}" +
+                    SpecialistMatch.brief(spec, SkillMatch.cached()) + "\nIt is ${SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())}." +
                     Memory.promptBlock(task) + "\nWhen done, reply with the result only."))
                 .put(JSONObject().put("role", "user").put("content", task))
             val shots = mutableListOf<String>()
@@ -2041,7 +2057,7 @@ When you finish, say what you did in one short sentence.
                     try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, args) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 in SkillPacks.names -> {
-                    add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; else -> "Reading a skill file" })
+                    add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; "save_workflow" -> "Saving a workflow"; else -> "Reading a skill file" })
                     try { SkillPacks.run(name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 "watch" -> { add(Role.STEP, "Setting a watcher"); com.blaze.assistant.phone.Watchers.run(args) }
@@ -2223,7 +2239,7 @@ When you finish, say what you did in one short sentence.
          * saved, and turns with nothing durable no longer cost a request.
          */
         fun learnAfterTurn() {
-            if (isPrivate) return   // v0.24.2: nothing is learned from a private chat (no title, memories, skills)
+            if (isPrivate) return   // v0.24.4: nothing is learned from a private chat (no title, memories, skills)
             val reply = msgs.lastOrNull { it.role == Role.BLAZE } ?: return
             if (reply.meta.startsWith("\u26a1")) return
             val lastUser = msgs.indexOfLast { it.role == Role.USER }; if (lastUser < 0) return
@@ -2253,7 +2269,7 @@ When you finish, say what you did in one short sentence.
             val repeat = Learn.repeatsAndRecord(Learn.signature(userText, tools), n >= 5 && distinct >= 2)
             val d0 = Learn.decide(Learn.Turn(userText, reply.text, tools,
                 savedMemory = tools.any { it == "remember" || it == "forget" || it == "memory_save" || it == "memory_update" },
-                savedSkill = tools.any { it == "write_skill" || it == "skill_manage" }), repeat)
+                savedSkill = tools.any { it == "write_skill" || it == "skill_manage" || it == "save_workflow" }), repeat)
             // One mind: save as you go. One cheap extraction call per real turn writes or merges memories; the
             // learning review below then only looks for skills.
             if (Mind.ready && agentId == null && userText.trim().split(Regex("\\s+")).size >= 3) {
@@ -2288,7 +2304,7 @@ When you finish, say what you did in one short sentence.
             }
             if (!isPrivate) try { com.blaze.assistant.widget.BlazeWidget.update(app, last.text.take(240)) } catch (_: Exception) { }
             if (this === cur && (inForeground || overlayOpen)) return
-            // v0.24.2: a private chat's words never land in the notification shade.
+            // v0.24.4: a private chat's words never land in the notification shade.
             if (isPrivate) { Notifier.reply("Blaze answered in your private chat.", last.role == Role.ERROR, id); return }
             // A chat you left kept working: say which one finished.
             Notifier.reply(if (this === cur) last.text else "${title.ifBlank { "A chat" }}: ${last.text}", last.role == Role.ERROR, id)
