@@ -3,9 +3,12 @@ name: Build APK
 on:
   push:
     branches: [main]
+    # The Blaze Gateway Worker (gateway/) has its own workflow; changes only there don't rebuild the app.
+    paths-ignore: ['gateway/**', '.github/workflows/gateway.yml']
   # Pull requests (including from forks) only build; they never publish, sign a release or edit issues.
   pull_request:
     branches: [main]
+    paths-ignore: ['gateway/**', '.github/workflows/gateway.yml']
   workflow_dispatch:
 
 concurrency:

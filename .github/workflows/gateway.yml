@@ -1,0 +1,108 @@
+name: Gateway
+
+# Blaze Gateway (gateway/): type check + tests on every change; deploy to Cloudflare from main
+# when the CLOUDFLARE_API_TOKEN secret exists (skipped cleanly otherwise). Never touches the app.
+on:
+  push:
+    branches: [main]
+    paths: ['gateway/**', '.github/workflows/gateway.yml']
+  pull_request:
+    branches: [main]
+    paths: ['gateway/**', '.github/workflows/gateway.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: gateway-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: gateway
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: gateway/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Tests
+        run: npx vitest run
+      - name: Bundle (dry run)
+        run: npx wrangler deploy --dry-run --outdir /tmp/gateway-bundle
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'lacksonkapapahue/Blaze-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      KEY_ENCRYPTION_SECRET: ${{ secrets.KEY_ENCRYPTION_SECRET }}
+      ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+      ADMIN_TOKEN: ${{ secrets.GATEWAY_ADMIN_TOKEN }}
+    steps:
+      - name: Skip when Cloudflare isn't set up
+        id: gate
+        working-directory: .
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN secret not set: skipping deploy (see gateway/SETUP.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: gateway/package-lock.json
+      - if: steps.gate.outputs.go == 'true'
+        run: npm ci
+      - name: Find or create the D1 database
+        if: steps.gate.outputs.go == 'true'
+        run: ./scripts/ensure-d1.sh
+      - name: Apply D1 migrations
+        if: steps.gate.outputs.go == 'true'
+        run: npx wrangler d1 migrations apply blaze-gateway --remote
+      - name: Deploy
+        if: steps.gate.outputs.go == 'true'
+        run: npx wrangler deploy
+      - name: Sync Worker secrets from GitHub secrets (only the ones that are set)
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          for NAME in KEY_ENCRYPTION_SECRET ADMIN_EMAILS ADMIN_TOKEN; do
+            VAL="${!NAME}"
+            if [ -n "$VAL" ]; then
+              printf '%s' "$VAL" | npx wrangler secret put "$NAME" >/dev/null && echo "set $NAME"
+            else
+              echo "skip $NAME (not set in GitHub secrets)"
+            fi
+          done
+      - name: Smoke test
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          URL=https://blaze-gateway.blaze-app.workers.dev
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$URL/health"; then echo; echo "Gateway: $URL  Admin: $URL/admin" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+            sleep 5
+          done
+          echo "health check failed at $URL" && exit 1
