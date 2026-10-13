@@ -130,7 +130,35 @@ class ShotsTest {
             if (views) ViewsSheet(mapOf("agents" to "1 LIVE"), onPick = {}, onDismiss = {}, autoFocus = false)
             if (plus) PlusMenu(plusItems("plan", "autopilot", "Auto (free)", false)) {}
             Composer(TextFieldValue(input), {}, busy = busy && !plus && !views, canSend = input.isNotEmpty(), plusOpen = plus, chip = chip, agents = 0,
-                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {})
+                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {}, hints = sampleHints)
+        }
+    }
+
+    private val sampleHints = listOf("Wish Gloria happy birthday", "Check my Gmail…", "Open WhatsApp…", "Get me ready for NET103 quiz")
+
+    // v0.24.1: the reference pill composer (+, rotating hint, mic → send, stop) in both themes.
+    @Composable
+    private fun ComposerStates() {
+        val c = LocalBlaze.current
+        Column(Modifier.fillMaxWidth().background(c.paper).padding(vertical = 10.dp)) {
+            Label("Idle · rotating hint", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 6.dp))
+            Composer(TextFieldValue(""), {}, busy = false, canSend = false, plusOpen = false, chip = "", agents = 0, listening = false, speaking = false,
+                onPlus = {}, onMic = {}, onSend = {}, onStop = {}, hints = sampleHints)
+            Composer(TextFieldValue(""), {}, busy = false, canSend = false, plusOpen = false, chip = "", agents = 0, listening = false, speaking = false,
+                onPlus = {}, onMic = {}, onSend = {}, onStop = {}, hints = sampleHints, hintIndex0 = 2)
+            Label("Typing · send", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 6.dp))
+            Composer(TextFieldValue("Wish Gloria happy birthday on WhatsApp"), {}, busy = false, canSend = true, plusOpen = false, chip = "", agents = 0,
+                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {}, hints = sampleHints)
+            Label("Working · stop", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 6.dp))
+            Composer(TextFieldValue(""), {}, busy = true, canSend = false, plusOpen = false, chip = "PLAN", agents = 1, listening = false, speaking = false,
+                onPlus = {}, onMic = {}, onSend = {}, onStop = {}, hints = sampleHints, hintIndex0 = 1)
+        }
+    }
+
+    @Test fun composerPill() = shot("43-composer") {
+        Column(Modifier.fillMaxSize()) {
+            ComposerStates()
+            CompositionLocalProvider(LocalBlaze provides DarkColors) { ComposerStates() }
         }
     }
 

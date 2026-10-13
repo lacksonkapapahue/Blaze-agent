@@ -51,6 +51,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.contentDescription
@@ -423,51 +425,101 @@ fun modeChip(work: String, approval: String): String {
 }
 
 /**
- * v0.24.0: a messaging pill. + on the left inside the pill, the text field, the mic, and the round Send / Stop
- * button attached at the pill's end. A mode chip shows above it only when not default.
+ * v0.24.1: Luke's reference composer. A fully rounded pill, a fill a step off the background with a thin outline,
+ * + on the left, the mic on the right that turns into a round send arrow once there's text (a stop square while
+ * Blaze works). The light-grey placeholder rotates through [hints] (on-device suggestions, ComposerHints) every ~3 s
+ * with a gentle fade and slide; it stops while the field is focused or has text, and with reduced motion.
  */
 @Composable
 fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boolean, canSend: Boolean, plusOpen: Boolean,
              chip: String, agents: Int, listening: Boolean, speaking: Boolean,
-             onPlus: () -> Unit, onMic: () -> Unit, onSend: () -> Unit, onStop: () -> Unit, onChip: () -> Unit = {}) {
+             onPlus: () -> Unit, onMic: () -> Unit, onSend: () -> Unit, onStop: () -> Unit, onChip: () -> Unit = {},
+             hints: List<String> = emptyList(), animateHints: Boolean = true, hintIndex0: Int = 0) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 10.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    var hintIdx by remember(hints) { mutableStateOf(if (hints.isEmpty()) 0 else hintIndex0.mod(hints.size)) }
+    val empty = value.text.isEmpty()
+    LaunchedEffect(hints, focused, empty, animateHints, listening) {
+        if (!animateHints || focused || !empty || listening || hints.size < 2) return@LaunchedEffect
+        while (true) { delay(com.blaze.assistant.agent.ComposerHints.ROTATE_MS); hintIdx = (hintIdx + 1) % hints.size }
+    }
+    val placeholder = when {
+        listening -> "Listening…"
+        hints.isEmpty() -> com.blaze.assistant.agent.ComposerHints.DEFAULT
+        else -> hints[hintIdx.coerceIn(0, hints.size - 1)]
+    }
+    Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)) {
         if (chip.isNotBlank() || agents > 0) Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (chip.isNotBlank()) Box(Modifier.clip(RoundedCornerShape(12.dp)).background(c.accent).clickable(onClick = onChip).padding(horizontal = 10.dp, vertical = 4.dp)) {
                 Label(chip, color = c.onAccent, size = 9.sp)
             }
             if (agents > 0) Label((if (chip.isNotBlank()) "   " else "") + "$agents AGENT" + (if (agents > 1) "S" else "") + " WORKING", color = c.accent, size = 9.sp)
         }
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(c.bubble).heightIn(min = 52.dp).padding(4.dp),
-            verticalAlignment = Alignment.Bottom) {
+        val pill = RoundedCornerShape(percent = 50)
+        Row(Modifier.fillMaxWidth().heightIn(min = 54.dp).clip(if (value.text.contains('\n') || value.text.length > 60) RoundedCornerShape(27.dp) else pill)
+            .background(c.field).border(1.dp, c.fieldLine, if (value.text.contains('\n') || value.text.length > 60) RoundedCornerShape(27.dp) else pill)
+            .padding(horizontal = 5.dp, vertical = 5.dp), verticalAlignment = Alignment.Bottom) {
             Box(Modifier.size(44.dp).clip(CircleShape).background(if (plusOpen) c.ink else Color.Transparent).clickable(onClick = onPlus)
-                .semantics { contentDescription = if (plusOpen) "Close menu" else "Attach and more" }, contentAlignment = Alignment.Center) {
-                Text(if (plusOpen) "×" else "+", style = TextStyle(fontFamily = Type.Display, fontSize = 24.sp, color = if (plusOpen) c.paper else c.sub))
+                .semantics { contentDescription = if (plusOpen) "Close menu" else "Attach and tools" }, contentAlignment = Alignment.Center) {
+                PlusIcon(if (plusOpen) c.paper else c.ink, open = plusOpen)
             }
-            Box(Modifier.weight(1f).padding(start = 2.dp, end = 6.dp, top = 12.dp, bottom = 12.dp)) {
-                if (value.text.isEmpty()) Text(if (listening) "Listening…" else "Message Blaze, or type /", maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
+            Box(Modifier.weight(1f).padding(start = 4.dp, end = 6.dp, top = 12.dp, bottom = 12.dp)) {
+                if (empty) androidx.compose.animation.AnimatedContent(targetState = placeholder, label = "hint",
+                    transitionSpec = {
+                        (fadeIn(tween(420)) + androidx.compose.animation.slideInVertically(tween(420)) { it / 3 }) togetherWith
+                            (fadeOut(tween(300)) + androidx.compose.animation.slideOutVertically(tween(300)) { -it / 3 })
+                    }) { t ->
+                    Text(t, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 22.sp, color = c.sub))
+                }
                 BasicTextField(value = value, onValueChange = onValue,
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink),
+                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 16.sp, lineHeight = 22.sp, color = c.ink),
                     cursorBrush = SolidColor(c.accent), maxLines = 6,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { if (canSend && !busy) onSend() }),
-                    modifier = Modifier.fillMaxWidth())
+                    modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+                        .semantics { contentDescription = "Message Blaze" })
             }
-            if (value.text.isEmpty() && !busy) {
-                val micOn = listening || speaking
-                Box(Modifier.size(44.dp).clip(CircleShape).background(if (micOn) c.accent else Color.Transparent).clickable(onClick = onMic)
-                    .semantics { contentDescription = if (speaking) "Stop speaking" else if (listening) "Stop listening" else "Talk" }, contentAlignment = Alignment.Center) {
-                    MicMark(if (micOn) c.onAccent else c.sub, speaking)
+            when {
+                busy -> Box(Modifier.size(44.dp).clip(CircleShape).background(c.accent).clickable(onClick = onStop)
+                    .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) { SendMark(c.onAccent, stop = true) }
+                canSend -> Box(Modifier.size(44.dp).clip(CircleShape).background(c.ink).clickable(onClick = onSend)
+                    .semantics { contentDescription = "Send" }, contentAlignment = Alignment.Center) { SendMark(c.paper, stop = false) }
+                else -> {
+                    val micOn = listening || speaking
+                    Box(Modifier.size(44.dp).clip(CircleShape).background(if (micOn) c.accent else Color.Transparent).clickable(onClick = onMic)
+                        .semantics { contentDescription = if (speaking) "Stop speaking" else if (listening) "Stop listening" else "Talk" }, contentAlignment = Alignment.Center) {
+                        if (speaking) SendMark(c.onAccent, stop = true) else MicIcon(if (micOn) c.onAccent else c.ink)
+                    }
                 }
             }
-            val enabled = busy || canSend
-            Box(Modifier.size(44.dp).clip(CircleShape).background(if (busy) c.accent else if (enabled) c.ink else c.hair)
-                .clickable(enabled = enabled) { if (busy) onStop() else onSend() }
-                .semantics { contentDescription = if (busy) "Stop" else "Send" }, contentAlignment = Alignment.Center) {
-                SendMark(if (busy) c.onAccent else if (enabled) c.paper else c.paper.copy(alpha = 0.9f), stop = busy)
-            }
         }
+    }
+}
+
+/** The composer pill's fill: a step off the paper (lighter in dark mode, like the reference), and its thin outline. */
+val BlazeColors.field: Color get() = if (dark) Color(0xFF323237) else Color(0xFFF4F4F2)
+val BlazeColors.fieldLine: Color get() = if (dark) Color(0x26F0F0EE) else Color(0x1A111110)
+
+/** A thin "+" (× when the menu is open). */
+@Composable
+fun PlusIcon(color: Color, open: Boolean = false, size: androidx.compose.ui.unit.Dp = 20.dp) {
+    Canvas(Modifier.size(size).rotate(if (open) 45f else 0f)) {
+        val w = this.size.width; val sw = 1.9.dp.toPx()
+        drawLine(color, Offset(w / 2, w * 0.1f), Offset(w / 2, w * 0.9f), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color, Offset(w * 0.1f, w / 2), Offset(w * 0.9f, w / 2), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}
+
+/** An outline microphone: capsule, cradle and stem. */
+@Composable
+fun MicIcon(color: Color, size: androidx.compose.ui.unit.Dp = 22.dp) {
+    Canvas(Modifier.size(size)) {
+        val w = this.size.width; val sw = 1.7.dp.toPx()
+        val cap = androidx.compose.ui.graphics.StrokeCap.Round
+        drawRoundRect(color, Offset(w * 0.35f, w * 0.06f), Size(w * 0.30f, w * 0.52f), androidx.compose.ui.geometry.CornerRadius(w * 0.15f), style = Stroke(sw))
+        drawArc(color, 0f, 180f, false, Offset(w * 0.2f, w * 0.22f), Size(w * 0.6f, w * 0.52f), style = Stroke(sw, cap = cap))
+        drawLine(color, Offset(w / 2, w * 0.74f), Offset(w / 2, w * 0.92f), sw, cap)
     }
 }
 
