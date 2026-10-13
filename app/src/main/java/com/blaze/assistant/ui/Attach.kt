@@ -71,7 +71,7 @@ import java.io.File
 /**
  * v0.24.6: pictures from the keyboard and attachment previews.
  * Keyboards (Samsung Keyboard's clipboard, Gboard's GIFs and stickers) send rich content through the input
- * connection's commitContent, which Compose's text field didn't accept. [AcceptImages] advertises image/* on the
+ * connection's commitContent, which Compose's text field didn't accept. [AcceptImages] advertises image types on the
  * field's EditorInfo and copies whatever the keyboard commits into the cache, then hands it on like a picked photo.
  */
 object RichContent {
