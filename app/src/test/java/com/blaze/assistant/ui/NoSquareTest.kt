@@ -37,7 +37,7 @@ class NoSquareTest {
     }
 
     @Test fun detectorCatchesSquares() {
-        val tmp = File.createTempFile("sq", ".kt").apply {
+        val tmp = File.createTempFile("square", ".kt").apply {
             writeText("val a = RectangleShape\nval b = RoundedCornerShape(0.dp)\nval c = RoundedCornerShape(0)\n// RectangleShape in a comment\nval ok = RoundedCornerShape(12.dp)\nval ok2 = RoundedCornerShape(10.dp, 0.dp, 4.dp, 4.dp)\n")
             deleteOnExit()
         }
