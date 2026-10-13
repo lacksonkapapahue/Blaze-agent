@@ -1,5 +1,10 @@
 # Blaze Gateway status
 
+- **2026-10-14, v0.2.1:** picker / naming polish after the first live discovery (gemini 29,
+  mistral 27, workers-ai 35 free chat models found via "Find models", Workers AI from the binding
+  catalogue). Next: add Groq / Cerebras / OpenRouter keys (discovery runs on add), then press
+  "Suggest best free lineup" in Routes, review, Save all.
+
 - **2026-10-14, v0.2.0 (branch `gateway-models`):** model discovery (D1 `models` / `discovery`,
   migration 0002, cron `*/30` refreshing day-old lists), free-only rule (OpenRouter `:free`,
   paid-only models never routed), friendly route editor with capability filters and "Suggest

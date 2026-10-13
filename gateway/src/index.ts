@@ -1,5 +1,5 @@
 // Blaze Gateway: the Worker entry point.
-//   GET  /health                    {"ok":true,"service":"blaze-gateway","version":"0.2.0"}
+//   GET  /health                    {"ok":true,"service":"blaze-gateway","version":"0.2.1"}
 //   GET  /v1/models                 the task-tagged virtual models (Blaze account token)
 //   POST /v1/chat/completions       OpenAI-compatible, streaming or not (Blaze account token)
 //   GET  /admin                     the admin dashboard; /admin/api/* behind ADMIN_EMAILS / ADMIN_TOKEN

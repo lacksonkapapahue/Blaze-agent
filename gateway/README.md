@@ -1,4 +1,4 @@
-# Blaze Gateway 0.2.0
+# Blaze Gateway 0.2.1
 
 One OpenAI-compatible endpoint for every Blaze app, so users never set up models or API keys.
 A Cloudflare Worker holds Blaze's own free-tier provider keys, picks the best model for each
@@ -102,8 +102,8 @@ blaze-auth `GET /v1/me` through the `AUTH` service binding (a Worker can't fetch
 - **Health**: per model: last success / failure, cooldown and why, requests today (ok / fail,
   average latency), `test` (a 5-token completion through the real path) and `clear` cooldown.
 - **Routes**: per task (Chat, Quick, Code, Vision, Long, Agent) a plain-language description and an
-  ordered fallback list of friendly model names ("Gemini Flash (fast, sees images)"). Add from a
-  searchable dropdown grouped by provider (by default only models that fit the task: Vision shows
+  ordered fallback list of friendly model names ("Gemini Flash (fast, sees images)"). "+ Add a
+  model" opens a searchable, rounded list grouped by provider (by default only models that fit the task: Vision shows
   only models that see images, Agent only tool-calling ones, Long only large-context ones), move
   up / down, remove; raw ids sit behind a small "id" detail. Slots are flagged when a model lacks
   what the task needs, isn't in the provider's latest list, or its provider has no key yet.
@@ -170,7 +170,7 @@ says so; add them again.
 cd gateway
 npm ci
 npx tsc --noEmit        # type check (src/)
-npx vitest run          # 59 tests: router, quota, crypto, catalogue, and the Worker end to end
+npx vitest run          # 60 tests: router, quota, crypto, catalogue, and the Worker end to end
 npx wrangler dev        # local; put KEY_ENCRYPTION_SECRET etc. in gateway/.dev.vars (git-ignored)
 ```
 

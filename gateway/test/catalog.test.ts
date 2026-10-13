@@ -67,6 +67,21 @@ describe("catalog parsers", () => {
     expect(ms[0]!.name).toBe("Llama 3.3 70B Fast (fast)");
     expect(parseWorkersAI(CURATED_WORKERS_AI).length).toBeGreaterThan(10);
   });
+  it("names aliases from their own ids and never shows two models with the same name", () => {
+    const ms = parseOpenAIList("mistral", { data: [
+      { id: "mistral-medium-2508", name: "mistral-medium-2508", capabilities: { completion_chat: true } },
+      { id: "mistral-medium-latest", name: "mistral-medium-2508", capabilities: { completion_chat: true } },
+      { id: "mistral-medium", name: "mistral-medium-2508", capabilities: { completion_chat: true } },
+    ] });
+    expect(ms.map(m => m.name)).toEqual(["Mistral Medium 2508 (sees images)", "Mistral Medium Latest (sees images)", "Mistral Medium (sees images)"]);
+    const g = parseGemini({ models: [
+      { name: "models/agent-a", displayName: "Same Name", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/agent-b", displayName: "Same Name", supportedGenerationMethods: ["generateContent"] },
+      { name: "models/nano-banana-pro-preview", displayName: "Nano Banana Pro", supportedGenerationMethods: ["generateContent"] },
+    ] });
+    expect(g.map(m => m.id)).toEqual(["agent-a", "agent-b"]);
+    expect(new Set(g.map(m => m.name)).size).toBe(2);
+  });
   it("friendly names", () => {
     expect(prettify("@cf/qwen/qwen2.5-coder-32b-instruct")).toBe("Qwen2.5 Coder 32B");
     expect(friendly("Gemini Flash", ["chat", "vision", "fast"])).toBe("Gemini Flash (fast, sees images)");

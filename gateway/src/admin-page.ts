@@ -7,7 +7,7 @@ export function adminPage(nonce: string): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex"><title>Blaze Gateway · admin</title>
 <style nonce="${nonce}">
-:root{--bg:#1c1c1f;--raised:#26262a;--raised2:#2e2e33;--hair:#3a3a40;--text:#ececea;--muted:#9c9c96;--accent:#7b98ff;--fire:#ff8a3d;--ok:#5fd38d;--warn:#f0b35a;--bad:#ff6b6b;
+:root{--bg:#1c1c1f;--raised:#26262a;--raised2:#2e2e33;--hair:#3a3a40;--text:#ececea;--muted:#aeaea8;--accent:#7b98ff;--fire:#ff8a3d;--ok:#5fd38d;--warn:#f0b35a;--bad:#ff6b6b;
 --r:14px;--r-s:10px;--mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--sans:-apple-system,"Segoe UI",Inter,Roboto,sans-serif}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 var(--sans)}
 header{display:flex;align-items:center;gap:12px;padding:12px 22px;border-bottom:1px solid var(--hair);position:sticky;top:0;background:rgba(28,28,31,.96);z-index:3;flex-wrap:wrap}
@@ -23,7 +23,7 @@ input,select,textarea{background:var(--bg);color:var(--text);border:1px solid va
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 textarea{width:100%;min-height:130px;resize:vertical}
 button.b{background:var(--raised2);color:var(--text);border:1px solid var(--hair);border-radius:999px;padding:6px 13px;font:12px var(--mono);cursor:pointer}
-button.b:hover{border-color:var(--accent)}button.b:disabled{opacity:.5;cursor:default}
+button.b:hover{border-color:var(--accent)}button.b:disabled{opacity:.45;cursor:default}
 button.p{background:var(--fire);color:#1c1c1f;border-color:var(--fire);font-weight:600}button.p:hover{border-color:#ffb27d}
 button.a{background:transparent;color:var(--accent);border-color:var(--accent)}button.d{color:var(--bad)}
 button.i{padding:3px 9px;min-width:30px}
@@ -31,7 +31,7 @@ table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}th{tex
 td{padding:7px 8px;border-bottom:1px solid var(--hair);vertical-align:top}td.m{font-family:var(--mono);font-size:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
 .tag{display:inline-block;font:11px var(--mono);color:var(--muted);border:1px solid var(--hair);border-radius:999px;padding:0 7px;margin:0 3px 3px 0}
-.tag.pv{color:var(--accent);border-color:rgba(123,152,255,.45)}.tag.w{color:var(--warn);border-color:rgba(240,179,90,.5)}.tag.x{color:var(--bad);border-color:rgba(255,107,107,.5)}
+.tag.pv{color:#a9bbff;background:rgba(123,152,255,.12);border-color:rgba(123,152,255,.5)}.tag.w{color:var(--warn);border-color:rgba(240,179,90,.5)}.tag.x{color:var(--bad);border-color:rgba(255,107,107,.5)}
 .warnbox{border-color:var(--warn);color:var(--warn);font-family:var(--mono);font-size:12px}
 .muted{color:var(--muted)}.hidden{display:none}
 #toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);background:var(--raised2);border:1px solid var(--accent);border-radius:999px;padding:8px 16px;font:12px var(--mono);opacity:0;transition:opacity .2s;pointer-events:none;z-index:5;max-width:90vw}
@@ -42,10 +42,16 @@ td{padding:7px 8px;border-bottom:1px solid var(--hair);vertical-align:top}td.m{f
 .task h3{margin:0;font-size:16px;font-weight:600}.task .desc{color:var(--muted);font-size:13px;margin:2px 0 10px}
 .slot{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--hair);border-radius:var(--r-s);padding:7px 10px;margin:0 0 6px}
 .slot .n{font:12px var(--mono);color:var(--fire);width:18px;text-align:right}.slot .nm{flex:1;min-width:0}
-.slot details{display:inline-block;margin-left:6px}.slot summary{display:inline;cursor:pointer;font:11px var(--mono);color:var(--muted);list-style:none}
-.slot summary::-webkit-details-marker{display:none}.slot code{font:11px var(--mono);color:var(--muted);word-break:break-all}
+.slot details{display:inline-block;margin-left:6px}.slot summary{display:inline-block;cursor:pointer;font:11px var(--mono);color:#a9bbff;list-style:none;border:1px solid rgba(123,152,255,.4);border-radius:999px;padding:0 7px}
+.slot summary::-webkit-details-marker{display:none}.slot code{font:11px var(--mono);color:var(--text);word-break:break-all}
 .slot.last{border-style:dashed}.pick{background:var(--raised2);border-radius:var(--r-s);padding:9px;margin-top:8px}
-details.adv>summary{cursor:pointer;font:11px var(--mono);color:var(--muted);margin-top:10px}
+details.adv>summary{cursor:pointer;font:12px var(--mono);color:#c9c9c3;margin-top:10px}
+.res{max-height:260px;overflow:auto;margin-top:8px;border:1px solid var(--hair);border-radius:var(--r-s);background:var(--bg);padding:4px}
+.res .g{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fire);padding:8px 10px 4px}
+.res button{display:flex;width:100%;gap:8px;align-items:center;text-align:left;background:none;border:0;border-radius:8px;color:var(--text);font:13px var(--sans);padding:6px 10px;cursor:pointer}
+.res button:hover,.res button:focus{background:var(--raised2);outline:none}.res button .id{margin-left:auto;font:11px var(--mono);color:var(--muted)}
+.res .empty{padding:8px 10px;color:var(--muted);font-size:13px}
+input::placeholder{color:#8e8e88}.task{scroll-margin-top:70px}
 .dirty{color:var(--fire);font:11px var(--mono)}
 </style></head><body>
 <div id="login" class="login hidden">
@@ -150,19 +156,21 @@ function slot(t,c,i,n){const m=MI.get(c.provider+"|"+c.model);const need=(S.task
  const det=el("details",{},el("summary",{},"id"),el("code",{}," "+c.provider+" · "+c.model));
  return el("div",{class:"slot"+(c.provider==="workers-ai"&&i===n-1?" last":"")},el("span",{class:"n"},String(i+1)),
   el("div",{class:"nm"},el("span",{},m?m.name:c.model),det,el("div",{},el("span",{class:"tag pv"},provName(c.provider)),...flags)),up,dn,rm);}
-function picker(t){const st=PICK[t]||(PICK[t]={q:"",fit:true});const q=el("input",{placeholder:"search models (e.g. flash, llama, coder)",class:"grow"});q.value=st.q;
- const fit=el("input",{type:"checkbox"});fit.checked=st.fit;const sel=el("select",{class:"grow"});
+function picker(t){const st=PICK[t]||(PICK[t]={q:"",fit:true,open:false});const need=(S.task_info[t]||{}).needs;
+ const addC=c=>{const l=list(t).slice();if(l.some(x=>x.provider===c.provider&&x.model===c.model)){toast("already in the list");return;}
+  const last=l.length&&l[l.length-1].provider==="workers-ai"&&c.provider!=="workers-ai"?l.length-1:l.length;l.splice(last,0,c);st.open=true;setList(t,l);};
+ if(!st.open)return el("div",{class:"row",style:"margin-top:6px"},el("button",{class:"b a",onclick:()=>{st.open=true;renderRoutes();const i=document.querySelector("#pick-"+t+" input");if(i)i.focus();}},"+ Add a model"));
+ const q=el("input",{placeholder:"search models (e.g. flash, llama, coder)",class:"grow"});q.value=st.q;
+ const fit=el("input",{type:"checkbox"});fit.checked=st.fit;const res=el("div",{class:"res",role:"listbox"});
  const fill=()=>{st.q=q.value;st.fit=fit.checked;const words=q.value.toLowerCase().split(" ").filter(Boolean);const by={};
-  for(const m of CAT.models){if(st.fit&&!fits(t,m))continue;const hay=(m.name+" "+m.id+" "+m.provider).toLowerCase();if(words.some(w=>hay.indexOf(w)<0))continue;(by[m.provider]=by[m.provider]||[]).push(m);}
-  const groups=Object.keys(by).sort((a,b)=>(provUsable(b)?1:0)-(provUsable(a)?1:0)||a.localeCompare(b));
-  sel.replaceChildren(...groups.map(p=>el("optgroup",{label:provName(p)+(provUsable(p)?"":" (no key yet)")},...by[p].map(m=>el("option",{value:m.provider+"|"+m.id},m.name+(fits(t,m)?"":" ⚠ "+CAPWORD[(S.task_info[t]||{}).needs]))))));
-  if(!groups.length)sel.append(el("option",{value:""},CAT.models.length?"no match":"no models yet: press Find models"));};
+  for(const m of CAT.models){if(st.fit&&!fits(t,m))continue;const hay=(m.name+" "+m.id+" "+m.provider+" "+provName(m.provider)).toLowerCase();if(words.some(w=>hay.indexOf(w)<0))continue;(by[m.provider]=by[m.provider]||[]).push(m);}
+  const groups=Object.keys(by).sort((a,b)=>(provUsable(b)?1:0)-(provUsable(a)?1:0)||a.localeCompare(b));const kids=[];
+  for(const p of groups){kids.push(el("div",{class:"g"},provName(p)+(provUsable(p)?"":" · no key yet")));
+   for(const m of by[p]){const inL=list(t).some(x=>x.provider===m.provider&&x.model===m.id);
+    kids.push(el("button",{type:"button",role:"option",title:m.provider+" · "+m.id,onclick:()=>addC({provider:m.provider,model:m.id})},el("span",{},(inL?"✓ ":"")+m.name+(fits(t,m)?"":" ⚠ "+CAPWORD[need])),el("span",{class:"id"},m.context?(m.context>=1e6?(Math.round(m.context/1e5)/10)+"M":Math.round(m.context/1000)+"k"):"")));}}
+  if(!kids.length)kids.push(el("div",{class:"empty"},CAT.models.length?"No match":"No models yet: press Find models"));res.replaceChildren(...kids);};
  q.oninput=fill;fit.onchange=fill;fill();
- const add=el("button",{class:"b a",onclick:()=>{const v=sel.value;if(!v)return;const i=v.indexOf("|");const c={provider:v.slice(0,i),model:v.slice(i+1)};const l=list(t).slice();
-  if(l.some(x=>x.provider===c.provider&&x.model===c.model)){toast("already in the list");return;}
-  const last=l.length&&l[l.length-1].provider==="workers-ai"&&c.provider!=="workers-ai"?l.length-1:l.length;l.splice(last,0,c);setList(t,l);}},"+ Add");
- const need=(S.task_info[t]||{}).needs;
- return el("div",{class:"pick"},el("div",{class:"row"},q,el("label",{class:"muted",style:"font-size:12px"},fit," only models that fit"+(need&&need!=="fast"?" ("+({vision:"see images",tools:"use tools",long:"long inputs"})[need]+")":""))),el("div",{class:"row",style:"margin-top:6px"},sel,add));}
+ return el("div",{class:"pick",id:"pick-"+t},el("div",{class:"row"},q,el("label",{class:"muted",style:"font-size:12px"},fit," only models that fit"+(need&&need!=="fast"?" ("+({vision:"see images",tools:"use tools",long:"long inputs"})[need]+")":"")),el("button",{class:"b",onclick:()=>{st.open=false;renderRoutes();}},"Done")),res);}
 async function saveTask(t){const models=list(t);try{await api("PUT","routes/"+t,{models});delete DRAFT[t];note("route-"+t,"Saved: "+models.length+" models","ok");await load(true);}catch(e){note("route-"+t,e.message,"bad");renderRoutes();}}
 function renderRoutes(){if(!S)return;const info=S.task_info||{};$("#routes-note").replaceChildren(...[noteEl("routes")].filter(Boolean));
  $("#routes").replaceChildren(...S.tasks.map(t=>{const l=list(t);const ti=info[t]||{title:t,text:""};
@@ -182,7 +190,7 @@ $("#discall").onclick=async e=>{const b=e.target;b.disabled=true;b.textContent="
 /* ---------- providers ---------- */
 function discFor(id){return (S.discovery||[]).find(d=>d.provider_id===id);}
 function renderProviders(){$("#providers").replaceChildren(...S.providers.map(p=>{
- const name=el("input",{value:p.name,size:"18"});const url=el("input",{value:p.base_url,class:"grow"});if(p.type==="workers-ai")url.disabled=true;
+ const name=el("input",{value:p.name,size:"26"});const url=el("input",{value:p.base_url,class:"grow"});if(p.type==="workers-ai")url.disabled=true;
  const en=el("input",{type:"checkbox"});en.checked=p.enabled;const notes=el("input",{value:p.notes,class:"grow"});
  const save=el("button",{class:"b p",onclick:async()=>{try{await api("PUT","providers/"+p.id,{name:name.value,base_url:url.value,type:p.type,enabled:en.checked,notes:notes.value});note(p.id,"Saved","ok");}catch(e){note(p.id,e.message,"bad");}load(true);}},"Save");
  const del=p.type==="workers-ai"?null:el("button",{class:"b d",onclick:async()=>{if(!confirm("Delete "+p.id+" and its keys?"))return;await api("DELETE","providers/"+p.id);load(true);}},"Delete");

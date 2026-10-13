@@ -70,7 +70,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("basics", () => {
   it("health", async () => {
     const r = await call("GET", "/health");
-    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.2.0" });
+    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.2.1" });
   });
   it("app endpoints need a live Blaze session", async () => {
     expect((await call("GET", "/v1/models")).status).toBe(401);
