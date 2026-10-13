@@ -33,6 +33,7 @@ import com.blaze.assistant.connect.KeySync
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.draw.clip
 
 /** Settings › Account: the Blaze account shared with Blaze Desktop. */
 @Composable
@@ -51,7 +52,7 @@ fun AccountPage() {
     if (u != null) {
         // ---------- signed in ----------
         Row(Modifier.fillMaxWidth().hairline(c.hair).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).background(c.ink), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(40.dp).clip(BlazeShapes.pill).background(c.ink, BlazeShapes.pill), contentAlignment = Alignment.Center) {
                 Text((u.name.ifBlank { u.email }).take(1).uppercase(),
                     style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, color = c.paper))
             }
@@ -86,7 +87,7 @@ fun AccountPage() {
         AccountButton("Sign out", primary = false) { scope.launch { BlazeAccount.signOut() } }
         Spacer(Modifier.height(24.dp))
         var confirm by remember { mutableStateOf(false) }
-        if (!confirm) Label("Delete account", color = c.accent, size = 10.sp, modifier = Modifier.clickable { confirm = true }.padding(vertical = 8.dp))
+        if (!confirm) ActionText("Delete account", color = c.accent, size = 10.sp, modifier = Modifier.clickable { confirm = true }.padding(vertical = 8.dp))
         else {
             Note("This deletes your Blaze account, its sign-ins and sessions everywhere. Chats, keys and connected accounts on this phone stay.")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -155,5 +156,5 @@ private fun Note(text: String, top: Int = 0) {
 private fun AccountButton(text: String, primary: Boolean = true, onClick: () -> Unit) {
     val c = LocalBlaze.current
     Box(Modifier.fillMaxWidth().height(44.dp).background(if (primary) c.ink else c.paper, BlazeShapes.medium).hairline(if (primary) c.ink else c.hair)
-        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { Label(text, color = if (primary) c.paper else c.ink, size = 11.sp) }
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { ButtonText(text, color = if (primary) c.paper else c.ink, size = 13.sp) }
 }

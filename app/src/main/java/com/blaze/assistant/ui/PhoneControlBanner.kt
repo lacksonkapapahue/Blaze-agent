@@ -24,7 +24,7 @@ fun PhoneControlBanner(state: PhoneControl.State, onFix: () -> Unit) {
     Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent).padding(horizontal = 14.dp, vertical = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Label(text, size = 10.sp, modifier = Modifier.weight(1f))
-            Label(action, color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onFix).padding(8.dp))
+            ActionText(action, color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onFix).padding(8.dp))
         }
         if (state == PhoneControl.State.OFF) Text(PhoneControl.TIP, modifier = Modifier.padding(bottom = 4.dp),
             style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, lineHeight = 15.sp, color = c.sub))

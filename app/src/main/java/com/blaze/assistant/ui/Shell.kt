@@ -495,7 +495,7 @@ fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boo
     Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)) {
         if (chip.isNotBlank() || agents > 0) Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (chip.isNotBlank()) Box(Modifier.clip(RoundedCornerShape(12.dp)).background(c.accent).clickable(onClick = onChip).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                Label(chip, color = c.onAccent, size = 9.sp)
+                ButtonText(chip, color = c.onAccent, size = 12.sp)
             }
             if (agents > 0) Label((if (chip.isNotBlank()) "   " else "") + "$agents AGENT" + (if (agents > 1) "S" else "") + " WORKING", color = c.accent, size = 9.sp)
         }
@@ -571,11 +571,12 @@ fun MicIcon(color: Color, size: androidx.compose.ui.unit.Dp = 22.dp) {
 fun MicMark(color: Color, speaking: Boolean) {
     Canvas(Modifier.size(18.dp)) {
         val u = size.width / 10f
-        if (speaking) { drawRect(color, Offset(3 * u, 3 * u), Size(4 * u, 4 * u)); return@Canvas }
-        drawRect(color, Offset(3.5f * u, 0f), Size(3 * u, 6 * u))
-        drawArc(color, 0f, 180f, false, Offset(1.8f * u, 1.5f * u), Size(6.4f * u, 6.4f * u), style = Stroke(1.2f * u))
-        drawRect(color, Offset(4.4f * u, 7.9f * u), Size(1.2f * u, 1.6f * u))
-        drawRect(color, Offset(3f * u, 9f * u), Size(4f * u, 1f * u))
+        // v0.24.8: rounded mic (was square blocks).
+        if (speaking) { drawRoundRect(color, Offset(3 * u, 3 * u), Size(4 * u, 4 * u), androidx.compose.ui.geometry.CornerRadius(1.2f * u)); return@Canvas }
+        drawRoundRect(color, Offset(3.5f * u, 0f), Size(3 * u, 6 * u), androidx.compose.ui.geometry.CornerRadius(1.5f * u))
+        drawArc(color, 0f, 180f, false, Offset(1.8f * u, 1.5f * u), Size(6.4f * u, 6.4f * u), style = Stroke(1.2f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        drawLine(color, Offset(5f * u, 7.9f * u), Offset(5f * u, 9.4f * u), 1.2f * u, androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color, Offset(3.4f * u, 9.5f * u), Offset(6.6f * u, 9.5f * u), 1f * u, androidx.compose.ui.graphics.StrokeCap.Round)
     }
 }
 

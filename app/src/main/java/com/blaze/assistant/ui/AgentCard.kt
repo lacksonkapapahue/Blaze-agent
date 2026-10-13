@@ -20,6 +20,7 @@ import com.blaze.assistant.agent.Agent
 import com.blaze.assistant.agent.BgAgents
 import com.blaze.assistant.agent.Modes
 import kotlinx.coroutines.delay
+import androidx.compose.ui.draw.clip
 
 /** A background agent's live card: status, current step, time, and Steer / Stop / Open. */
 @Composable
@@ -78,12 +79,12 @@ fun AgentCard(id: String) {
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (steering) {
-                Label("Send", color = c.accent, size = 10.sp, modifier = Modifier.clickable { if (text.isNotBlank()) { BgAgents.steer(bg.id, text); text = ""; steering = false } })
-                Label("Cancel", size = 10.sp, modifier = Modifier.clickable { steering = false })
+                ActionText("Send", color = c.accent, size = 10.sp, modifier = Modifier.clickable { if (text.isNotBlank()) { BgAgents.steer(bg.id, text); text = ""; steering = false } })
+                ActionText("Cancel", size = 10.sp, modifier = Modifier.clickable { steering = false })
             } else {
-                Label(if (bg.live) "Steer" else "Follow up", color = c.accent, size = 10.sp, modifier = Modifier.clickable { steering = true })
-                if (bg.live) Label("Stop", size = 10.sp, modifier = Modifier.clickable { BgAgents.cancel(bg.id) })
-                Label("Open", size = 10.sp, modifier = Modifier.clickable { Agent.open(bg.chat) })
+                ActionText(if (bg.live) "Steer" else "Follow up", color = c.accent, size = 10.sp, modifier = Modifier.clickable { steering = true })
+                if (bg.live) ActionText("Stop", size = 10.sp, modifier = Modifier.clickable { BgAgents.cancel(bg.id) })
+                ActionText("Open", size = 10.sp, modifier = Modifier.clickable { Agent.open(bg.chat) })
             }
         }
     }
@@ -109,8 +110,8 @@ fun ModeBar() {
 @Composable
 private fun Chip(text: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.background(if (on) c.accent else c.paper, BlazeShapes.medium).hairline(if (on) c.accent else c.hair).clickable(onClick = onClick)
+    Box(Modifier.clip(BlazeShapes.pill).background(if (on) c.accent else c.paper, BlazeShapes.pill).hairline(if (on) c.accent else c.hair, BlazeShapes.pill).clickable(onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 5.dp)) {
-        Label(text, color = if (on) c.paper else c.ink, size = 9.sp)
+        ButtonText(text, color = if (on) c.paper else c.ink, size = 13.sp)
     }
 }

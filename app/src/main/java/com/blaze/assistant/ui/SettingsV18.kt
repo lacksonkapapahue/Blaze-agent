@@ -36,6 +36,8 @@ import com.blaze.assistant.device.DeviceStatus
 import com.blaze.assistant.device.SelfCheck
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 @Composable
 internal fun V18Note(text: String, top: Int = 0) {
@@ -48,7 +50,7 @@ internal fun V18Note(text: String, top: Int = 0) {
 internal fun V18Button(text: String, primary: Boolean = true, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
     val c = LocalBlaze.current
     Box(modifier.height(44.dp).background(if (primary) c.ink else c.paper, BlazeShapes.medium).hairline(if (primary) c.ink else c.hair)
-        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { Label(text, color = if (primary) c.paper else c.ink, size = 11.sp) }
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { ButtonText(text, color = if (primary) c.paper else c.ink, size = 13.sp) }
 }
 
 @Composable
@@ -84,7 +86,7 @@ fun DevicePage() {
     if (results.isNotEmpty()) Column(Modifier.fillMaxWidth().padding(top = 10.dp).hairline(c.hair)) {
         results.forEach { r ->
             Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(12.dp), verticalAlignment = Alignment.Top) {
-                Box(Modifier.padding(top = 6.dp).size(7.dp).background(if (r.ok) c.accent else c.ink))
+                Box(Modifier.padding(top = 6.dp).size(7.dp).background(if (r.ok) c.accent else c.ink, BlazeShapes.pill))
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(r.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
@@ -116,7 +118,7 @@ fun DevicePage() {
     Row(Modifier.fillMaxWidth()) {
         listOf(0.9f to "S", 1f to "M", 1.15f to "L", 1.3f to "XL").forEach { (v, l) ->
             Box(Modifier.weight(1f).height(40.dp).background(if (scale == v) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair).clickable { scale = v; Settings.textScale = v },
-                contentAlignment = Alignment.Center) { Label(l, color = if (scale == v) c.paper else c.ink, size = 10.sp) }
+                contentAlignment = Alignment.Center) { ButtonText(l, color = if (scale == v) c.paper else c.ink, size = 13.sp) }
         }
     }
 
@@ -170,20 +172,20 @@ fun TerminalPage() {
             val on = !showBlaze && s == sess
             Row(Modifier.padding(end = 6.dp).height(34.dp).background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair)
                 .clickable { showBlaze = false; T.select(s) }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Label(s.title, color = if (on) c.paper else c.ink, size = 10.sp)
-                if (sessions.size > 1) Label("  ×", color = if (on) c.paper else c.weak, size = 10.sp, modifier = Modifier.clickable { T.closeSession(s) })
+                ButtonText(s.title, color = if (on) c.paper else c.ink, size = 13.sp)
+                if (sessions.size > 1) ActionText("  ×", color = if (on) c.paper else c.weak, size = 10.sp, modifier = Modifier.clickable { T.closeSession(s) })
             }
         }
         Box(Modifier.padding(end = 6.dp).height(34.dp).hairline(c.hair).clickable { showBlaze = false; T.newSession(mode) }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
             Label("+", color = c.accent, size = 12.sp) }
         Box(Modifier.height(34.dp).background(if (showBlaze) c.accent else c.paper, BlazeShapes.medium).hairline(c.accent).clickable { showBlaze = true }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-            Label("Blaze", color = if (showBlaze) c.paper else c.accent, size = 10.sp) }
+            ButtonText("Blaze", color = if (showBlaze) c.paper else c.accent, size = 13.sp) }
     }
     if (!showBlaze) Row(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         listOf("phone" to "Phone shell", "linux" to "Linux (Alpine)").forEach { (id, label) ->
             Box(Modifier.weight(1f).height(40.dp).background(if (mode == id) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair)
                 .clickable { if (id == "phone" || linuxReady) T.switchMode(id) }, contentAlignment = Alignment.Center) {
-                Label(label, color = if (mode == id) c.paper else if (id == "linux" && !linuxReady) c.weak else c.ink, size = 10.sp) }
+                ButtonText(label, color = if (mode == id) c.paper else if (id == "linux" && !linuxReady) c.weak else c.ink, size = 13.sp) }
         }
     }
     if (!linuxReady) {
@@ -202,17 +204,17 @@ fun TerminalPage() {
         showBlaze -> "Every command Blaze runs for you, live, with its output. Read-only."
         mode == "linux" -> "Alpine Linux. Try: apk update && apk add python3, then python3. Your phone's Blaze files are in ~/phone."
         else -> "Android sh plus ~300 BusyBox tools (vi, wget, tar, grep, awk, nc, httpd…). Tab completes file names; ↑ ↓ walk your history." })
-    Box(Modifier.fillMaxWidth().height(380.dp).background(androidx.compose.ui.graphics.Color(0xFF111110)).padding(10.dp)) {
+    Box(Modifier.fillMaxWidth().height(380.dp).clip(BlazeShapes.medium).background(androidx.compose.ui.graphics.Color(0xFF111110)).padding(12.dp)) {
         Text(if (showBlaze) agentOut.ifEmpty { "Nothing yet. When Blaze runs a command, it shows up here." } else out.ifEmpty { "Starting the shell…" },
             modifier = Modifier.verticalScroll(scroll),
             style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, lineHeight = 17.sp, color = androidx.compose.ui.graphics.Color(0xFFF0F0EE)))
     }
     if (!showBlaze) {
         // Extra keys, like Termux: modifiers, navigation, and the symbols phone keyboards hide.
-        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).background(androidx.compose.ui.graphics.Color(0xFF1C1C1A))) {
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp).clip(BlazeShapes.pill).background(androidx.compose.ui.graphics.Color(0xFF1C1C1A)).horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 4.dp)) {
             val keys = listOf("ESC", "CTRL", "TAB", "↑", "↓", "←", "→", "|", "~", "/", "-", ">", "&", ";", "$", "*", "\"")
             keys.forEach { k ->
-                Box(Modifier.height(40.dp).width(46.dp).background(if (k == "CTRL" && ctrl) c.accent else androidx.compose.ui.graphics.Color.Transparent).clickable {
+                Box(Modifier.height(40.dp).width(46.dp).clip(BlazeShapes.pill).background(if (k == "CTRL" && ctrl) c.accent else androidx.compose.ui.graphics.Color.Transparent).clickable {
                     when (k) {
                         "ESC" -> { setLine(""); histPos = -1 }
                         "CTRL" -> ctrl = !ctrl
@@ -251,8 +253,8 @@ fun TerminalPage() {
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
                     modifier = Modifier.fillMaxWidth())
             }
-            Box(Modifier.height(46.dp).width(64.dp).background(c.ink).clickable { send() },
-                contentAlignment = Alignment.Center) { Label("Run", color = c.paper, size = 11.sp) }
+            Box(Modifier.height(46.dp).width(64.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable { send() },
+                contentAlignment = Alignment.Center) { ButtonText("Run", color = Color.White) }
         }
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth()) {
@@ -331,7 +333,7 @@ fun ProactivePage() {
     Row(Modifier.fillMaxWidth()) {
         listOf(15, 30, 45, 90, 180).forEach { m ->
             Box(Modifier.weight(1f).height(40.dp).background(if (every == m) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair).clickable { every = m; P.everyMin = m },
-                contentAlignment = Alignment.Center) { Label(if (m < 60) "${m}m" else "${m / 60}h", color = if (every == m) c.paper else c.ink, size = 10.sp) }
+                contentAlignment = Alignment.Center) { ButtonText(if (m < 60) "${m}m" else "${m / 60}h", color = if (every == m) c.paper else c.ink, size = 13.sp) }
         }
     }
     var qf by remember { mutableStateOf(P.quietFrom) }; var qt by remember { mutableStateOf(P.quietTo) }
@@ -364,7 +366,7 @@ fun ProactivePage() {
                     Text("When ${t.event.replace('_', ' ')}${if (t.match.isNotBlank()) " · ${t.match}" else ""} → ${t.prompt}", maxLines = 2,
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                 }
-                Label("×", color = c.sub, size = 14.sp, modifier = Modifier.clickable { com.blaze.assistant.proactive.Triggers.remove(t.id) }.padding(8.dp))
+                ActionText("×", color = c.sub, size = 14.sp, modifier = Modifier.clickable { com.blaze.assistant.proactive.Triggers.remove(t.id) }.padding(8.dp))
             }
         }
     }
@@ -403,7 +405,7 @@ fun SpecialistsPage() {
                     Text(s.prompt, maxLines = 2, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                     Label(s.groups.joinToString(" · "), color = c.accent, size = 9.sp)
                 }
-                if (s.custom) Label("×", color = c.sub, size = 14.sp, modifier = Modifier.clickable {
+                if (s.custom) ActionText("×", color = c.sub, size = 14.sp, modifier = Modifier.clickable {
                     custom = custom.filterNot { it.id == s.id }; com.blaze.assistant.agent.Specialists.saveCustom(custom) }.padding(8.dp))
             }
         }
@@ -421,7 +423,7 @@ fun SpecialistsPage() {
                 val sel = g in groups
                 Box(Modifier.weight(1f).height(38.dp).background(if (sel) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair)
                     .clickable { groups = if (sel) groups - g else groups + g }, contentAlignment = Alignment.Center) {
-                    Label(g, color = if (sel) c.paper else c.ink, size = 10.sp) }
+                    ButtonText(g, color = if (sel) c.paper else c.ink, size = 13.sp) }
             }
             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
         }

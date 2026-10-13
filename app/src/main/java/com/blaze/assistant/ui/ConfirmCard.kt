@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blaze.assistant.agent.Agent
+import androidx.compose.ui.graphics.Color
 
 /** Blaze's mid-task question: tap an option, or type your own answer. */
 @Composable
@@ -96,8 +97,8 @@ fun ConfirmCard() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.widthIn(max = 340.dp).fillMaxWidth()) {
             Box(Modifier.weight(1f).height(46.dp).clip(RoundedCornerShape(23.dp)).background(c.bubble).clickable { Agent.answerConfirm(false) },
                 contentAlignment = Alignment.Center) { Label("Don't", color = c.ink, size = 11.sp) }
-            Box(Modifier.weight(1f).height(46.dp).clip(RoundedCornerShape(23.dp)).background(c.accent).clickable { Agent.answerConfirm(true) },
-                contentAlignment = Alignment.Center) { Label(pc.action, color = c.onAccent, size = 11.sp) }
+            Box(Modifier.weight(1f).height(46.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable { Agent.answerConfirm(true) },
+                contentAlignment = Alignment.Center) { ButtonText(pc.action, color = Color.White) }
         }
     }
 }

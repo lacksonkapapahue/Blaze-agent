@@ -94,6 +94,7 @@ import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.assist.BlazeInteractionService
 import com.blaze.assistant.phone.BlazeAccessibilityService
 import com.blaze.assistant.voice.Voice
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 /** Lets a ComposeView live outside an Activity (assistant session window, floating orb). */
 class OverlayOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
@@ -552,7 +553,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                     items(recent, key = { it.id }) { m ->
                         when (m.role) {
                             Role.USER -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                                Text(m.text, modifier = Modifier.background(c.ink).padding(horizontal = 12.dp, vertical = 8.dp),
+                                Text(m.text, modifier = Modifier.clip(RoundedCornerShape(18.dp, 18.dp, 6.dp, 18.dp)).background(c.ink).padding(horizontal = 12.dp, vertical = 8.dp),
                                     style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.paper))
                             }
                             Role.STEP -> Label("— " + m.text, size = 10.sp)
@@ -594,13 +595,13 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                             else -> listen()
                         }
                     }, contentAlignment = Alignment.Center) {
-                    Label(if (micOn) "■" else "Mic", color = if (micOn) c.paper else c.ink, size = 10.sp)
+                    ButtonText(if (micOn) "■" else "Mic", color = if (micOn) c.paper else c.ink, size = 13.sp)
                 }
                 Spacer(Modifier.width(6.dp))
-                Box(Modifier.height(46.dp).background(if (mood != Mood.IDLE) c.accent else c.ink)
+                Box(Modifier.height(46.dp).clip(BlazeShapes.pill).background(if (mood != Mood.IDLE) androidx.compose.ui.graphics.SolidColor(c.accent) else BlazeBrush.primary, BlazeShapes.pill)
                     .clickable { if (mood != Mood.IDLE) Agent.stop() else submit() }.padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center) {
-                    Label(if (mood != Mood.IDLE) "Stop" else "Send", color = c.paper, size = 11.sp)
+                    ButtonText(if (mood != Mood.IDLE) "Stop" else "Send", color = Color.White)
                 }
             }
         }
@@ -609,7 +610,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
 
 @Composable
 private fun PanelButton(label: String, onClick: () -> Unit) {
-    Box(Modifier.clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp)) {
+    Box(Modifier.clip(BlazeShapes.pill).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp)) {
         Label(label, color = if (label == "Pin orb") LocalBlaze.current.accent else LocalBlaze.current.sub, size = if (label == "×") 16.sp else 10.sp)
     }
 }

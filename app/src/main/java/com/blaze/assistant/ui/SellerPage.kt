@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blaze.assistant.agent.Brand
 import com.blaze.assistant.agent.Seller
+import androidx.compose.ui.draw.clip
 
 /**
  * Seller (marketer pack, v0.17.0): the brand kit every post, ad and listing follows, the weekly store
@@ -57,12 +58,12 @@ internal fun SellerPage(digest0: Boolean? = null) {
     Field("Fonts (headings, body)", fonts, { fonts = it; saved = "" }, "Playfair Display, Inter")
     Field("Voice and audience", notes, { notes = it; saved = "" }, "Warm, cosy home decor for young renters")
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.height(44.dp).background(c.ink).clickable {
+        Box(Modifier.height(44.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
             val cs = colors.split(',').map { it.trim() }.filter { it.isNotBlank() }
             Seller.saveBrand(Seller.brand().copy(name = name.trim(), paper = cs.getOrElse(0) { "" }, ink = cs.getOrElse(1) { "" }, accents = cs.drop(2),
                 fonts = fonts.split(',').map { it.trim() }.filter { it.isNotBlank() }, notes = notes.trim()))
             saved = "Saved"
-        }.padding(horizontal = 18.dp), contentAlignment = Alignment.Center) { Label("Save brand kit", color = c.paper, size = 10.sp) }
+        }.padding(horizontal = 18.dp), contentAlignment = Alignment.Center) { ButtonText("Save brand kit", color = Color.White) }
         if (saved.isNotBlank()) Label(saved, color = c.accent, size = 9.sp, modifier = Modifier.padding(start = 12.dp))
     }
     Text("Or ask Blaze: \u201cread my brand from homeglow.store\u201d. Kept in ~/.blaze/brand.json, the same shape as Blaze Desktop's.",

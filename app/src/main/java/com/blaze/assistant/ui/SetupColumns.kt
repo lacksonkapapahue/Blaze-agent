@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.blaze.assistant.setup.SetupGate
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.Color
 
 /** v0.24.4: a setup step's mark: a still ring (to do), a spinning ring (working on it), a checkmark (done). */
 enum class Mark { TODO, WORKING, DONE }
@@ -194,10 +195,10 @@ fun SetupGateScreen(onOpenPage: (String) -> Unit, onDone: () -> Unit) {
                 }
             }
             val next = left.firstOrNull { it.required } ?: left.firstOrNull()
-            Box(Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(27.dp)).background(if (next == null) c.accent else c.ink).clickable {
+            Box(Modifier.fillMaxWidth().height(54.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                 if (next == null) onDone() else { asked = asked + next.id; setupFix(ctx, next.id, { perm.launch(it) }, onOpenPage, scope) }
             }, contentAlignment = Alignment.Center) {
-                Label(if (next == null) "Open Blaze" else "Set up: ${next.title.lowercase()}", color = c.paper, size = 11.sp)
+                ButtonText(if (next == null) "Open Blaze" else "Set up: ${next.title.lowercase()}", color = Color.White)
             }
             if (blocking.isNotEmpty()) Box(Modifier.fillMaxWidth().padding(top = 10.dp), contentAlignment = Alignment.Center) {
                 Label("Required steps can't be skipped.", color = c.weak, size = 10.sp)

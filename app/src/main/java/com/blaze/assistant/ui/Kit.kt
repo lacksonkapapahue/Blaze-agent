@@ -405,3 +405,22 @@ fun BlazeMenuCard(items: List<Pair<String, () -> Unit>>, onDismiss: () -> Unit =
         }
     }
 }
+
+/**
+ * v0.24.8: a tappable text action ("Delete", "Open", "×"): sentence-case sans in a pill-shaped touch area. Same
+ * parameters as [Label] so the old uppercase mono "label buttons" swap over one for one.
+ */
+@Composable
+fun ActionText(text: String, color: Color = LocalBlaze.current.sub, size: androidx.compose.ui.unit.TextUnit = 11.sp, modifier: Modifier = Modifier,
+               maxLines: Int = 1) {
+    Text(text.sentence(), modifier = Modifier.clip(BlazeShapes.pill).then(modifier).padding(horizontal = 6.dp, vertical = 2.dp), maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = (size.value + 3f).sp, color = color))
+}
+
+/** v0.24.8: the old uppercase mono "button" text inside a filled box, as sentence-case button text. */
+@Composable
+fun ButtonText(text: String, color: Color = LocalBlaze.current.ink, size: androidx.compose.ui.unit.TextUnit = 14.sp) {
+    Text(text.sentence(), maxLines = 1, overflow = TextOverflow.Ellipsis,
+        style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = size, color = color))
+}

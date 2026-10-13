@@ -45,6 +45,7 @@ import com.blaze.assistant.R
 import com.blaze.assistant.agent.Mood
 import kotlinx.coroutines.delay
 import kotlin.random.Random
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 /** Design tokens lifted from blazeinchue.netlify.app (paper, ink, hairlines, blue accent); v0.24.8: every edge rounded. */
 data class BlazeColors(

@@ -54,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
+import androidx.compose.ui.draw.clip
 
 object GalleryUi { val open = MutableStateFlow(false) }
 
@@ -103,7 +104,7 @@ fun MediaStrip(paths: List<String>) {
             when (Media.kindOf(f)) {
                 "image" -> {
                     val bmp = rememberThumb(p, 720)
-                    Box(Modifier.widthIn(max = 330.dp).fillMaxWidth().heightIn(min = 120.dp).background(c.hair.copy(alpha = 0.3f))
+                    Box(Modifier.widthIn(max = 330.dp).fillMaxWidth().heightIn(min = 120.dp).clip(BlazeShapes.medium).background(c.hair.copy(alpha = 0.3f))
                         .clickable { try { ctx.startActivity(Media.viewIntent(f)) } catch (_: Exception) { } }) {
                         if (bmp != null) Image(bmp, contentDescription = f.nameWithoutExtension, modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
                         else Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { Label("Loading picture\u2026", size = 10.sp) }
@@ -111,7 +112,7 @@ fun MediaStrip(paths: List<String>) {
                 }
                 "audio" -> Row(Modifier.widthIn(max = 330.dp).fillMaxWidth().hairline(c.hair).clickable { Player.toggle(p) }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(34.dp).background(c.ink), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(34.dp).clip(BlazeShapes.pill).background(c.ink), contentAlignment = Alignment.Center) {
                         Text(if (playing == p) "\u275A\u275A" else "\u25B6", style = TextStyle(fontSize = 13.sp, color = c.paper))
                     }
                     Spacer(Modifier.width(12.dp))
@@ -119,12 +120,12 @@ fun MediaStrip(paths: List<String>) {
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink))
                 }
                 else -> Row(Modifier.hairline(c.hair).clickable { try { ctx.startActivity(Media.viewIntent(f)) } catch (_: Exception) { } }.padding(12.dp)) {
-                    Label("\u25B6  " + f.name, color = c.ink, size = 10.sp)
+                    Text("\u25B6  " + f.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
                 }
             }
             Row(Modifier.padding(top = 4.dp, bottom = 8.dp)) {
-                Label("Save", color = c.accent, size = 9.sp, modifier = Modifier.clickable { Toast.makeText(ctx, Media.saveToPhone(f), Toast.LENGTH_SHORT).show() }.padding(end = 14.dp, top = 4.dp, bottom = 4.dp))
-                Label("Share", color = c.accent, size = 9.sp, modifier = Modifier.clickable { try { ctx.startActivity(Media.shareIntent(f)) } catch (_: Exception) { } }.padding(end = 14.dp, top = 4.dp, bottom = 4.dp))
+                ActionText("Save", color = c.accent, size = 9.sp, modifier = Modifier.clickable { Toast.makeText(ctx, Media.saveToPhone(f), Toast.LENGTH_SHORT).show() }.padding(end = 14.dp, top = 4.dp, bottom = 4.dp))
+                ActionText("Share", color = c.accent, size = 9.sp, modifier = Modifier.clickable { try { ctx.startActivity(Media.shareIntent(f)) } catch (_: Exception) { } }.padding(end = 14.dp, top = 4.dp, bottom = 4.dp))
             }
         }
     }
@@ -142,7 +143,7 @@ fun GalleryScreen(onDismiss: () -> Unit) {
     BackHandler { if (open != null) open = null else onDismiss() }
     Column(Modifier.fillMaxSize().background(c.paper).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable { if (open != null) open = null else onDismiss() }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).clip(BlazeShapes.pill).clickable { if (open != null) open = null else onDismiss() }, contentAlignment = Alignment.Center) {
                 Text("\u2190", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
             }
             Text(open?.title?.take(30) ?: "Gallery", modifier = Modifier.weight(1f),
@@ -153,7 +154,7 @@ fun GalleryScreen(onDismiss: () -> Unit) {
         if (sel != null) {
             Column(Modifier.fillMaxSize().padding(16.dp)) {
                 MediaStrip(listOf(sel.file.absolutePath))
-                Label("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Media.delete(sel.file); open = null }.padding(vertical = 10.dp))
+                ActionText("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Media.delete(sel.file); open = null }.padding(vertical = 10.dp))
             }
         } else if (items.isEmpty()) {
             Column(Modifier.fillMaxSize().padding(20.dp)) {
@@ -162,7 +163,7 @@ fun GalleryScreen(onDismiss: () -> Unit) {
         } else {
             LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().padding(2.dp)) {
                 items(items, key = { it.file.absolutePath }) { it ->
-                    Box(Modifier.padding(2.dp).aspectRatio(1f).background(c.hair.copy(alpha = 0.3f)).clickable { open = it }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.padding(3.dp).aspectRatio(1f).clip(BlazeShapes.small).background(c.hair.copy(alpha = 0.3f)).clickable { open = it }, contentAlignment = Alignment.Center) {
                         if (it.kind == "image") {
                             val bmp = rememberThumb(it.file.absolutePath, 240)
                             if (bmp != null) Image(bmp, contentDescription = it.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -187,7 +188,7 @@ fun AttachedThumbs(paths: List<String>) {
         paths.take(5).forEach { p ->
             val bmp = rememberThumb(p, 360)
             val single = paths.size == 1
-            Box(Modifier.then(if (single) Modifier.widthIn(max = 220.dp) else Modifier.size(84.dp)).background(c.hair.copy(alpha = 0.3f)).border(1.dp, c.hair)
+            Box(Modifier.then(if (single) Modifier.widthIn(max = 220.dp) else Modifier.size(84.dp)).clip(BlazeShapes.small).background(c.hair.copy(alpha = 0.3f)).border(1.dp, c.hair, BlazeShapes.small)
                 .clickable { try { ctx.startActivity(Media.viewIntent(File(p))) } catch (_: Exception) { } }) {
                 if (bmp != null) Image(bmp, contentDescription = "Attached picture",
                     modifier = if (single) Modifier.widthIn(max = 220.dp).heightIn(max = 300.dp) else Modifier.fillMaxSize(),

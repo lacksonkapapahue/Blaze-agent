@@ -62,7 +62,7 @@ fun UpdateCard() {
         }
         if (action != null) {
             Spacer(Modifier.height(10.dp))
-            Label(action, color = c.accent, size = 10.sp, modifier = Modifier.hairline(c.accent).clickable { Updater.retry(ctx) }.padding(horizontal = 12.dp, vertical = 8.dp))
+            ActionText(action, color = c.accent, size = 10.sp, modifier = Modifier.hairline(c.accent).clickable { Updater.retry(ctx) }.padding(horizontal = 12.dp, vertical = 8.dp))
         }
     }
 }

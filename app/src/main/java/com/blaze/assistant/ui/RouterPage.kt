@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.sp
 import com.blaze.assistant.agent.BlazeRouter
 import com.blaze.assistant.agent.Settings
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 /** Settings › BlazeRouter: run the router (Alpine, Termux or directly), use it as the brain, open its dashboard. */
 @Composable
@@ -53,7 +55,7 @@ internal fun RouterPage(onClassic: () -> Unit) {
         style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 21.sp, color = c.body))
     Spacer(Modifier.height(18.dp))
     Row(Modifier.fillMaxWidth().hairline(c.hair).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(if (up) c.accent else c.weak))
+        Box(Modifier.size(8.dp).background(if (up) c.accent else c.weak, BlazeShapes.pill))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(if (up) "Running" + (if (st.where.isNotBlank()) " in " + BlazeRouter.label(st.where) else "") else "Stopped",
@@ -69,7 +71,7 @@ internal fun RouterPage(onClassic: () -> Unit) {
             val on = runner == r
             Box(Modifier.background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(if (on) c.ink else c.hair).clickable { runner = r; BlazeRouter.runner = r }
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Label(when (r) { "auto" -> "Auto"; "alpine" -> "Alpine"; "termux" -> "Termux"; else -> "Direct" }, color = if (on) c.paper else c.ink, size = 10.sp)
+                ButtonText(when (r) { "auto" -> "Auto"; "alpine" -> "Alpine"; "termux" -> "Termux"; else -> "Direct" }, color = if (on) c.paper else c.ink, size = 13.sp)
             }
         }
     }
@@ -77,8 +79,8 @@ internal fun RouterPage(onClassic: () -> Unit) {
         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
     Spacer(Modifier.height(16.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(Modifier.weight(1f).height(46.dp).background(c.ink).clickable(enabled = !busy) { act { if (up) BlazeRouter.stop(ctx) else BlazeRouter.start(ctx) } },
-            contentAlignment = Alignment.Center) { Label(if (busy) "…" else if (up) "Stop" else "Start", color = c.paper, size = 11.sp) }
+        Box(Modifier.weight(1f).height(46.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable(enabled = !busy) { act { if (up) BlazeRouter.stop(ctx) else BlazeRouter.start(ctx) } },
+            contentAlignment = Alignment.Center) { ButtonText(if (busy) "…" else if (up) "Stop" else "Start", color = Color.White) }
         Box(Modifier.weight(1f).height(46.dp).hairline(c.hair).clickable(enabled = !busy) { act { BlazeRouter.openDashboard(ctx); "Dashboard opened." } },
             contentAlignment = Alignment.Center) { Label("Open dashboard", color = c.ink, size = 11.sp) }
     }
@@ -86,7 +88,7 @@ internal fun RouterPage(onClassic: () -> Unit) {
     Box(Modifier.fillMaxWidth().height(46.dp).background(if (using) c.accent else c.paper, BlazeShapes.medium).hairline(if (using) c.accent else c.hair)
         .clickable(enabled = !busy) { act { if (using) { Settings.providerId = com.blaze.assistant.agent.Providers.AUTO; "Back to Auto." } else BlazeRouter.run(ctx, org.json.JSONObject().put("action", "use")) } },
         contentAlignment = Alignment.Center) {
-        Label(if (using) "Blaze answers through BlazeRouter · ${Settings.model}" else "Use as Blaze's brain (${BlazeRouter.DEFAULT_MODEL})", color = if (using) c.paper else c.ink, size = 10.sp)
+        ButtonText(if (using) "Blaze answers through BlazeRouter · ${Settings.model}" else "Use as Blaze's brain (${BlazeRouter.DEFAULT_MODEL})", color = if (using) c.paper else c.ink, size = 13.sp)
     }
     if (msg.isNotBlank()) Text(msg, modifier = Modifier.padding(top = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.sub))
     Spacer(Modifier.height(8.dp))

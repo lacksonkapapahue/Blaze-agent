@@ -28,7 +28,7 @@ fun ModelField(selected: String, open: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
     Row(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(if (open) c.accent else c.hair2).clickable(onClick = onClick)
         .heightIn(min = 48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(7.dp).background(if (selected.isBlank()) c.weak else c.accent)); Spacer(Modifier.width(10.dp))
+        Box(Modifier.size(7.dp).background(if (selected.isBlank()) c.weak else c.accent, BlazeShapes.pill)); Spacer(Modifier.width(10.dp))
         Text(selected.ifBlank { "Choose a model" }, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = TextStyle(fontFamily = Type.Mono, fontSize = 13.5.sp, color = if (selected.isBlank()) c.weak else c.ink))
         Text(if (open) "\u25B4" else "\u25BE", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = if (open) c.accent else c.sub))
@@ -51,7 +51,7 @@ fun ModelList(models: List<ModelCatalog.Model>, selected: String, query: String,
             val free = m.note.contains("free", true) || m.id.endsWith(":free")
             Row(Modifier.fillMaxWidth().hairlineTop(c.hair).background(if (on) c.accentSoft else c.raised).clickable { onPick(m.id) }
                 .heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2)); Spacer(Modifier.width(12.dp))
+                Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2, BlazeShapes.pill)); Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(m.name, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis,

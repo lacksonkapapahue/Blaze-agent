@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.launch
 import java.io.File
+import androidx.compose.ui.draw.clip
 
 /** Turns what Blaze passed (URL, ~/path, relative path, absolute path) into something WebView can load. */
 fun designUrl(target: String, home: File?): String {
@@ -172,8 +173,8 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(false to "Phone", true to "Desktop").forEach { (w, label) ->
                 val on = wide == w
-                Box(Modifier.background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(if (on) c.ink else c.hair).clickable { wide = w }.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                    Label(label, color = if (on) c.paper else c.ink, size = 9.sp)
+                Box(Modifier.clip(BlazeShapes.pill).background(if (on) c.ink else c.paper, BlazeShapes.pill).hairline(if (on) c.ink else c.hair, BlazeShapes.pill).clickable { wide = w }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                    ButtonText(label, color = if (on) c.paper else c.ink, size = 13.sp)
                 }
                 Spacer(Modifier.width(6.dp))
             }
@@ -181,9 +182,9 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
                 style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
             if (url.isNotBlank()) {
-                Label("Reload", color = c.accent, size = 9.sp, modifier = Modifier.clickable { restart(rs.forceGl1) }.padding(6.dp))
+                ActionText("Reload", color = c.accent, size = 9.sp, modifier = Modifier.clickable { restart(rs.forceGl1) }.padding(6.dp))
                 // "Open" hands the real file (or URL) to the browser, never the in-app virtual origin.
-                Label("Open", color = c.accent, size = 9.sp, modifier = Modifier.clickable { onOpenInBrowser(fileUrl) }.padding(6.dp))
+                ActionText("Open", color = c.accent, size = 9.sp, modifier = Modifier.clickable { onOpenInBrowser(fileUrl) }.padding(6.dp))
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(c.faint)) {
@@ -252,7 +253,7 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
             }
         }
         Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 12.dp, vertical = 11.dp)) {
+            Box(Modifier.weight(1f).clip(BlazeShapes.pill).background(c.field, BlazeShapes.pill).hairline(c.fieldLine, BlazeShapes.pill).padding(horizontal = 16.dp, vertical = 11.dp)) {
                 if (ask.isEmpty()) Text(if (busy) status.ifBlank { "Working…" } else "Ask for a change to this design", maxLines = 1,
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = if (busy) c.accent else c.weak))
                 BasicTextField(ask, { ask = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
@@ -262,8 +263,7 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                     modifier = Modifier.fillMaxWidth())
             }
             Spacer(Modifier.width(8.dp))
-            Box(Modifier.background(if (ask.isNotBlank() && !busy) c.ink else c.faint).clickable(enabled = ask.isNotBlank() && !busy) { onAsk(ask); ask = "" }
-                .padding(horizontal = 14.dp, vertical = 12.dp)) { Label("Send", color = if (ask.isNotBlank() && !busy) c.paper else c.weak, size = 10.sp) }
+            BlazeButton("Send", enabled = ask.isNotBlank() && !busy) { onAsk(ask); ask = "" }
         }
     }
 }
@@ -271,7 +271,7 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
 /** The "3D engine couldn't start" banner: the real error, what's shown instead, and Retry. */
 @Composable
 private fun FailBanner(error: String, sketch: Boolean, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().padding(12.dp).background(androidx.compose.ui.graphics.Color(0xFFFFF3E0))
+    Row(modifier.fillMaxWidth().padding(12.dp).clip(BlazeShapes.medium).background(androidx.compose.ui.graphics.Color(0xFFFFF3E0), BlazeShapes.medium)
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("The 3D engine couldn't start: " + error.take(220), maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -280,8 +280,8 @@ private fun FailBanner(error: String, sketch: Boolean, onRetry: () -> Unit, modi
                 style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = androidx.compose.ui.graphics.Color(0xFF8A5A1C)))
         }
         Spacer(Modifier.width(8.dp))
-        Box(Modifier.background(androidx.compose.ui.graphics.Color(0xFF6D3D00)).clickable { onRetry() }.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Label("Retry", color = androidx.compose.ui.graphics.Color.White, size = 10.sp)
+        Box(Modifier.clip(BlazeShapes.pill).background(androidx.compose.ui.graphics.Color(0xFF6D3D00), BlazeShapes.pill).clickable { onRetry() }.padding(horizontal = 14.dp, vertical = 8.dp)) {
+            ButtonText("Retry", color = androidx.compose.ui.graphics.Color.White, size = 13.sp)
         }
     }
 }

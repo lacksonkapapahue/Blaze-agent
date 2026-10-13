@@ -240,17 +240,17 @@ fun BoxScope.UndoBar(text: String, onUndo: () -> Unit, modifier: Modifier = Modi
         Spacer(Modifier.width(6.dp))
         Box(Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = onUndo).semantics { contentDescription = "Undo clear" }
             .padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Label("Undo", color = c.paper, size = 11.sp)
+            ButtonText("Undo", color = c.paper)
         }
     }
 }
 
-/** Send: an up arrow; Stop: a square. Drawn so they match the pixel-clean marks elsewhere. */
+/** Send: an up arrow; Stop: a soft rounded square (v0.24.8). Drawn so they match the pixel-clean marks elsewhere. */
 @Composable
 fun SendMark(color: Color, stop: Boolean, size: Dp = 16.dp) {
     Canvas(Modifier.size(size)) {
         val w = this.size.width; val u = w / 10f
-        if (stop) { drawRect(color, Offset(2.5f * u, 2.5f * u), Size(5 * u, 5 * u)); return@Canvas }
+        if (stop) { drawRoundRect(color, Offset(2.5f * u, 2.5f * u), Size(5 * u, 5 * u), androidx.compose.ui.geometry.CornerRadius(1.4f * u)); return@Canvas }
         drawLine(color, Offset(5 * u, 9 * u), Offset(5 * u, 1.5f * u), 1.8f * u, StrokeCap.Round)
         drawLine(color, Offset(1.6f * u, 4.8f * u), Offset(5 * u, 1.4f * u), 1.8f * u, StrokeCap.Round)
         drawLine(color, Offset(8.4f * u, 4.8f * u), Offset(5 * u, 1.4f * u), 1.8f * u, StrokeCap.Round)

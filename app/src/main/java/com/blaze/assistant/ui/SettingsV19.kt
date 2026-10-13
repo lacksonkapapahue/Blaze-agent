@@ -36,6 +36,8 @@ import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.agent.Traces
 import com.blaze.assistant.phone.BlazeAccessibilityService
 import kotlinx.coroutines.delay
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 /** Settings → Look & feel: the small things that make Blaze feel alive. */
 @Composable
@@ -82,7 +84,7 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.clickable { finish(null) }.padding(8.dp)) { Label("Skip", color = c.sub, size = 10.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable { finish(null) }.padding(8.dp)) { ActionText("Skip", color = c.sub, size = 10.sp) }
             }
             Column {
                 OrbFace(72.dp)
@@ -107,14 +109,14 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                         if (!a11y) ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
             }
-            Box(Modifier.fillMaxWidth().height(54.dp).background(c.ink).clickable {
+            Box(Modifier.fillMaxWidth().height(54.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                 when (page) {
                     0 -> { if (brain.isEmpty()) { Settings.providerId = Providers.AUTO; brain = "free" }; page = 1 }
                     1 -> page = 2
                     else -> finish(if (brain == "key") "/settings ai" else "Introduce yourself in one sentence, then tell me three things you can do on my phone.")
                 }
             }, contentAlignment = Alignment.Center) {
-                Label(when (page) { 0 -> "Continue"; 1 -> if (a11y) "Continue" else "Later"; else -> "Let's go" }, color = c.paper, size = 11.sp)
+                ButtonText(when (page) { 0 -> "Continue"; 1 -> if (a11y) "Continue" else "Later"; else -> "Let's go" }, color = Color.White)
             }
         }
     }
