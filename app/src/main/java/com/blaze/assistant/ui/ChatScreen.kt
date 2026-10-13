@@ -305,6 +305,7 @@ fun ChatScreen() {
     var plusOpen by remember { mutableStateOf(false) }
     val showing by Views.showing.collectAsState()
     val designTarget by Views.designTarget.collectAsState()
+    val viewOffer by Views.offer.collectAsState()
     val work by com.blaze.assistant.agent.Modes.work.collectAsState()
     val approval by com.blaze.assistant.agent.Modes.approval.collectAsState()
     val bgAgents by com.blaze.assistant.agent.BgAgents.all.collectAsState()
@@ -461,13 +462,16 @@ fun ChatScreen() {
             ConfirmCard()
             QuestionCard()
             SecureFormCard()
+            // v0.24.6: "Open in Design?" instead of switching views on its own.
+            if (shellMode == "chat") viewOffer?.let { o -> if (showing != o.id) ViewOfferChip(Views.offerLabel(o.id),
+                onOpen = { Views.offer.value = null; Views.find(o.id)?.let { openView(it, o.target) } }, onDismiss = { Views.offer.value = null }) }
             if (shellMode == "chat" && showing.isEmpty()) {
                 val sugg = remember(input.text) { fileSuggestions(input.text).ifEmpty { CommandRunner.suggest(input.text) } }
                 if (sugg.isNotEmpty() && !showViews) SuggestionList(sugg) { s ->
                     if (s.runNow) send(s.fill) else input = TextFieldValue(s.fill, TextRange(s.fill.length))
                 }
                 if (quote.isNotBlank()) QuoteStrip(quote) { quote = "" }
-                if (pending.isNotEmpty() || loadingFiles) AttachmentStrip(pending, loadingFiles) { a -> pending = pending - a }
+                if (pending.isNotEmpty() || loadingFiles) AttachmentThumbs(pending, loadingFiles) { a -> pending = pending - a }
                 if (clipHasImage && pending.isEmpty() && !plusOpen) Row(Modifier.fillMaxWidth().background(c.paper)
                     .padding(horizontal = 14.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Label("Image on your clipboard", size = 10.sp, modifier = Modifier.weight(1f))
@@ -501,11 +505,14 @@ fun ChatScreen() {
                     }
                     BackHandler { plusOpen = false }
                 }
+                // v0.24.6: pictures straight from the keyboard (Samsung clipboard, GIFs, stickers) attach like picked photos.
+                AcceptImages(onImage = { uri, mime -> addUris(listOf(uri), mime) }) {
                 Composer(input, { input = it }, busy = mood != Mood.IDLE, canSend = input.text.isNotBlank() || pending.isNotEmpty(),
                     plusOpen = plusOpen, chip = modeChip(work, approval), agents = bgAgents.count { it.live },
                     listening = voiceState == Voice.State.LISTENING, speaking = voiceState == Voice.State.SPEAKING,
                     onPlus = { plusOpen = !plusOpen; showViews = false }, onMic = { onMic() }, onSend = { send(input.text) }, onStop = { Agent.stop() },
                     onChip = { plusOpen = true }, hints = hints, animateHints = !reducedMotion)
+                }
             }
         }
 
@@ -778,10 +785,8 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
     when (m.role) {
         Role.USER -> SwipeToQuote(true, onQuote = { onQuote(splitQuote(m.text).second) }) { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
             val (quoted, body) = splitQuote(m.text)
-            UserBubble(body, quoted, pos)
-            if (m.media.isNotEmpty()) AttachedThumbs(m.media)
-            val unpictured = if (m.media.isNotEmpty()) m.files.drop(m.media.size) else m.files
-            if (unpictured.isNotEmpty()) Label("Attached: " + unpictured.joinToString(", ") { it.take(24) }, size = 9.sp, modifier = Modifier.padding(top = 4.dp, end = 4.dp))
+            // v0.24.6: pictures inside your bubble (tap to preview), other files as icon chips.
+            SentBubble(body, quoted, m.media, m.files, pos)
             if (pos.ends) Actions(m, Side.ME, time, canAct, onQuote, allowQuote = false)
         } }
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()

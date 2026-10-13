@@ -19,6 +19,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -39,6 +40,27 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.app.PictureInPictureParams
+import android.os.Build
+import android.util.Rational
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.blaze.assistant.ui.Glass
+import com.blaze.assistant.ui.GlassIconButton
+import com.blaze.assistant.ui.MascotGlyph
+import com.blaze.assistant.ui.BrandProgress
 import com.blaze.assistant.ui.BlazeTheme
 import com.blaze.assistant.ui.Label
 import com.blaze.assistant.ui.LocalBlaze
@@ -83,10 +105,25 @@ class BrowserActivity : ComponentActivity() {
         }
         handle(intent)
         if (BrowserEngine.tabs.isEmpty()) BrowserEngine.newTab(this)
-        setContent { BlazeTheme { BrowserScreen(onClose = { finish() }, onImport = { try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { } }) } }
+        setContent { BlazeTheme { BrowserScreen(onClose = { finish() }, onImport = { try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { } },
+            onPopOut = { w, h -> popOut(w, h) }) } }
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handle(intent) }
+
+    /** v0.24.6: the page pointer's Pop out: the video under the pointer plays in a small window over other apps. */
+    fun popOut(w: Float, h: Float): Boolean {
+        if (Build.VERSION.SDK_INT < 26 || !packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+        return try {
+            val r = if (w > 0f && h > 0f) (w / h).coerceIn(0.42f, 2.38f) else 16f / 9f
+            enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(Rational((r * 1000).toInt(), 1000)).build())
+        } catch (_: Exception) { false }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        BrowserUi.pip.value = isInPictureInPictureMode
+    }
 
     private fun handle(i: Intent?) {
         val u = i?.dataString ?: i?.getStringExtra(Intent.EXTRA_TEXT)?.let { Regex("https?://\\S+").find(it)?.value } ?: return
@@ -103,11 +140,25 @@ class BrowserActivity : ComponentActivity() {
     }
 }
 
+/** Browser screen state shared with the activity. */
+object BrowserUi {
+    val pip = androidx.compose.runtime.mutableStateOf(false)
+    /** The summoned page pointer (v0.24.6). */
+    val pointer = androidx.compose.runtime.mutableStateOf(false)
+}
+
 private enum class Panel { NONE, TABS, MENU, BOOKMARKS, HISTORY, PRIVACY }
 
+/**
+ * The Browser (v0.24.6 look): rounded dark Blaze theme with a pill address bar, rounded tab chips, round icon
+ * buttons and a brand-coloured progress shimmer. The mascot button summons the page pointer (long-press too);
+ * the sparkle button opens "Ask Blaze about this page".
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit) {
-    val c = LocalBlaze.current
+internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: (Float, Float) -> Boolean = { _, _ -> false },
+                           previewPointer: PagePointer.Hit? = null, previewMenu: Boolean = false, previewAsk: List<Pair<Boolean, String>>? = null,
+                           previewPage: (@Composable () -> Unit)? = null, previewTip: androidx.compose.ui.geometry.Offset? = null) {
     val ctx = LocalContext.current
     val focus = LocalFocusManager.current
     val tab = BrowserEngine.tab()
@@ -115,10 +166,19 @@ private fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit) {
     var editing by remember { mutableStateOf(false) }
     var bar by remember(tab?.id, tab?.url, editing) { mutableStateOf(if (editing) tab?.url.orEmpty().let { if (it == "about:blank") "" else it } else display(tab?.url.orEmpty())) }
     var tick by remember { mutableIntStateOf(0) }   // re-read bookmarks after a change
+    var pointer by BrowserUi.pointer
+    if (previewPointer != null) pointer = true
+    var askOpen by remember { mutableStateOf(previewAsk != null) }
+    var askFirst by remember { mutableStateOf<String?>(null) }
+    val pip by BrowserUi.pip
+    val priv = tab?.isPrivate == true
+    val bg = if (priv) Glass.privateBg else Glass.bg
 
     BackHandler {
         when {
             BrowserEngine.fullView != null -> BrowserEngine.exitFull()
+            askOpen -> askOpen = false
+            pointer -> pointer = false
             panel != Panel.NONE -> panel = Panel.NONE
             tab?.web?.canGoBack() == true -> tab.web.goBack()
             else -> onClose()
@@ -132,87 +192,131 @@ private fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit) {
     }
 
     if (panel == Panel.TABS) {
-        Box(Modifier.fillMaxSize().background(if (tab?.isPrivate == true) androidx.compose.ui.graphics.Color(0xFF202124) else c.paper).systemBarsPadding()) {
-            TabGrid(startPrivate = tab?.isPrivate == true, onDone = { panel = Panel.NONE })
+        Box(Modifier.fillMaxSize().background(if (priv) androidx.compose.ui.graphics.Color(0xFF202124) else LocalBlaze.current.paper).systemBarsPadding()) {
+            TabGrid(startPrivate = priv, onDone = { panel = Panel.NONE })
         }
         return
     }
 
-    Column(Modifier.fillMaxSize().background(c.paper).systemBarsPadding().imePadding()) {
-        // Address bar
-        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconBtn("×") { onClose() }
+    // Picture-in-picture: only the page (the video was scrolled to the middle and started).
+    if (pip && tab != null) {
+        key(tab.id) { WebHost(tab) }
+        return
+    }
+
+    val host = remember(tab?.id) {
+        PointerHost(
+            openUrl = { u, mode ->
+                when (mode) {
+                    OpenMode.SAME -> BrowserEngine.tab()?.let { BrowserEngine.load(it, u) }
+                    OpenMode.NEW -> BrowserEngine.newTab(ctx, u, isPrivate = priv)
+                    OpenMode.BACKGROUND -> { val keep = BrowserEngine.current; BrowserEngine.newTab(ctx, u, isPrivate = priv); BrowserEngine.current = keep }
+                }
+            },
+            ask = { q -> askFirst = q; askOpen = true },
+            pip = { h, x, y ->
+                BrowserEngine.tab()?.web?.evaluateJavascript(PagePointer.focusVideoJs(x, y), null)
+                pointer = false
+                if (!onPopOut(h.w, h.h)) android.widget.Toast.makeText(ctx, "This phone doesn't allow picture-in-picture for Blaze.", android.widget.Toast.LENGTH_SHORT).show()
+            },
+            isPrivate = priv)
+    }
+
+    Column(Modifier.fillMaxSize().background(bg).systemBarsPadding().imePadding()) {
+        // Address row: close, privacy, the address pill, reload, ask.
+        Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            GlassIconButton(Icons.Rounded.Close, "Close browser", size = 38.dp, onClick = onClose)
             Spacer(Modifier.width(6.dp))
-            // VPN / privacy: the exit country's flag while connected, ! when the kill switch is holding pages back.
             val vpn = BrowserVpn.status
-            IconBtn(when (vpn) {
-                BrowserVpn.Status.ON -> Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty())
-                BrowserVpn.Status.CONNECTING -> "…"
-                BrowserVpn.Status.FAILED -> "!"
-                BrowserVpn.Status.OFF -> "\uD83D\uDEE1"
-            }) { panel = if (panel == Panel.PRIVACY) Panel.NONE else Panel.PRIVACY }
-            Spacer(Modifier.width(6.dp))
-            val priv = tab?.isPrivate == true
-            Box(Modifier.weight(1f).height(40.dp).hairline(c.hair)
-                .background(if (priv) androidx.compose.ui.graphics.Color(0xFF35363A) else androidx.compose.ui.graphics.Color.Transparent)
-                .padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
-                if (bar.isEmpty()) Text(if (priv) "\uD83D\uDD76  Private: search or type a web address" else "Search or type a web address", if (priv) androidx.compose.ui.graphics.Color(0xFF9AA0A6) else c.weak, 14)
-                BasicTextField(bar, { bar = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
-                    textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = if (priv) androidx.compose.ui.graphics.Color(0xFFE8EAED) else c.ink),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { tab?.let { BrowserEngine.load(it, bar) }; focus.clearFocus() }),
-                    modifier = Modifier.fillMaxWidth().onFocusChanged { editing = it.isFocused })
+            Box(Modifier.size(38.dp).clip(CircleShape).background(Glass.raised).clickable { panel = if (panel == Panel.PRIVACY) Panel.NONE else Panel.PRIVACY }
+                .semantics { contentDescription = "VPN and privacy" }, contentAlignment = Alignment.Center) {
+                when (vpn) {
+                    BrowserVpn.Status.ON -> Text(Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty()), Glass.text, 16)
+                    BrowserVpn.Status.CONNECTING -> Icon(Icons.Rounded.VpnLock, null, tint = Glass.orange, modifier = Modifier.size(19.dp))
+                    BrowserVpn.Status.FAILED -> Icon(Icons.Rounded.ErrorOutline, null, tint = Glass.orange, modifier = Modifier.size(19.dp))
+                    BrowserVpn.Status.OFF -> Icon(Icons.Rounded.Shield, null, tint = Glass.sub, modifier = Modifier.size(19.dp))
+                }
             }
             Spacer(Modifier.width(6.dp))
-            IconBtn(if ((tab?.progress ?: 100) < 100) "■" else "↻") { tab?.web?.let { if (tab.progress < 100) it.stopLoading() else it.reload() } }
+            Row(Modifier.weight(1f).height(42.dp).clip(Glass.pill).background(if (priv) Color(0xFF2A2433) else Glass.raised)
+                .border(1.dp, if (editing) Glass.blue.copy(alpha = 0.7f) else Glass.border, Glass.pill)
+                .padding(start = 12.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(when { priv -> Icons.Rounded.VisibilityOff; tab?.url.orEmpty().startsWith("https") -> Icons.Rounded.Lock; else -> Icons.Rounded.Search },
+                    null, tint = Glass.weak, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (bar.isEmpty()) Text(if (priv) "Private: search or type a web address" else "Search or type a web address", Glass.weak, 14, maxLines = 1)
+                    BasicTextField(bar, { bar = it }, singleLine = true, cursorBrush = SolidColor(Glass.blue),
+                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = Glass.text),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { tab?.let { BrowserEngine.load(it, bar) }; focus.clearFocus() }),
+                        modifier = Modifier.fillMaxWidth().onFocusChanged { editing = it.isFocused })
+                }
+                val loading = (tab?.progress ?: 100) < 100
+                Icon(if (loading) Icons.Rounded.Close else Icons.Rounded.Refresh, if (loading) "Stop loading" else "Reload", tint = Glass.sub,
+                    modifier = Modifier.size(30.dp).clip(CircleShape).clickable { tab?.web?.let { if (loading) it.stopLoading() else it.reload() } }.padding(6.dp))
+            }
+            Spacer(Modifier.width(6.dp))
+            GlassIconButton(Icons.Rounded.AutoAwesome, "Ask Blaze about this page", size = 38.dp, bg = Glass.blue,
+                enabled = tab?.url.orEmpty().startsWith("http") || previewPage != null) { askFirst = null; askOpen = true }
         }
-        // Progress
-        val p = tab?.progress ?: 100
-        Box(Modifier.fillMaxWidth().height(2.dp)) {
-            if (p < 100) Box(Modifier.fillMaxWidth(p / 100f).fillMaxHeight().background(c.accent))
+        BrandProgress(tab?.progress ?: 100, Modifier.padding(horizontal = 14.dp))
+        // Rounded tab chips (only with more than one tab of this kind).
+        val sameKind = BrowserEngine.tabs.filter { it.isPrivate == priv }
+        if (sameKind.size > 1) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                sameKind.forEach { t ->
+                    val on = t === tab
+                    Row(Modifier.height(32.dp).widthIn(max = 170.dp).clip(Glass.pill).background(if (on) Glass.raised2 else Glass.surface)
+                        .border(1.dp, if (on) Glass.blue.copy(alpha = 0.6f) else Glass.border, Glass.pill)
+                        .clickable { BrowserEngine.current = BrowserEngine.tabs.indexOf(t) }.padding(start = 12.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(t.title.ifBlank { display(t.url) }.ifBlank { "New tab" }, if (on) Glass.text else Glass.sub, 12, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                        Icon(Icons.Rounded.Close, "Close tab", tint = Glass.weak, modifier = Modifier.size(24.dp).clip(CircleShape)
+                            .clickable { BrowserEngine.close(BrowserEngine.tabs.indexOf(t)); if (BrowserEngine.tabs.none { it.isPrivate == priv }) BrowserEngine.newTab(ctx, isPrivate = priv) }.padding(5.dp))
+                    }
+                }
+            }
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (tab != null) {
+        Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 6.dp).clip(RoundedCornerShape(20.dp)).background(Color.White)) {
+            if (previewPage != null) {
+                previewPage()
+                if (pointer) PagePointerLayer(null, host, onClose = { pointer = false }, preview = previewPointer, previewMenu = previewMenu, startTip = previewTip)
+            } else if (tab != null) {
                 val blank = tab.url.isBlank() || tab.url == "about:blank"
-                key(tab.id) {
-                    AndroidView(factory = { FrameLayout(it) }, update = { f ->
-                        val w = tab.web
-                        if (w.parent !== f) { (w.parent as? ViewGroup)?.removeView(w); f.removeAllViews(); f.addView(w, FrameLayout.LayoutParams(-1, -1)) }
-                    }, modifier = Modifier.fillMaxSize())
-                }
+                key(tab.id) { WebHost(tab) }
                 if (blank) StartPage(tick) { u -> BrowserEngine.load(tab, u); panel = Panel.NONE }
+                if (pointer) PagePointerLayer(tab.web, host, onClose = { pointer = false })
             }
             when (panel) {
-                Panel.TABS -> {}
+                Panel.TABS, Panel.NONE -> {}
                 Panel.PRIVACY -> Sheet { PrivacySheet(onImport = onImport, onPrivateTab = { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }) }
                 Panel.MENU -> Sheet {
                     val url = tab?.url.orEmpty()
                     val marked = remember(url, tick) { BrowserData.isBookmarked(ctx, url) }
-                    MenuRow("New tab") { BrowserEngine.newTab(ctx); panel = Panel.NONE }
-                    MenuRow("New private tab") { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }
-                    MenuRow("VPN & privacy" + when (BrowserVpn.status) { BrowserVpn.Status.ON -> "  ·  " + Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty()); BrowserVpn.Status.FAILED -> "  ·  not connected"; else -> "" }) { panel = Panel.PRIVACY }
-                    if (url.startsWith("http")) MenuRow(if (marked) "Remove bookmark" else "Bookmark this page") { BrowserData.toggleBookmark(ctx, tab?.title.orEmpty(), url); tick++; panel = Panel.NONE }
-                    MenuRow("Bookmarks") { panel = Panel.BOOKMARKS }
-                    MenuRow("History") { panel = Panel.HISTORY }
-                    MenuRow(if (BrowserEngine.desktop) "Mobile site" else "Desktop site") { BrowserEngine.useDesktop(!BrowserEngine.desktop); panel = Panel.NONE }
+                    MenuRow(Icons.Rounded.Add, "New tab") { BrowserEngine.newTab(ctx); panel = Panel.NONE }
+                    MenuRow(Icons.Rounded.VisibilityOff, "New private tab") { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }
+                    MenuRow(Icons.Rounded.VpnLock, "VPN & privacy" + when (BrowserVpn.status) { BrowserVpn.Status.ON -> "  \u00b7  " + Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty()); BrowserVpn.Status.FAILED -> "  \u00b7  not connected"; else -> "" }) { panel = Panel.PRIVACY }
+                    if (url.startsWith("http")) MenuRow(if (marked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, if (marked) "Remove bookmark" else "Bookmark this page") { BrowserData.toggleBookmark(ctx, tab?.title.orEmpty(), url); tick++; panel = Panel.NONE }
+                    MenuRow(Icons.Rounded.Bookmarks, "Bookmarks") { panel = Panel.BOOKMARKS }
+                    MenuRow(Icons.Rounded.History, "History") { panel = Panel.HISTORY }
+                    MenuRow(if (BrowserEngine.desktop) Icons.Rounded.PhoneAndroid else Icons.Rounded.DesktopWindows, if (BrowserEngine.desktop) "Mobile site" else "Desktop site") { BrowserEngine.useDesktop(!BrowserEngine.desktop); panel = Panel.NONE }
                     if (url.startsWith("http")) {
-                        MenuRow("Ask Blaze about this page") {
-                            ctx.startActivity(Intent(ctx, com.blaze.assistant.MainActivity::class.java).setAction(Intent.ACTION_SEND).setType("text/plain")
-                                .putExtra(Intent.EXTRA_TEXT, "Summarise the page open in your browser (use browser_read): $url").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                            panel = Panel.NONE
-                        }
-                        MenuRow("Share link") {
+                        MenuRow(Icons.Rounded.AutoAwesome, "Ask Blaze about this page") { askFirst = null; askOpen = true; panel = Panel.NONE }
+                        MenuRow(Icons.Rounded.AdsClick, "Summon the Blaze pointer") { pointer = true; panel = Panel.NONE }
+                        MenuRow(Icons.Rounded.Share, "Share link") {
                             ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url), "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); panel = Panel.NONE }
-                        MenuRow("Open in another app") {
+                        MenuRow(Icons.Rounded.OpenInNew, "Open in another app") {
                             try { ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, Uri.parse(url)), "Open with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
                             panel = Panel.NONE }
                     }
-                    MenuRow("Downloads") {
+                    MenuRow(Icons.Rounded.Download, "Downloads") {
                         try { ctx.startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
                         panel = Panel.NONE }
-                    MenuRow(if (tab?.isPrivate == true) "Close all private tabs" else "Close all tabs") {
-                        val p = tab?.isPrivate == true
+                    MenuRow(Icons.Rounded.ClearAll, if (priv) "Close all private tabs" else "Close all tabs") {
+                        val p = priv
                         BrowserEngine.closeAll(p); if (BrowserEngine.normalTabs().isEmpty()) BrowserEngine.newTab(ctx)
                         if (!p || BrowserEngine.tab()?.isPrivate == true) BrowserEngine.current = BrowserEngine.tabs.indexOfLast { !it.isPrivate }
                         panel = Panel.NONE }
@@ -220,87 +324,121 @@ private fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit) {
                 Panel.BOOKMARKS -> Sheet { EntryList("Bookmarks", BrowserData.bookmarks(ctx), "No bookmarks yet.") { tab?.let { t -> BrowserEngine.load(t, it) }; panel = Panel.NONE } }
                 Panel.HISTORY -> Sheet {
                     EntryList("History", BrowserData.history(ctx), "No history yet.") { tab?.let { t -> BrowserEngine.load(t, it) }; panel = Panel.NONE }
-                    MenuRow("Clear history") { BrowserData.clearHistory(ctx); panel = Panel.NONE }
+                    MenuRow(Icons.Rounded.DeleteSweep, "Clear history") { BrowserData.clearHistory(ctx); panel = Panel.NONE }
                 }
-                Panel.NONE -> {}
             }
         }
 
-        // Bottom bar
-        Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            BarBtn("‹", enabled = tab?.canBack == true, modifier = Modifier.weight(1f)) { tab?.web?.goBack() }
-            BarBtn("›", enabled = tab?.canForward == true, modifier = Modifier.weight(1f)) { tab?.web?.goForward() }
-            BarBtn("⌂", modifier = Modifier.weight(1f)) { tab?.let { BrowserEngine.load(it, "about:blank") }; panel = Panel.NONE }
-            Box(Modifier.weight(1f).height(44.dp).clickable { BrowserEngine.snapshot(); panel = Panel.TABS }, contentAlignment = Alignment.Center) {
-                val priv = tab?.isPrivate == true
-                val n = BrowserEngine.tabs.count { it.isPrivate == priv }
-                Box(Modifier.size(24.dp).background(if (priv) c.ink else androidx.compose.ui.graphics.Color.Transparent).hairline(c.ink), contentAlignment = Alignment.Center) {
-                    Text(if (n > 99) ":D" else "$n", if (priv) c.paper else c.ink, 12) }
+        // Bottom bar: back, forward, home, the mascot (pointer), tabs, menu.
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            GlassIconButton(Icons.Rounded.ArrowBack, "Back", size = 42.dp, bg = Color.Transparent, enabled = tab?.canBack == true) { tab?.web?.goBack() }
+            GlassIconButton(Icons.Rounded.ArrowForward, "Forward", size = 42.dp, bg = Color.Transparent, enabled = tab?.canForward == true) { tab?.web?.goForward() }
+            GlassIconButton(Icons.Rounded.Home, "Start page", size = 42.dp, bg = Color.Transparent) { tab?.let { BrowserEngine.load(it, "about:blank") }; panel = Panel.NONE; pointer = false }
+            Box(Modifier.size(50.dp).clip(CircleShape).background(if (pointer) Glass.raised2 else Glass.raised)
+                .border(1.dp, if (pointer) Glass.blue else Glass.border, CircleShape)
+                .combinedClickable(onClick = { pointer = !pointer; panel = Panel.NONE }, onLongClick = { pointer = true; panel = Panel.NONE },
+                    onClickLabel = if (pointer) "Put the Blaze pointer away" else "Summon the Blaze pointer")
+                .semantics { contentDescription = if (pointer) "Put the Blaze pointer away" else "Summon the Blaze pointer" }, contentAlignment = Alignment.Center) {
+                MascotGlyph(40.dp, pulse = pointer)
             }
-            BarBtn("⋯", modifier = Modifier.weight(1f)) { panel = if (panel == Panel.MENU) Panel.NONE else Panel.MENU }
+            Box(Modifier.size(42.dp).clip(CircleShape).clickable { BrowserEngine.snapshot(); panel = Panel.TABS }
+                .semantics { contentDescription = "Tabs" }, contentAlignment = Alignment.Center) {
+                val n = BrowserEngine.tabs.count { it.isPrivate == priv }
+                Box(Modifier.size(24.dp).clip(RoundedCornerShape(8.dp)).border(1.6.dp, Glass.text, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+                    Text(if (n > 99) ":D" else "$n", Glass.text, 11, weight = FontWeight.SemiBold) }
+            }
+            GlassIconButton(Icons.Rounded.MoreHoriz, "Menu", size = 42.dp, bg = Color.Transparent) { panel = if (panel == Panel.MENU) Panel.NONE else Panel.MENU }
         }
     }
+
+    if (askOpen) PageAskSheet(title = tab?.title.orEmpty(), initial = askFirst,
+        readPage = { BrowserEngine.read(ctx, 6000) }, web = tab?.web?.takeIf { previewAsk == null },
+        onDismiss = { askOpen = false; askFirst = null }, preview = previewAsk)
+}
+
+@Composable
+private fun WebHost(tab: BrowserEngine.Tab) {
+    AndroidView(factory = { FrameLayout(it) }, update = { f ->
+        val w = tab.web
+        if (w.parent !== f) { (w.parent as? ViewGroup)?.removeView(w); f.removeAllViews(); f.addView(w, FrameLayout.LayoutParams(-1, -1)) }
+    }, modifier = Modifier.fillMaxSize())
 }
 
 private fun display(u: String) = if (u == "about:blank") "" else u.removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/')
 
 @Composable
 private fun StartPage(tick: Int, open: (String) -> Unit) {
-    val c = LocalBlaze.current
     val ctx = LocalContext.current
     val marks = remember(tick) { BrowserData.bookmarks(ctx) }
     val recent = remember(tick) { BrowserData.history(ctx).take(6) }
     val quick = listOf("Google" to "google.com", "YouTube" to "youtube.com", "Wikipedia" to "wikipedia.org", "Gmail" to "mail.google.com")
-    LazyColumn(Modifier.fillMaxSize().background(c.paper).padding(horizontal = 20.dp)) {
+    LazyColumn(Modifier.fillMaxSize().background(Glass.bg).padding(horizontal = 18.dp)) {
         item {
-            Spacer(Modifier.height(36.dp))
-            Text("Blaze browser", c.ink, 26, weight = FontWeight.Medium)
-            Text("Blaze can browse here for you in the background: open pages, fill forms and read them, without touching your screen.", c.sub, 13)
-            Spacer(Modifier.height(24.dp))
-            Row(Modifier.fillMaxWidth()) { quick.forEach { (n, u) ->
-                Box(Modifier.weight(1f).height(44.dp).hairline(c.hair).clickable { open(u) }, contentAlignment = Alignment.Center) { Label(n, color = c.ink, size = 10.sp) } } }
+            Spacer(Modifier.height(28.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                MascotGlyph(54.dp)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("Blaze browser", Glass.text, 24, weight = FontWeight.Medium)
+                    Text("Tap the mascot below to point at anything on a page.", Glass.sub, 13)
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { quick.forEach { (n, u) ->
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(18.dp)).background(Glass.surface).border(1.dp, Glass.border, RoundedCornerShape(18.dp))
+                    .clickable { open(u) }.padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(34.dp).clip(CircleShape).background(Glass.raised2), contentAlignment = Alignment.Center) {
+                        Text(n.take(1), Glass.text, 15, weight = FontWeight.SemiBold) }
+                    Spacer(Modifier.height(6.dp))
+                    Text(n, Glass.sub, 11, maxLines = 1)
+                } } }
         }
-        if (marks.isNotEmpty()) { item { Spacer(Modifier.height(24.dp)); Label("Bookmarks") }
+        if (marks.isNotEmpty()) { item { Spacer(Modifier.height(22.dp)); Head("Bookmarks") }
             items(marks.take(12)) { e -> EntryRow(e) { open(e.url) } } }
-        if (recent.isNotEmpty()) { item { Spacer(Modifier.height(24.dp)); Label("Recent") }
+        if (recent.isNotEmpty()) { item { Spacer(Modifier.height(22.dp)); Head("Recent") }
             items(recent) { e -> EntryRow(e) { open(e.url) } } }
+        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
+@Composable private fun Head(s: String) = Text(s, Glass.sub, 12, weight = FontWeight.Medium, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+
 @Composable private fun EntryList(title: String, l: List<BrowserData.Entry>, empty: String, open: (String) -> Unit) {
-    Label(title, modifier = Modifier.padding(16.dp))
-    if (l.isEmpty()) Text(empty, LocalBlaze.current.sub, 13, modifier = Modifier.padding(start = 16.dp, bottom = 16.dp))
-    LazyColumn(Modifier.heightIn(max = 420.dp)) { items(l.take(150)) { e -> EntryRow(e) { open(e.url) } } }
+    Text(title, Glass.text, 16, weight = FontWeight.SemiBold, modifier = Modifier.padding(start = 18.dp, top = 6.dp, bottom = 8.dp))
+    if (l.isEmpty()) Text(empty, Glass.sub, 13, modifier = Modifier.padding(start = 18.dp, bottom = 16.dp))
+    LazyColumn(Modifier.heightIn(max = 420.dp).padding(horizontal = 8.dp)) { items(l.take(150)) { e -> EntryRow(e) { open(e.url) } } }
 }
 
 @Composable private fun EntryRow(e: BrowserData.Entry, onClick: () -> Unit) {
-    val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().hairlineTop(c.hair).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Text(e.title.ifBlank { e.url }, c.ink, 14, maxLines = 1)
-        Text(display(e.url), c.sub, 12, maxLines = 1)
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(Glass.raised2), contentAlignment = Alignment.Center) {
+            Text(display(e.url).take(1).uppercase().ifBlank { "\u2022" }, Glass.text, 13, weight = FontWeight.SemiBold) }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(e.title.ifBlank { e.url }, Glass.text, 14, maxLines = 1)
+            Text(display(e.url), Glass.sub, 12, maxLines = 1)
+        }
     }
 }
 
 @Composable private fun Sheet(content: @Composable ColumnScope.() -> Unit) {
-    val c = LocalBlaze.current
-    Box(Modifier.fillMaxSize().background(c.ink.copy(alpha = 0.25f)), contentAlignment = Alignment.BottomCenter) {
-        Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.hair), content = content)
+    val shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)), contentAlignment = Alignment.BottomCenter) {
+        Column(Modifier.fillMaxWidth().shadow(18.dp, shape).clip(shape).background(Glass.surface).border(1.dp, Glass.border, shape)
+            .padding(top = 10.dp, bottom = 8.dp), content = content)
     }
 }
 
-@Composable private fun MenuRow(text: String, onClick: () -> Unit) {
-    val c = LocalBlaze.current
-    Text(text, c.ink, 15, modifier = Modifier.fillMaxWidth().hairlineTop(c.hair).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp))
-}
-
-@Composable private fun IconBtn(s: String, onClick: () -> Unit) {
-    val c = LocalBlaze.current
-    Box(Modifier.size(40.dp).hairline(c.hair).clickable(onClick = onClick), contentAlignment = Alignment.Center) { Text(s, c.ink, 18) }
-}
-
-@Composable private fun BarBtn(s: String, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    val c = LocalBlaze.current
-    Box(modifier.height(44.dp).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) { Text(s, if (enabled) c.ink else c.weak, 22) }
+@Composable private fun MenuRow(icon: ImageVector, text: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp).clip(RoundedCornerShape(16.dp)).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(34.dp).clip(CircleShape).background(Glass.raised), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = Glass.text, modifier = Modifier.size(18.dp)) }
+        Spacer(Modifier.width(12.dp))
+        Text(text, Glass.text, 15)
+    }
 }
 
 @Composable private fun Text(s: String, color: androidx.compose.ui.graphics.Color, size: Int, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE, weight: FontWeight = FontWeight.Normal) =
