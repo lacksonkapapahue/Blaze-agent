@@ -569,6 +569,75 @@ class ShotsTest {
         }
     }
 
+    // v0.24.5: the mascot pointer on light, dark and busy backgrounds, gliding and clicking, plus the "Click '…'?" check.
+    @Test fun pointerMascot() = shot("44-pointer-mascot") {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFFF4F4F4))) {
+                Text("Light app \u00b7 Blaze gliding", Modifier.padding(top = 96.dp, start = 18.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color(0xFF1D1A16)))
+                PointerGlyph(pulse = 1.06f, modifier = Modifier.padding(start = 150.dp, top = 140.dp))
+                Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = Alignment.TopCenter) { PointerCheck("Click \u2018Add to cart\u2019?") }
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFF111110))) {
+                Text("Dark app \u00b7 clicking (squish)", Modifier.padding(top = 20.dp, start = 18.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color(0xFFEDEDED)))
+                PointerGlyph(ripple = 0.5f, modifier = Modifier.padding(start = 210.dp, top = 70.dp))
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(
+                androidx.compose.ui.graphics.Color(0xFF1F4BD8), androidx.compose.ui.graphics.Color(0xFFE8743B), androidx.compose.ui.graphics.Color(0xFF2E7D32))))) {
+                Text("Busy photo \u00b7 paused (you have it)", Modifier.padding(top = 20.dp, start = 18.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color.White))
+                PointerGlyph(paused = true, modifier = Modifier.padding(start = 120.dp, top = 70.dp))
+            }
+        }
+    }
+
+    // v0.24.5: the real launcher icon (adaptive background + foreground), the themed-icon silhouette and the
+    // notification icon, rendered from res/drawable, next to the mascot pointer drawn big.
+    @Test fun mascotIcons() = shot("45-mascot-icons") {
+        Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF212226)).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text("Launcher icon", style = TextStyle(fontSize = 13.sp, color = androidx.compose.ui.graphics.Color(0xFFBBBBBB)))
+            Box(Modifier.size(216.dp)) {
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_launcher_background), null, Modifier.size(216.dp))
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_launcher_foreground), null, Modifier.size(216.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Box(Modifier.size(108.dp).background(androidx.compose.ui.graphics.Color(0xFFDDE3F0))) {
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_launcher_monochrome), null, Modifier.size(108.dp),
+                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.ui.graphics.Color(0xFF2A3550)))
+                }
+                Box(Modifier.size(108.dp).background(androidx.compose.ui.graphics.Color(0xFF333333)), contentAlignment = Alignment.Center) {
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_stat_blaze), null, Modifier.size(72.dp))
+                }
+                PointerGlyph(scale = 1.7f)
+            }
+            Text("Themed icon \u00b7 notification icon \u00b7 pointer", style = TextStyle(fontSize = 13.sp, color = androidx.compose.ui.graphics.Color(0xFFBBBBBB)))
+        }
+    }
+
+    // v0.24.5: the "Leave private chat?" dialog in the Blaze dialog look (dark card, pill buttons), over a dimmed chat.
+    @Test fun privateLeaveDialog() = shot("46-private-leave-dialog", dark = true) {
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF26262A))) {
+            Text("Private chat", Modifier.padding(24.dp), style = TextStyle(fontSize = 15.sp, color = androidx.compose.ui.graphics.Color(0xFFF0F0EE)))
+            Box(Modifier.fillMaxSize().background(DialogColors.scrim).padding(24.dp), contentAlignment = Alignment.Center) {
+                BlazeDialogCard(com.blaze.assistant.agent.PrivateChat.LEAVE_TITLE, com.blaze.assistant.agent.PrivateChat.LEAVE_TEXT,
+                    confirm = "Leave", onConfirm = {}, dismiss = "Stay", warm = true)
+            }
+        }
+    }
+
+    // v0.24.5: the floating work banner (rounded dark card, mascot in a spinning ring, Stop pill) over a light and a dark app, and the Blaze menu.
+    @Test fun workBanner() = shot("47-work-banner") {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFFF4F4F4)).padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
+                TaskCard(onOpen = {}, onStop = {}, step0 = "Opening YouTube and searching \u201clofi\u201d", tasks0 = 1)
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(androidx.compose.ui.graphics.Color(0xFF111110)).padding(top = 36.dp, start = 12.dp, end = 12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TaskCard(onOpen = {}, onStop = {}, step0 = "Comparing prices at 3 shops", tasks0 = 2)
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) { BlazeMenuCard(listOf("Close all tabs" to {}, "New tab" to {})) }
+                }
+            }
+        }
+    }
+
     // v0.23.4: Settings › Brains / Auto, models per provider with cooling counts, one provider opened.
     @Test fun autoPool() = shot("38-auto-pool") {
         fun S(pid: String, name: String, n: Int, cool: Int, tools: Int, at: Long, err: String, next: Long) =

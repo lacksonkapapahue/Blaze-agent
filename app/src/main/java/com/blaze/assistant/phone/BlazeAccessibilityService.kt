@@ -411,7 +411,6 @@ class BlazeAccessibilityService : AccessibilityService() {
      * target went away or moved during the glide and is aimed at again once).
      */
     private suspend fun aimAt(node: AccessibilityNodeInfo, id: Int, long: Boolean): String? {
-        if (!Pointer.enabled) return null
         val p0 = centerOf(node) ?: return null
         val paused = "Paused before tapping [$id]: the user took over the pointer. Nothing was tapped."
         if (!Pointer.aim(this, p0.first, p0.second)) return paused
@@ -424,11 +423,61 @@ class BlazeAccessibilityService : AccessibilityService() {
         return null
     }
 
+    /** v0.24.4: every agent gesture shows the pointer first: glide to (x, y), ripple. False = the user paused Blaze. */
+    private suspend fun pointTo(x: Float, y: Float, long: Boolean = false): Boolean = Pointer.aim(this, x, y) && Pointer.ripple(long)
+
+    /**
+     * What's under the pointer tip (manual double-tap check, v0.24.4): the label of the clickable element at (x, y)
+     * (its text, content description, or a child's text) and how many different clickable elements are stacked
+     * there. Blaze's own overlay windows are skipped. (null, 0) when nothing readable is there.
+     */
+    fun labelAt(x: Float, y: Float): Pair<String?, Int> {
+        val xi = x.toInt(); val yi = y.toInt()
+        val roots = try {
+            windows.filter { it.type != android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }.mapNotNull { it.root }
+        } catch (_: Exception) { emptyList() }.ifEmpty { listOfNotNull(rootInActiveWindow) }
+        val r = android.graphics.Rect()
+        fun contains(n: AccessibilityNodeInfo): Boolean { n.getBoundsInScreen(r); return r.contains(xi, yi) && n.isVisibleToUser }
+        fun text(n: AccessibilityNodeInfo): String? = (n.text ?: n.contentDescription)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        fun childText(n: AccessibilityNodeInfo, depth: Int = 0): String? {
+            if (depth > 4) return null
+            text(n)?.let { return it }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { c -> childText(c, depth + 1)?.let { return it } }
+            return null
+        }
+        for (root in roots) {
+            if (!contains(root)) continue
+            var deepest: AccessibilityNodeInfo = root
+            val clickable = ArrayList<AccessibilityNodeInfo>()
+            var cur: AccessibilityNodeInfo? = root
+            var guard = 0
+            while (cur != null && guard++ < 60) {
+                if (cur.isClickable || cur.isLongClickable || cur.isEditable) clickable += cur
+                deepest = cur
+                var next: AccessibilityNodeInfo? = null
+                var hits = 0
+                for (i in cur.childCount - 1 downTo 0) cur.getChild(i)?.let { c -> if (contains(c)) { hits++; if (next == null) next = c } }
+                if (hits > 1 && cur.isClickable.not()) {
+                    // Overlapping siblings: count the clickable ones (an ambiguous spot).
+                    var n2 = 0
+                    for (i in 0 until cur.childCount) cur.getChild(i)?.let { c -> if (contains(c) && (c.isClickable || childText(c) != null)) n2++ }
+                    if (n2 > 1) return (childText(next ?: deepest)) to n2
+                }
+                cur = next
+            }
+            val target = clickable.lastOrNull() ?: deepest
+            val label = childText(target) ?: target.viewIdResourceName?.substringAfterLast('/')?.replace('_', ' ')
+            return label to (if (label == null) 0 else 1)
+        }
+        return null to 0
+    }
+
     /** A tap the user asked for by double-tapping the pointer (manual mode). */
     suspend fun tapAt(x: Float, y: Float): Boolean = gestureTap(x, y, 60)
 
     /** Tap a node found outside read_screen (watchers): accessibility click up the parent chain, else a touch. */
     suspend fun tapNode(node: AccessibilityNodeInfo): Boolean {
+        centerOf(node)?.let { if (!pointTo(it.first, it.second)) return false }
         var n: AccessibilityNodeInfo? = node
         while (n != null) { if (n.isClickable && n.isEnabled) { if (n.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true; break }; n = n.parent }
         val pt = centerOf(node) ?: return false
@@ -494,6 +543,8 @@ class BlazeAccessibilityService : AccessibilityService() {
 
     suspend fun type(id: Int, text: String, submit: Boolean = false): String {
         var node = element(id) ?: return "No element [$id]. Call read_screen again."
+        // v0.24.4: the pointer shows which field gets the text before Blaze focuses it (a non-field goes through tap()).
+        if (node.isEditable) centerOf(node)?.let { if (!pointTo(it.first, it.second)) return "Paused before typing into [$id]: the user took over the pointer. Nothing was typed." }
         if (!node.isEditable) {
             // Search icons/bars often turn into a real field after a tap.
             tap(id)
@@ -528,6 +579,7 @@ class BlazeAccessibilityService : AccessibilityService() {
         val forward = direction.lowercase() in listOf("down", "right", "forward")
         val target = id?.let { element(it) } ?: elements.firstOrNull { it?.isScrollable == true }
         if (target != null) {
+            centerOf(target)?.let { if (!pointTo(it.first, it.second)) return "Paused before scrolling: the user took over the pointer." }
             var n: AccessibilityNodeInfo? = target
             while (n != null) {
                 if (n.isScrollable && n.performAction(
@@ -575,9 +627,10 @@ class BlazeAccessibilityService : AccessibilityService() {
     private suspend fun swipe(x1: Float, y1: Float, x2: Float, y2: Float): Boolean {
         val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
         val ms = if (com.blaze.assistant.agent.Settings.bool("speed_mode", false)) 180L else 350L
+        if (!pointTo(x1, y1)) return false
         Pointer.showPath(this, x1, y1, x2, y2, ms)
         Pointer.ownGesture(ms)
-        return dispatch(GestureDescription.StrokeDescription(path, 0, ms))
+        return dispatch(GestureDescription.StrokeDescription(path, 0, ms)).also { if (it) Pointer.jump(x2, y2) }
     }
 
     private suspend fun dispatch(stroke: GestureDescription.StrokeDescription): Boolean =

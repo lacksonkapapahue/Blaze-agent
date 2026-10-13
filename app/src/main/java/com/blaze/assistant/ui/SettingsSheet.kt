@@ -280,9 +280,9 @@ private fun ControlPage(a11yOn: Boolean, onOpenAccessibility: () -> Unit) {
     var control by remember { mutableStateOf(Settings.phoneControl) }
     Spacer(Modifier.height(8.dp))
     ToggleRow("Phone control", "Open apps, tap, type and scroll for you", control) { control = !control; Settings.phoneControl = control }
-    var pointer by remember { mutableStateOf(Settings.bool("show_pointer", true)) }
-    ToggleRow("Show the pointer", "See where Blaze is about to tap. Touch the screen to pause it, drag the pointer, double-tap to click there", pointer) {
-        pointer = !pointer; Settings.setBool("show_pointer", pointer); if (!pointer) com.blaze.assistant.phone.Pointer.done() }
+    // v0.24.5: the pointer is always shown while Blaze controls apps (no switch; the old show_pointer pref is ignored).
+    Text("Blaze's mascot pointer is always on screen while it controls your phone. Touch the screen to pause it, drag the pointer, double-tap to click there.",
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.weak))
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth().hairline(if (a11yOn) c.hair else c.accent).clickable(onClick = onOpenAccessibility).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
