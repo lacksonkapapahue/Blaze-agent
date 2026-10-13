@@ -88,13 +88,12 @@ class PointerTest {
     }
 
     @Test fun workBannerSwipes() {
-        val B = com.blaze.assistant.ui.BannerSwipe
         val t = 100f
-        assertEquals(B.MINIMISE, com.blaze.assistant.ui.bannerSwipe(0f, -150f, t))   // up
-        assertEquals(B.MINIMISE, com.blaze.assistant.ui.bannerSwipe(-200f, 10f, t))  // left
-        assertEquals(B.MINIMISE, com.blaze.assistant.ui.bannerSwipe(220f, 20f, t))   // right
-        assertEquals(B.OPEN, com.blaze.assistant.ui.bannerSwipe(10f, 150f, t))       // down opens Blaze
-        assertEquals(B.NONE, com.blaze.assistant.ui.bannerSwipe(30f, 40f, t))        // a nudge springs back
-        assertEquals(B.NONE, com.blaze.assistant.ui.bannerSwipe(0f, 0f, t))
+        assertEquals(com.blaze.assistant.ui.BannerSwipe.MINIMISE, com.blaze.assistant.ui.bannerSwipe(0f, -150f, t))   // up
+        assertEquals(com.blaze.assistant.ui.BannerSwipe.MINIMISE, com.blaze.assistant.ui.bannerSwipe(-200f, 10f, t))  // left
+        assertEquals(com.blaze.assistant.ui.BannerSwipe.MINIMISE, com.blaze.assistant.ui.bannerSwipe(220f, 20f, t))   // right
+        assertEquals(com.blaze.assistant.ui.BannerSwipe.OPEN, com.blaze.assistant.ui.bannerSwipe(10f, 150f, t))       // down opens Blaze
+        assertEquals(com.blaze.assistant.ui.BannerSwipe.NONE, com.blaze.assistant.ui.bannerSwipe(30f, 40f, t))        // a nudge springs back
+        assertEquals(com.blaze.assistant.ui.BannerSwipe.NONE, com.blaze.assistant.ui.bannerSwipe(0f, 0f, t))
     }
 }

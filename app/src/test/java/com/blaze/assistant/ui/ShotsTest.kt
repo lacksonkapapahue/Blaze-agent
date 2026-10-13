@@ -592,20 +592,19 @@ class ShotsTest {
     // v0.24.5: the real launcher icon (adaptive background + foreground), the themed-icon silhouette and the
     // notification icon, rendered from res/drawable, next to the mascot pointer drawn big.
     @Test fun mascotIcons() = shot("45-mascot-icons") {
-        val R = com.blaze.assistant.R.drawable
         Column(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFF212226)).padding(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Text("Launcher icon", style = TextStyle(fontSize = 13.sp, color = androidx.compose.ui.graphics.Color(0xFFBBBBBB)))
             Box(Modifier.size(216.dp)) {
-                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_launcher_background), null, Modifier.size(216.dp))
-                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_launcher_foreground), null, Modifier.size(216.dp))
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_launcher_background), null, Modifier.size(216.dp))
+                androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_launcher_foreground), null, Modifier.size(216.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Box(Modifier.size(108.dp).background(androidx.compose.ui.graphics.Color(0xFFDDE3F0))) {
-                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_launcher_monochrome), null, Modifier.size(108.dp),
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_launcher_monochrome), null, Modifier.size(108.dp),
                         colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(androidx.compose.ui.graphics.Color(0xFF2A3550)))
                 }
                 Box(Modifier.size(108.dp).background(androidx.compose.ui.graphics.Color(0xFF333333)), contentAlignment = Alignment.Center) {
-                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(R.ic_stat_blaze), null, Modifier.size(72.dp))
+                    androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(com.blaze.assistant.R.drawable.ic_stat_blaze), null, Modifier.size(72.dp))
                 }
                 PointerGlyph(scale = 1.7f)
             }
