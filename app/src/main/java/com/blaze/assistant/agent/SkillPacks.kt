@@ -81,10 +81,53 @@ object SkillPacks {
 
     fun write(name: String, description: String, instructions: String): String {
         if (name.isBlank() || instructions.isBlank()) return "A skill needs a name and instructions."
+        if (CoreSkills.isCore(slug(name))) return "${slug(name)} is a core skill and can't be overwritten. Save yours under another name."
         val d = File(root(), slug(name)).apply { mkdirs() }
         File(d, "SKILL.md").writeText("---\nname: ${slug(name)}\ndescription: ${description.replace("\n", " ").take(300)}\n---\n\n$instructions\n")
         val p = Pack(slug(name), description, d); register(p)
+        SkillMatch.invalidate()
         return "Skill ${p.name} saved [ID ${Processes.idFor("skill", d.name)}]."
+    }
+
+    // ---------- Workflows (v0.24.3, core skill blaze-workflow-builder) ----------
+
+    private fun lines(v: String): List<String> = v.lines().map { it.trim().replace(Regex("""^(?:[-*•]\s+|\d{1,2}[.)]\s+)"""), "").trim() }.filter { it.isNotEmpty() }
+
+    /**
+     * A reusable workflow as a SKILL.md: front matter (name, description = the trigger, tags so the per-turn lookup
+     * finds it, `workflow: true`, `tested:`), then Trigger, numbered Steps and Checks. Pure (CoreSkillsTest).
+     */
+    fun workflowMd(name: String, trigger: String, steps: String, checks: String, tags: List<String>, tested: Boolean): String {
+        val n = slug(name)
+        val tagList = (tags + trigger.lowercase().split(Regex("[,;/]")).map { it.trim() }.filter { it.length in 3..40 })
+            .map { it.replace(Regex("[\\[\\],\"']"), "").trim().lowercase() }.filter { it.isNotEmpty() }.distinct().take(12)
+        return buildString {
+            append("---\nname: $n\n")
+            append("description: Workflow. Use when: ${trigger.replace("\n", " ").trim().take(240)}\n")
+            if (tagList.isNotEmpty()) append("tags: [${tagList.joinToString(", ")}]\n")
+            append("workflow: true\ntested: $tested\n---\n\n")
+            append("# ${n.replace('-', ' ').replaceFirstChar { it.uppercase() }}\n\n")
+            append("## Trigger\n${trigger.trim()}\n\n## Steps\n")
+            lines(steps).forEachIndexed { i, l -> append("${i + 1}. $l\n") }
+            val c = lines(checks)
+            if (c.isNotEmpty()) { append("\n## Checks\n"); c.forEach { append("- $it\n") } }
+            append("\n## Notes\n- Follow the steps in order; verify each check before saying it's done. If a step fails twice, stop and report.\n")
+            if (!tested) append("- Not tested yet: follow it once, fix what was wrong, then save again with tested=true.\n")
+        }
+    }
+
+    fun saveWorkflow(name: String, trigger: String, steps: String, checks: String, tags: List<String>, tested: Boolean): String {
+        if (name.isBlank() || trigger.isBlank() || lines(steps).isEmpty()) return "A workflow needs a name, a trigger and at least one step."
+        if (CoreSkills.isCore(slug(name))) return "${slug(name)} is a core skill. Pick another name for the workflow."
+        val d = File(root(), slug(name)).apply { mkdirs() }
+        val existed = File(d, "SKILL.md").exists()
+        File(d, "SKILL.md").writeText(workflowMd(name, trigger, steps, checks, tags, tested))
+        register(Pack(slug(name), "Workflow. Use when: $trigger", d))
+        SkillLibrary.setOn(d.name, true)
+        SkillMatch.invalidate()
+        return "Workflow ${slug(name)} ${if (existed) "updated" else "saved"} [ID ${Processes.idFor("skill", d.name)}]" +
+            (if (tested) ". It's marked tested." else ". Test it once by following the steps, then save again with tested=true.") +
+            " It's looked up automatically when a request matches its trigger."
     }
 
     fun delete(dirName: String) = SkillLibrary.delete(dirName)
@@ -230,7 +273,7 @@ object SkillPacks {
 
     // ---------- Tools ----------
 
-    val names = setOf("use_skill", "skill_file", "install_skill", "write_skill")
+    val names = setOf("use_skill", "skill_file", "install_skill", "write_skill", "save_workflow")
 
     private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
         JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
@@ -242,13 +285,26 @@ object SkillPacks {
         fn("install_skill", "Install skills from a GitHub folder/repo link, a SKILL.md link, or a .zip URL.", JSONObject().put("url", str()), listOf("url")),
         fn("write_skill", "Save a procedure you worked out as a skill (SKILL.md) for next time.",
             JSONObject().put("name", str()).put("description", str("When to use it, one line")).put("instructions", str("Markdown steps")), listOf("name", "description", "instructions")),
+        fn("save_workflow", "Save a multi-step or recurring task as a reusable workflow (a user skill with trigger, steps and checks). It is looked up automatically next time a request matches. Save again with the same name to fix or mark it tested.",
+            JSONObject().put("name", str("short-kebab-name")).put("trigger", str("When to use it, in the user's words"))
+                .put("steps", str("Numbered steps, one action each, with the tool to use")).put("checks", str("How to know it worked, one per line"))
+                .put("tags", JSONObject().put("type", "array").put("items", str()).put("description", "Words people would type for it"))
+                .put("tested", JSONObject().put("type", "boolean").put("description", "true once you followed it and it worked")),
+            listOf("name", "trigger", "steps")),
     )
+
+    /** Models sometimes send steps as an array: accept both. */
+    private fun textOrList(a: JSONObject, k: String): String =
+        a.optJSONArray(k)?.let { arr -> (0 until arr.length()).joinToString("\n") { arr.optString(it) } } ?: a.optString(k)
 
     suspend fun run(name: String, a: JSONObject): String = when (name) {
         "use_skill" -> use(a.optString("name"))
         "skill_file" -> file(a.optString("name"), a.optString("path"))
         "install_skill" -> install(a.optString("url")).also { com.blaze.assistant.connect.SkillSync.localChange() }
         "write_skill" -> write(a.optString("name"), a.optString("description"), a.optString("instructions")).also { com.blaze.assistant.connect.SkillSync.localChange() }
+        "save_workflow" -> saveWorkflow(a.optString("name"), a.optString("trigger"), textOrList(a, "steps"), textOrList(a, "checks"),
+            a.optJSONArray("tags")?.let { t -> (0 until t.length()).map { t.optString(it) } } ?: emptyList(), a.optBoolean("tested", false))
+            .also { com.blaze.assistant.connect.SkillSync.localChange() }
         else -> "Unknown tool"
     }
 }

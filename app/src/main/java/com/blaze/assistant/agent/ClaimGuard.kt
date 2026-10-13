@@ -98,7 +98,7 @@ object ClaimGuard {
             "learn" -> "flashcards action=add (deck, cards=[{front, back}]), then open_view view=learn. "
             "schedule" -> "create_routine / schedule_command / create_trigger (set_alarm or add_calendar_event for one-off times). "
             "gallery" -> "generate_image (or run_code saving under /root/phone/). "
-            "skills" -> "write_skill or install_skill. "
+            "skills" -> "save_workflow, write_skill or install_skill. "
             "projects" -> "open_view view=projects (or update_brief). "
             "memory" -> "memory_save / remember. "
             "browser" -> "browser_open and the other browser_ tools. "

@@ -47,8 +47,8 @@ object ViewRouter {
             listOf("generate_image", "gallery"), listOf("media"),
             r("""\b(?:(?:make|generate|draw|create|paint|produce)\b.{0,40}\b(?:image|picture|pic|photo|logo|icon|wallpaper|art|artwork|illustration|beat|beats|song|instrumental|sticker|avatar)s?|my gallery|in (?:the|my) gallery)\b""")),
         Spec("skills", "Skills", "saved methods and workflows (skills), installing skill packs",
-            listOf("write_skill", "install_skill", "use_skill"), listOf("extras"),
-            r("""\b((?:make|save|create|write|install|add)\b.{0,30}\bskills?|skill library|my skills|as a skill)\b""")),
+            listOf("save_workflow", "write_skill", "install_skill", "use_skill"), listOf("extras"),
+            r("""\b((?:make|save|create|write|install|add)\b.{0,30}\b(?:skills?|workflows?)|skill library|my skills|my workflows|as a (?:skill|workflow))\b""")),
         Spec("projects", "Projects", "ongoing efforts with their own threads, brief and instructions",
             listOf("update_brief", "open_view"), emptyList(),
             r("""\b((?:new|start|create|open) (?:a )?project|my projects|project (?:for|about|called))\b""")),
@@ -115,7 +115,7 @@ object ViewRouter {
             "2D art (svg), sites, UI mockups, diagrams, charts, posters, slides, floor plans, product mockups, games (html). The Design view opens by itself. " +
             "Follow-ons (\"show the engine\", \"make it taller\", \"add fins\") change the CURRENT design with design action=update, never a new one or a text answer.\n")
         append("- Never say you created, updated or opened something in a view (\"I've updated the design\", \"view it in the design section\") unless that view's tool succeeded this turn; Blaze checks.\n")
-        append("- \"Remind me\" or anything repeating → Schedule (create_routine / schedule_command / create_trigger). Pictures and beats → Gallery. A method to reuse → Skills (write_skill).\n")
+        append("- \"Remind me\" or anything repeating → Schedule (create_routine / schedule_command / create_trigger). Pictures and beats → Gallery. A method or multi-step task to reuse → Skills (save_workflow with trigger, steps, checks).\n")
         append("- Other views (Jobs, Accounts, Agents, Usage, Settings…): open with open_view ask=true unless the user asked for that view.")
     }
 
@@ -130,7 +130,7 @@ object ViewRouter {
             "Don't paste the code in chat, and never say it's made unless the tool succeeded."
         "schedule" -> "\nREQUIRED VIEW THIS TURN: Schedule. Create it with create_routine / schedule_command / create_trigger (or set_alarm / add_calendar_event for one-off times) and say when it will run in one line."
         "gallery" -> "\nREQUIRED VIEW THIS TURN: Gallery. Make it with generate_image (art/photos) or run_code (beats, charts) saved under /root/phone/ so it lands in the Gallery; reply briefly."
-        "skills" -> "\nREQUIRED VIEW THIS TURN: Skills. Save or install it with write_skill / install_skill; say its name in one line."
+        "skills" -> "\nREQUIRED VIEW THIS TURN: Skills. Save a workflow with save_workflow (name, trigger, steps, checks), or a skill with write_skill / install_skill; say its name in one line."
         "projects" -> "\nREQUIRED VIEW THIS TURN: Projects. Use open_view view=projects so the user can create or open the project there; keep the reply short."
         "archive" -> "\nREQUIRED VIEW THIS TURN: Archive. Look it up with search_chat / search_past_chats and answer in chat from what you find (quote the exact words when it helps). There is no chat list screen to open."
         "memory" -> "\nREQUIRED VIEW THIS TURN: Memory. Save, update or forget with memory_save / remember / forget (or look up with memory_search); confirm in one line."
