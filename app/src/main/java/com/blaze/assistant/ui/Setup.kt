@@ -127,7 +127,9 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { tick++ }
 
+    var asked by remember { mutableStateOf(setOf<String>()) }
     fun fix(n: Need) {
+        asked = asked + n.id
         val pkg = Uri.parse("package:" + ctx.packageName)
         when (n.id) {
             "accessibility" -> {
@@ -177,7 +179,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                     0 -> {
                         val orOn = "OpenRouter" in have.joinToString()
                         val gOn = have.any { it.startsWith("Google") }
-                        SetupRow(if (orOn) "OpenRouter connected" else "Sign in with OpenRouter", "Free models, one tap. Sign in with Google or email there.", orOn) {
+                        SetupRow(if (orOn) "OpenRouter connected" else "Sign in with OpenRouter", "Free models, one tap. Sign in with Google or email there.", orOn, working = busy && !orOn) {
                             if (!busy && !orOn) { busy = true; scope.launch { Brains.connectOpenRouter(ctx); busy = false } }
                         }
                         Spacer(Modifier.height(10.dp))
@@ -200,7 +202,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                     1 -> {
                         needs.forEach { n ->
                             val on = state[n.id] == true
-                            SetupRow(n.title, n.why, on) { if (!on) fix(n) }
+                            SetupRow(n.title, n.why, on, working = !on && n.id in asked) { if (!on) fix(n) }
                             Spacer(Modifier.height(8.dp))
                         }
                     }
@@ -226,9 +228,9 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
     }
 }
 
-/** One setup step (v0.19.0): a raised card with a square check on the right; blue once it's done. */
+/** One setup step: a raised card with a ring on the right that spins while it's being set up and turns into a checkmark (v0.24.2). */
 @Composable
-private fun SetupRow(title: String, sub: String, on: Boolean, onClick: () -> Unit) {
+private fun SetupRow(title: String, sub: String, on: Boolean, working: Boolean = false, onClick: () -> Unit) {
     val c = LocalBlaze.current
     Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -238,10 +240,7 @@ private fun SetupRow(title: String, sub: String, on: Boolean, onClick: () -> Uni
             Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
         }
         Spacer(Modifier.width(12.dp))
-        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
-            if (on) Text("\u2713", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.onAccent))
-            else Text("\u2192", style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = c.sub))
-        }
+        StepMark(if (on) Mark.DONE else if (working) Mark.WORKING else Mark.TODO, 24.dp)
     }
 }
 

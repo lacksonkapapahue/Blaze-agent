@@ -263,6 +263,8 @@ private fun AiPage() {
     }
     Spacer(Modifier.height(10.dp))
     ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
+    var tech by remember { mutableStateOf(com.blaze.assistant.agent.ReplyChips.showTech()) }
+    ToggleRow("Show technical details", "Timings, data used, model names and the token meter under replies (hidden by default)", tech) { tech = !tech; Settings.setBool(com.blaze.assistant.agent.ReplyChips.PREF, tech) }
     ToggleRow("Show every step", "List each tool call as it happens, instead of one plain line and \"Worked for 12s\"", showSteps) { showSteps = !showSteps; Settings.showSteps = showSteps }
     ToggleRow("Background agents", "Blaze can hand long work to an agent and keep chatting (${com.blaze.assistant.agent.BgAgents.cap()} at a time on this phone)", bgAgents) { bgAgents = !bgAgents; Settings.setBool("bg_agents", bgAgents) }
     ToggleRow("Mode switches", "Show Plan/Build and Auto/Autopilot above the message box", modeBar) { modeBar = !modeBar; Settings.setBool("mode_bar", modeBar) }

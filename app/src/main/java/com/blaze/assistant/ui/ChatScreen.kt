@@ -648,7 +648,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                     when (item) {
                         is Item.Steps -> {
                             val st by Agent.status.collectAsState()
-                            val m = if (Settings.longChat && (item.live || item.key == lastStepsKey)) meter else null
+                            // v0.24.2: the token meter is a technical line; shown only with Show technical details on.
+                            val m = if (Settings.longChat && (com.blaze.assistant.agent.ReplyChips.showTech() || meter?.high == true) && (item.live || item.key == lastStepsKey)) meter else null
                             WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
                                 meter = m?.text.orEmpty(), meterHigh = m?.high == true)
                         }
@@ -793,7 +794,7 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
             BlazeReply(m.id, m.text, pos)
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             if (pos.ends || followups.isNotEmpty()) Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = true)
-            else if (m.meta.isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
+            else if (com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech()).isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)
         } }
         Role.ERROR -> Column(Modifier.fillMaxWidth()) {
@@ -827,7 +828,9 @@ private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, o
     val clip = LocalClipboardManager.current
     val ctx = LocalContext.current
     val usedUp = m.meta.startsWith("usedup:")
-    val chip = if (usedUp) "" else m.meta
+    // v0.24.2: technical parts of the chip (timings, data, model ids) are hidden unless Show technical details is on.
+    val chip = if (usedUp) "" else com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech())
+    if (chipOnly && chip.isBlank()) return
     if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }
     val acts = buildList<Pair<String, (() -> Unit)?>> {
         add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(m.text) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
