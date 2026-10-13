@@ -16,7 +16,7 @@ object PrivateChat {
     /** Tools that save or learn something; never offered (and refused at dispatch) in a private chat. */
     val blockedTools = setOf(
         "remember", "forget", "memory_save", "memory_update",
-        "skill_manage", "write_skill", "install_skill",
+        "skill_manage", "write_skill", "install_skill", "save_workflow",
     )
 
     fun blocked(name: String): Boolean = name in blockedTools
