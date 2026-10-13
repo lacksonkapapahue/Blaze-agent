@@ -253,8 +253,8 @@ fun RichDiagram(d: RichReplies.Block.Diagram) {
     val c = LocalBlaze.current
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White)) {
         RichPicture(RichReplies.Img(d.url, "${d.kind.replaceFirstChar { it.uppercase() }} diagram"), Modifier.fillMaxWidth().heightIn(max = 420.dp), ratio = 4f / 3f, crop = false)
-        Text("${d.kind.replaceFirstChar { it.uppercase() }} diagram", modifier = Modifier.fillMaxWidth().background(c.faint).padding(horizontal = 12.dp, vertical = 6.dp),
-            style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = c.sub))
+        Text("${d.kind.replaceFirstChar { it.uppercase() }} diagram", modifier = Modifier.fillMaxWidth().background(Color(0xFFF1F1EF)).padding(horizontal = 12.dp, vertical = 6.dp),
+            style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = Color(0xFF5A5A5E)))   // on the white diagram card in light and dark
     }
 }
 
