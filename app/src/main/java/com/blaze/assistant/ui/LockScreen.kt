@@ -17,6 +17,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blaze.assistant.agent.Mood
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun LockScreen(onUnlock: () -> Unit) {
@@ -28,8 +30,8 @@ fun LockScreen(onUnlock: () -> Unit) {
             Spacer(Modifier.height(20.dp))
             Text("Blaze is locked", style = TextStyle(fontFamily = Type.Display, fontSize = 24.sp, color = c.ink))
             Spacer(Modifier.height(18.dp))
-            Box(Modifier.background(c.ink).clickable(onClick = onUnlock).padding(horizontal = 22.dp, vertical = 14.dp)) {
-                Label("Unlock", color = c.paper, size = 11.sp)
+            Box(Modifier.clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable(onClick = onUnlock).padding(horizontal = 22.dp, vertical = 14.dp)) {
+                ButtonText("Unlock", color = Color.White)
             }
         }
     }

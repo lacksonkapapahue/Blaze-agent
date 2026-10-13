@@ -52,7 +52,7 @@ fun CalmSteps(steps: List<ChatMessage>, live: Boolean, endAt: Long) {
     val count = if (n == 1) "1 step" else "$n steps"
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(if (live) c.accent else c.weak))
+            Box(Modifier.size(6.dp).background(if (live) c.accent else c.weak, BlazeShapes.pill))
             Spacer(Modifier.width(10.dp))
             if (live && !open) Shimmer(steps.last().text, Modifier.weight(1f))
             else {

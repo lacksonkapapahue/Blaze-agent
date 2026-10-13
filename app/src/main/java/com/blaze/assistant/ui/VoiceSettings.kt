@@ -54,7 +54,7 @@ fun VoiceTuning() {
     Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         if (!showAll && voices.size > list.size) Label("Show all ${voices.size} voices", color = c.accent, size = 10.sp,
             modifier = Modifier.clickable { showAll = true }.padding(vertical = 10.dp).padding(end = 18.dp))
-        Label("Get more voices", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+        ActionText("Get more voices", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
             try { ctx.startActivity(android.content.Intent("com.android.settings.TTS_SETTINGS").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
             catch (_: Exception) { android.widget.Toast.makeText(ctx, "Couldn't open speech settings.", android.widget.Toast.LENGTH_SHORT).show() }
         }.padding(vertical = 10.dp))
@@ -99,7 +99,7 @@ private fun Chips(options: List<Pair<String, String>>, value: String, onPick: (S
             Box(Modifier.weight(1f).padding(end = 6.dp).hairline(if (value == v) c.ink else c.hair)
                 .background(if (value == v) c.ink else c.paper).clickable { onPick(v) }.padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center) {
-                Label(l, color = if (value == v) c.paper else c.ink, size = 10.sp, maxLines = 1)
+                ButtonText(l, color = if (value == v) c.paper else c.ink, size = 13.sp)
             }
         }
     }

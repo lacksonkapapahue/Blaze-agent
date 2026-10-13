@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,11 +75,11 @@ fun AutoPoolPanel(rows: List<FreeRouter.PoolSummary>, refreshing: Boolean, onRef
             KitRow(s.name, poolLine(s), first = i == 0,
                 pill = when { allCool -> "resting"; s.cooling > 0 -> "${s.models - s.cooling} ready"; else -> "ready" }, pillOn = !allCool,
                 onClick = { open = if (open == s.pid) "" else s.pid },
-                lead = { Box(Modifier.size(6.dp).background(when { s.models == 0 -> c.weak; allCool -> c.sub; else -> c.accent })) },
+                lead = { Box(Modifier.size(6.dp).background(when { s.models == 0 -> c.weak; allCool -> c.sub; else -> c.accent }, BlazeShapes.pill)) },
                 trailing = { Label(if (open == s.pid) "\u25B2" else "\u25BC", size = 10.sp) })
             if (open == s.pid) {
                 val list = remember(s.pid, s.cooling, s.fetchedAt) { models(s.pid) }
-                Column(Modifier.fillMaxWidth().background(c.faint).padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 8.dp)) {
+                Column(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 8.dp)) {
                     list.take(60).forEach { m ->
                         Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                             Text(m.id + if (m.tools) "  · tools" else "", maxLines = 1, overflow = TextOverflow.Ellipsis,

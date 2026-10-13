@@ -36,6 +36,8 @@ import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.agent.Traces
 import com.blaze.assistant.phone.BlazeAccessibilityService
 import kotlinx.coroutines.delay
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 /** Settings → Look & feel: the small things that make Blaze feel alive. */
 @Composable
@@ -77,12 +79,12 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // v0.19.0: three progress segments, like Desktop's onboarding steps.
                 (0 until 3).forEach { i ->
-                    Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).background(if (i <= page) c.accent else c.hair2))
+                    Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).clip(BlazeShapes.pill).background(if (i <= page) c.accent else c.hair2))
                 }
                 Spacer(Modifier.width(8.dp))
                 Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.clickable { finish(null) }.padding(8.dp)) { Label("Skip", color = c.sub, size = 10.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable { finish(null) }.padding(8.dp)) { ActionText("Skip", color = c.sub, size = 10.sp) }
             }
             Column {
                 OrbFace(72.dp)
@@ -107,14 +109,14 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                         if (!a11y) ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
             }
-            Box(Modifier.fillMaxWidth().height(54.dp).background(c.ink).clickable {
+            Box(Modifier.fillMaxWidth().height(54.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                 when (page) {
                     0 -> { if (brain.isEmpty()) { Settings.providerId = Providers.AUTO; brain = "free" }; page = 1 }
                     1 -> page = 2
                     else -> finish(if (brain == "key") "/settings ai" else "Introduce yourself in one sentence, then tell me three things you can do on my phone.")
                 }
             }, contentAlignment = Alignment.Center) {
-                Label(when (page) { 0 -> "Continue"; 1 -> if (a11y) "Continue" else "Later"; else -> "Let's go" }, color = c.paper, size = 11.sp)
+                ButtonText(when (page) { 0 -> "Continue"; 1 -> if (a11y) "Continue" else "Later"; else -> "Let's go" }, color = Color.White)
             }
         }
     }
@@ -123,7 +125,7 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
 @Composable
 private fun Choice(title: String, sub: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
+    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised, BlazeShapes.medium).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))
@@ -131,7 +133,7 @@ private fun Choice(title: String, sub: String, on: Boolean, onClick: () -> Unit)
             Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
         }
         Spacer(Modifier.width(12.dp))
-        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper, BlazeShapes.medium).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
             if (on) Text("\u2713", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.onAccent))
         }
     }

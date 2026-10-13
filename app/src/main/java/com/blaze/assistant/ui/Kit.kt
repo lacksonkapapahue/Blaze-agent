@@ -3,6 +3,7 @@ package com.blaze.assistant.ui
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,8 +42,9 @@ import androidx.compose.ui.unit.sp
 
 /*
  * v0.19.0 visual parity: the small kit Blaze Desktop's pages are built from (frontend/dist/style.css:
- * .phead, .group, .rows, .pill, .btn, .empty), in the classic Blaze look: paper, ink, hairlines,
- * one blue accent, square edges, mono uppercase eyebrows.
+ * .phead, .group, .rows, .pill, .btn, .empty), in the Blaze look: paper, ink, hairlines, one blue accent.
+ * v0.24.8 "no square UI": every piece is rounded ([BlazeShapes]): grouped rows are rounded cards, buttons are pills in
+ * sentence case (primary = the mascot's orange-to-blue gradient), inputs are filled pills, tags are pills, the switch is round.
  */
 
 /** Desktop's --raised (cards, rows) and --hair2 (their borders), --accent-soft (on states). */
@@ -84,11 +86,11 @@ fun GroupHead(title: String, desc: String = "", modifier: Modifier = Modifier, r
     }
 }
 
-/** Desktop's .rows: a raised box with hairlines between its rows. */
+/** Desktop's .rows as a rounded grouped card (v0.24.8): a raised 16dp card with soft hairlines between its rows. */
 @Composable
 fun Rows(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalBlaze.current
-    Column(modifier.fillMaxWidth().background(c.raised).hairline(c.hair2), content = content)
+    Column(modifier.fillMaxWidth().clip(BlazeShapes.medium).background(c.raised, BlazeShapes.medium).hairline(c.hair2), content = content)
 }
 
 /**
@@ -100,9 +102,9 @@ fun KitRow(title: String, sub: String = "", n: Int = 0, first: Boolean = false, 
            dim: Boolean = false, mono: Boolean = false, onClick: (() -> Unit)? = null, lead: (@Composable () -> Unit)? = null,
            trailing: (@Composable RowScope.() -> Unit)? = null) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().let { if (first) it else it.hairlineTop(c.hair) }.let { if (onClick != null) it.clickable(onClick = onClick) else it }
+    Row(Modifier.fillMaxWidth().let { if (first) it else it.hairlineTopInset(c.hair) }.let { if (onClick != null) it.clickable(onClick = onClick) else it }
         .heightIn(min = 52.dp).padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (n > 0) { Text("%02d".format(n), style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.weak)); Spacer(Modifier.width(12.dp)) }
+        // v0.24.8: no "01 / 02" row numbers (they were part of the old square desktop look); [n] is kept for callers.
         if (lead != null) { lead(); Spacer(Modifier.width(12.dp)) }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -118,31 +120,107 @@ fun KitRow(title: String, sub: String = "", n: Int = 0, first: Boolean = false, 
     }
 }
 
-/** Small mono tag: accent-soft when [on], hairline otherwise. */
+/** Small pill tag: accent-soft when [on], faint otherwise. */
 @Composable
 fun Tag(text: String, on: Boolean = false) {
     val c = LocalBlaze.current
-    Box(Modifier.background(if (on) c.accentSoft else c.faint).padding(horizontal = 6.dp, vertical = 2.dp)) {
-        Text(text.uppercase(), maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 9.5.sp, letterSpacing = 0.08.em,
+    Box(Modifier.clip(BlazeShapes.pill).background(if (on) c.accentSoft else c.faint, BlazeShapes.pill).padding(horizontal = 8.dp, vertical = 2.dp)) {
+        Text(text.sentence(), maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 10.5.sp,
             color = if (on) c.accent else c.sub))
     }
 }
 
 enum class Btn { ACCENT, INK, LINE, GHOST }
 
-/** Desktop's .btn: 36dp tall on a phone (touch), square, accent / ink / line / ghost. */
+/**
+ * Desktop's .btn as a Blaze pill (v0.24.8): 40dp tall, sentence case. ACCENT and INK are the primary gradient pill,
+ * LINE a raised outlined pill, GHOST plain text in a pill-shaped touch area.
+ */
 @Composable
 fun KitButton(text: String, kind: Btn = Btn.LINE, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    BlazeButton(text, modifier = modifier, kind = when (kind) { Btn.ACCENT, Btn.INK -> BtnKind.PRIMARY; Btn.LINE -> BtnKind.SECONDARY; Btn.GHOST -> BtnKind.GHOST },
+        enabled = enabled, height = 40.dp, onClick = onClick)
+}
+
+enum class BtnKind { PRIMARY, SECONDARY, GHOST, DANGER }
+
+/**
+ * The one Blaze button (v0.24.8): a pill, sentence case. PRIMARY = orange-to-blue gradient with white text,
+ * SECONDARY = raised pill with a hairline, GHOST = text only, DANGER = warm orange outline.
+ */
+@Composable
+fun BlazeButton(text: String, modifier: Modifier = Modifier, kind: BtnKind = BtnKind.PRIMARY, enabled: Boolean = true,
+                height: androidx.compose.ui.unit.Dp = 44.dp, lead: String = "", onClick: () -> Unit) {
     val c = LocalBlaze.current
-    // Disabled: Desktop's .btn:disabled reads as a quiet hairline button, never a dimmed accent block.
-    val bg = if (!enabled) c.faint else when (kind) { Btn.ACCENT -> c.accent; Btn.INK -> c.ink; Btn.LINE -> c.raised; Btn.GHOST -> Color.Transparent }
-    val fg = if (!enabled) c.weak else when (kind) { Btn.ACCENT -> c.onAccent; Btn.INK -> c.paper; Btn.LINE -> c.ink; Btn.GHOST -> c.sub }
-    Box(modifier.height(36.dp).widthIn(min = 64.dp).background(bg).let { if (kind == Btn.LINE) it.hairline(c.hair2) else it }
-        .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center) {
-        Text(text, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp,
-            color = fg))
+    val shape = BlazeShapes.pill
+    val base = modifier.height(height).widthIn(min = 64.dp).clip(shape)
+    val filled = when {
+        !enabled -> base.background(c.faint, shape)
+        kind == BtnKind.PRIMARY -> base.background(BlazeBrush.primary, shape)
+        kind == BtnKind.SECONDARY -> base.background(c.raised, shape).border(1.dp, c.hair2, shape)
+        kind == BtnKind.DANGER -> base.border(1.dp, BlazeBrush.orange, shape)
+        else -> base
     }
+    val fg = when {
+        !enabled -> c.weak
+        kind == BtnKind.PRIMARY -> Color.White
+        kind == BtnKind.DANGER -> BlazeBrush.orange
+        kind == BtnKind.GHOST -> c.sub
+        else -> c.ink
+    }
+    Box(filled.clickable(enabled = enabled, onClick = onClick).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+        Text((if (lead.isNotBlank()) "$lead  " else "") + text.sentence(), maxLines = 1, overflow = TextOverflow.Ellipsis,
+            style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = fg))
+    }
+}
+
+/**
+ * The one Blaze text field (v0.24.8): a filled dark surface ([field]) with a soft outline that turns accent when focused.
+ * Single line = a pill; multi-line = a 16dp card. No square outline anywhere.
+ */
+@Composable
+fun BlazeTextField(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier, singleLine: Boolean = true,
+                   minHeight: androidx.compose.ui.unit.Dp = if (singleLine) 46.dp else 88.dp, mono: Boolean = false, enabled: Boolean = true,
+                   keyboardOptions: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default,
+                   keyboardActions: androidx.compose.foundation.text.KeyboardActions = androidx.compose.foundation.text.KeyboardActions.Default,
+                   visualTransformation: androidx.compose.ui.text.input.VisualTransformation = androidx.compose.ui.text.input.VisualTransformation.None) {
+    val c = LocalBlaze.current
+    var focused by remember { mutableStateOf(false) }
+    val shape = if (singleLine) BlazeShapes.pill else BlazeShapes.medium
+    Box(modifier.heightIn(min = minHeight).clip(shape).background(c.field, shape).border(1.dp, if (focused) c.accent else c.fieldLine, shape)
+        .padding(horizontal = if (singleLine) 18.dp else 14.dp, vertical = 12.dp),
+        contentAlignment = if (singleLine) Alignment.CenterStart else Alignment.TopStart) {
+        val style = TextStyle(fontFamily = if (mono) Type.Mono else Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.ink)
+        if (value.isEmpty()) Text(hint, maxLines = if (singleLine) 1 else 4, overflow = TextOverflow.Ellipsis, style = style.copy(color = c.weak))
+        BasicTextField(value, onChange, singleLine = singleLine, enabled = enabled, cursorBrush = SolidColor(c.accent), textStyle = style,
+            keyboardOptions = keyboardOptions, keyboardActions = keyboardActions, visualTransformation = visualTransformation,
+            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused })
+    }
+}
+
+/** A rounded Blaze card (v0.24.8): raised surface, 16dp corners, soft hairline; [accent] outlines it in blue. */
+@Composable
+fun BlazeCard(modifier: Modifier = Modifier, accent: Boolean = false, padding: androidx.compose.ui.unit.Dp = 14.dp,
+              onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalBlaze.current
+    val shape = BlazeShapes.medium
+    Column(modifier.fillMaxWidth().clip(shape).background(c.raised, shape).border(1.dp, if (accent) c.accent else c.hair2, shape)
+        .let { if (onClick != null) it.clickable(onClick = onClick) else it }.padding(padding), content = content)
+}
+
+/** "CREATE" / "create" → "Create" (buttons and tags are sentence case since v0.24.8). Leaves mixed case alone. */
+fun String.sentence(): String {
+    val letters = filter { it.isLetter() }
+    if (letters.isEmpty() || letters.any { it.isLowerCase() }) return this
+    val low = lowercase()
+    val k = low.indexOfFirst { it.isLetter() }
+    return low.substring(0, k) + low[k].uppercaseChar() + low.substring(k + 1)
+}
+
+/** A hairline across the top, inset from both sides (separators inside rounded grouped cards). */
+fun Modifier.hairlineTopInset(color: Color, inset: androidx.compose.ui.unit.Dp = 14.dp) = drawBehind {
+    val x = inset.toPx()
+    drawLine(color, androidx.compose.ui.geometry.Offset(x, 0.5f), androidx.compose.ui.geometry.Offset(size.width - x, 0.5f), 1f)
 }
 
 /** Desktop's .empty: a bold line and a quiet one, centred, with an optional action. */
@@ -158,7 +236,7 @@ fun EmptyState(title: String, body: String, modifier: Modifier = Modifier, mark:
     }
 }
 
-/** The particle-dot mark empty states wear: a 3x3 grid of squares, the centre one blue. */
+/** The particle-dot mark empty states wear: a 3x3 grid of dots, the centre one blue (round since v0.24.8). */
 @Composable
 fun DotMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
     val c = LocalBlaze.current
@@ -166,19 +244,19 @@ fun DotMark(size: androidx.compose.ui.unit.Dp = 30.dp) {
         val g = this.size.width / 3f; val d = g * 0.56f; val o = (g - d) / 2f
         for (y in 0 until 3) for (x in 0 until 3) {
             val mid = x == 1 && y == 1
-            drawRect(if (mid) c.accent else c.ink.copy(alpha = if ((x + y) % 2 == 1) 0.35f else 0.85f),
-                androidx.compose.ui.geometry.Offset(x * g + o, y * g + o), androidx.compose.ui.geometry.Size(d, d))
+            drawCircle(if (mid) c.accent else c.ink.copy(alpha = if ((x + y) % 2 == 1) 0.35f else 0.85f),
+                d / 2f, androidx.compose.ui.geometry.Offset(x * g + g / 2f, y * g + g / 2f))
         }
     }
 }
 
-/** Desktop's .msearch: hairline box that turns blue with a soft ring when focused. */
+/** Desktop's .msearch as a filled pill (v0.24.8) that turns blue with a soft ring when focused. */
 @Composable
 fun KitSearch(value: String, onChange: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
     val c = LocalBlaze.current
     var focused by remember { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth().let { if (focused) it.background(c.accentSoft).padding(2.dp) else it.padding(2.dp) }
-        .background(c.raised).hairline(if (focused) c.accent else c.hair2).height(40.dp).padding(horizontal = 12.dp),
+    Row(modifier.fillMaxWidth().let { if (focused) it.background(c.accentSoft, BlazeShapes.pill).padding(2.dp) else it.padding(2.dp) }
+        .background(c.field, BlazeShapes.pill).hairline(if (focused) c.accent else c.fieldLine, BlazeShapes.pill).height(42.dp).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         androidx.compose.foundation.Canvas(Modifier.size(12.dp)) {
             val col = if (focused) c.accent else c.weak
@@ -194,20 +272,20 @@ fun KitSearch(value: String, onChange: (String) -> Unit, hint: String, modifier:
                 textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 13.5.sp, color = c.ink),
                 modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused })
         }
-        if (value.isNotEmpty()) Box(Modifier.size(28.dp).clickable { onChange("") }, contentAlignment = Alignment.Center) {
+        if (value.isNotEmpty()) Box(Modifier.size(28.dp).clip(BlazeShapes.pill).clickable { onChange("") }, contentAlignment = Alignment.Center) {
             Text("\u00d7", style = TextStyle(fontFamily = Type.Sans, fontSize = 16.sp, color = c.sub))
         }
     }
 }
 
-/** Two- or three-way segmented control (Graph | List), ink when on. */
+/** Two- or three-way segmented pill (Graph | List), ink when on. */
 @Composable
 fun Segmented(options: List<Pair<String, String>>, value: String, modifier: Modifier = Modifier, onPick: (String) -> Unit) {
     val c = LocalBlaze.current
-    Row(modifier.hairline(c.hair2).background(c.raised).padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(modifier.hairline(c.hair2, BlazeShapes.pill).background(c.raised, BlazeShapes.pill).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         options.forEach { (id, label) ->
             val on = id == value
-            Box(Modifier.height(30.dp).background(if (on) c.ink else Color.Transparent).clickable { onPick(id) }.padding(horizontal = 12.dp),
+            Box(Modifier.height(30.dp).clip(BlazeShapes.pill).background(if (on) c.ink else Color.Transparent, BlazeShapes.pill).clickable { onPick(id) }.padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center) {
                 Text(label, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 12.5.sp,
                     color = if (on) c.paper else c.sub))
@@ -216,14 +294,24 @@ fun Segmented(options: List<Pair<String, String>>, value: String, modifier: Modi
     }
 }
 
-/** Square on/off switch (the classic one), usable outside Settings. */
+/** Round on/off switch (v0.24.8: a pill track with a round knob, blue when on), usable outside Settings. */
 @Composable
 fun KitSwitch(on: Boolean, onToggle: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.clickable(onClick = onToggle).padding(4.dp)) {
-        Box(Modifier.width(40.dp).height(22.dp).background(if (on) c.ink else c.faint).hairline(if (on) c.ink else c.hair2)) {
-            Box(Modifier.padding(start = if (on) 20.dp else 2.dp, top = 2.dp).size(18.dp).background(if (on) c.paper else c.weak))
-        }
+    Box(Modifier.clip(BlazeShapes.pill).clickable(onClick = onToggle).padding(4.dp)) {
+        BlazeSwitchTrack(on, 40.dp, 22.dp)
+    }
+}
+
+/** The rounded switch drawing shared by [KitSwitch] and Settings' own toggles: pill track, round knob, accent when on. */
+@Composable
+fun BlazeSwitchTrack(on: Boolean, w: androidx.compose.ui.unit.Dp, h: androidx.compose.ui.unit.Dp) {
+    val c = LocalBlaze.current
+    val knob = h - 4.dp
+    Box(Modifier.width(w).height(h).clip(BlazeShapes.pill).background(if (on) c.accent else c.faint, BlazeShapes.pill)
+        .border(1.dp, if (on) c.accent else c.hair2, BlazeShapes.pill)) {
+        Box(Modifier.padding(start = if (on) w - knob - 2.dp else 2.dp, top = 2.dp).size(knob).clip(BlazeShapes.pill)
+            .background(if (on) Color.White else c.weak, BlazeShapes.pill))
     }
 }
 
@@ -286,7 +374,7 @@ fun BlazeDialogCard(
 @Composable
 fun PillButton(text: String, primary: Boolean, warm: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
-    val bg = if (!primary) Color.Transparent else if (warm) DialogColors.primaryWarm else DialogColors.primary
+    val bg = if (!primary) androidx.compose.ui.graphics.SolidColor(Color.Transparent) else if (warm) androidx.compose.ui.graphics.SolidColor(DialogColors.primaryWarm) else BlazeBrush.primary
     Box(modifier.height(40.dp).widthIn(min = 72.dp).clip(shape).background(bg, shape)
         .let { if (!primary) it.border(1.dp, DialogColors.border, shape) else it }
         .clickable(onClick = onClick).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
@@ -311,9 +399,28 @@ fun BlazeMenuCard(items: List<Pair<String, () -> Unit>>, onDismiss: () -> Unit =
     Column(Modifier.widthIn(min = 200.dp, max = 280.dp).shadow(12.dp, shape).background(DialogColors.surface, shape)
         .border(1.dp, DialogColors.border, shape).padding(vertical = 6.dp)) {
         items.forEach { (label, act) ->
-            Box(Modifier.fillMaxWidth().clickable { onDismiss(); act() }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 6.dp).clip(BlazeShapes.small).clickable { onDismiss(); act() }.padding(horizontal = 12.dp, vertical = 12.dp)) {
                 Text(label, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = DialogColors.title))
             }
         }
     }
+}
+
+/**
+ * v0.24.8: a tappable text action ("Delete", "Open", "×"): sentence-case sans in a pill-shaped touch area. Same
+ * parameters as [Label] so the old uppercase mono "label buttons" swap over one for one.
+ */
+@Composable
+fun ActionText(text: String, color: Color = LocalBlaze.current.sub, size: androidx.compose.ui.unit.TextUnit = 11.sp, modifier: Modifier = Modifier,
+               maxLines: Int = 1) {
+    Text(text.sentence(), modifier = Modifier.clip(BlazeShapes.pill).then(modifier).padding(horizontal = 6.dp, vertical = 2.dp), maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
+        style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = (size.value + 3f).sp, color = color))
+}
+
+/** v0.24.8: the old uppercase mono "button" text inside a filled box, as sentence-case button text. */
+@Composable
+fun ButtonText(text: String, color: Color = LocalBlaze.current.ink, size: androidx.compose.ui.unit.TextUnit = 14.sp) {
+    Text(text.sentence(), maxLines = 1, overflow = TextOverflow.Ellipsis,
+        style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = size, color = color))
 }

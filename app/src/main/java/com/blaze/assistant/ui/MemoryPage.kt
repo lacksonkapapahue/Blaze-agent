@@ -65,6 +65,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+import androidx.compose.ui.draw.clip
 
 /**
  * Memory (v0.19.0): Blaze Desktop's Memory view on the phone. An animated graph of the memories
@@ -198,7 +199,7 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
     val catStyle = TextStyle(fontFamily = Type.Mono, fontSize = 10.sp, letterSpacing = 0.14.em, fontWeight = FontWeight.Medium)
     fun layout(t: String, st: TextStyle): TextLayoutResult = layouts.getOrPut(t + "|" + st.fontSize) { measurer.measure(t, st, maxLines = 1) }
 
-    Box(Modifier.fillMaxWidth().height(height).background(c.paper).hairline(c.hair2).clipToBounds()
+    Box(Modifier.fillMaxWidth().height(height).background(c.paper, BlazeShapes.medium).hairline(c.hair2).clipToBounds()
         .onSizeChanged { if (it != size) { size = it; fit() } }) {
         Canvas(Modifier.fillMaxSize()
             .pointerInput(graph) {
@@ -301,17 +302,18 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
                     val g = s / 3f; val ds = g * 0.62f * b; val o = (g - ds) / 2f
                     for (yy in 0 until 3) for (xx in 0 until 3) {
                         val a = if ((xx + yy) % 2 == 1 && !hot) (if (dim) 0.1f else 0.55f) else base
-                        drawRect(col.copy(alpha = a * r), Offset(X - s / 2 + xx * g + o, Y - s / 2 + yy * g + o), Size(ds, ds))
+                        // v0.24.8: round particle dots (were squares).
+                        drawCircle(col.copy(alpha = a * r), ds / 2f, Offset(X - s / 2 + xx * g + g / 2f, Y - s / 2 + yy * g + g / 2f))
                     }
-                } else { s *= b; drawRect(col.copy(alpha = base * r), Offset(X - s / 2, Y - s / 2), Size(s, s)) }
+                } else { s *= b; drawCircle(col.copy(alpha = base * r), s / 2f, Offset(X, Y)) }
                 if (n.i == selIndex) {
                     val rr = s / 2 + 5f * d
-                    drawRect(c.accent, Offset(X - rr, Y - rr), Size(rr * 2, rr * 2), style = Stroke(1f * d))
+                    drawCircle(c.accent, rr, Offset(X, Y), style = Stroke(1f * d))
                 }
                 // The newest memory sends out a slow blue pulse.
                 if (n.i == graph.newest && selIndex < 0 && !reduce && reveal >= 1f) {
                     val ph = (t % 2600L) / 2600f; val rr = s / 2 + 3f * d + ph * 16f * d
-                    drawRect(c.accent.copy(alpha = (1 - ph) * 0.6f), Offset(X - rr, Y - rr), Size(rr * 2, rr * 2), style = Stroke(1f * d))
+                    drawCircle(c.accent.copy(alpha = (1 - ph) * 0.6f), rr, Offset(X, Y), style = Stroke(1f * d))
                 }
             }
 
@@ -336,14 +338,15 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
                 if (!forced && placed.any { p -> rect[0] < p[2] && rect[2] > p[0] && rect[1] < p[3] && rect[3] > p[1] }) continue
                 placed += rect; count++; said += txt
                 // A paper backing keeps labels readable where they cross links and dots.
-                drawRect(c.paper.copy(alpha = if (forced) 0.95f else 0.82f * reveal), Offset(rect[0], rect[1]), Size(rect[2] - rect[0], rect[3] - rect[1]))
+                drawRoundRect(c.paper.copy(alpha = if (forced) 0.95f else 0.82f * reveal), Offset(rect[0], rect[1]), Size(rect[2] - rect[0], rect[3] - rect[1]),
+                    androidx.compose.ui.geometry.CornerRadius(6f * d, 6f * d))
                 drawText(lay, color = if (forced) c.accent else c.ink, topLeft = Offset(X, Y), alpha = reveal * (if (forced) 1f else if (dimmed(n.i)) 0.25f else 0.78f))
             }
         }
         // Count (top left), tools (top right), hint (bottom left).
         Label("${graph.nodes.size} ${if (graph.nodes.size == 1) "memory" else "memories"} \u00b7 ${graph.edges.size} links", size = 9.sp, color = c.weak,
             maxLines = 1, modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
-        Row(Modifier.align(Alignment.TopEnd).padding(10.dp).background(c.raised).hairline(c.hair2)) {
+        Row(Modifier.align(Alignment.TopEnd).padding(10.dp).background(c.raised, BlazeShapes.pill).hairline(c.hair2, BlazeShapes.pill)) {
             GraphTool("+") { cam.z = (cam.z * 1.3f).coerceAtMost(6f); camTick++; touch() }
             Box(Modifier.width(1.dp).height(30.dp).background(c.hair))
             GraphTool("\u2212") { cam.z = (cam.z / 1.3f).coerceAtLeast(0.15f); camTick++; touch() }
@@ -380,7 +383,7 @@ private fun dotGrid(ds: DrawScope, c: BlazeColors) = with(ds) {
     val step = 18f * density; val r = 0.9f * density
     val col = c.ink.copy(alpha = if (c.dark) 0.16f else 0.13f)
     var y = step / 2
-    while (y < size.height) { var x = step / 2; while (x < size.width) { drawRect(col, Offset(x - r / 2, y - r / 2), Size(r, r)); x += step }; y += step }
+    while (y < size.height) { var x = step / 2; while (x < size.width) { drawCircle(col, r / 2f, Offset(x, y)); x += step }; y += step }
 }
 
 // ---------------------------------------------------------------- list
@@ -409,7 +412,7 @@ private fun MemoryList(mems: List<Mind.Mem>, matches: Set<Long>?, sel: Long, gra
 @Composable
 private fun KindMark(kind: String, on: Boolean = false) {
     val c = LocalBlaze.current
-    Box(Modifier.size(8.dp).background(if (on) c.accent else c.ink.copy(alpha = 0.85f)))
+    Box(Modifier.size(8.dp).background(if (on) c.accent else c.ink.copy(alpha = 0.85f), BlazeShapes.pill))
 }
 
 // ---------------------------------------------------------------- detail
@@ -431,20 +434,20 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
     val idx = graph.nodes.firstOrNull { it.mem.id == m.id }?.i ?: -1
     val links = if (idx >= 0) graph.neighbours(idx) else emptyList()
 
-    Row(Modifier.fillMaxWidth().background(c.raised).hairline(c.hair2)
-        .drawBehind { drawRect(c.accent, size = Size(3.dp.toPx(), size.height)) }) {
+    Row(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(c.hair2)
+        .drawBehind { drawRoundRect(c.accent, topLeft = androidx.compose.ui.geometry.Offset(4.dp.toPx(), 10.dp.toPx()), size = Size(3.dp.toPx(), (size.height - 20.dp.toPx()).coerceAtLeast(1f)), cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())) }) {
         Column(Modifier.weight(1f).padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 14.dp)) {
             Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).background(c.accent)); Spacer(Modifier.width(8.dp))
+                Box(Modifier.size(7.dp).background(c.accent, BlazeShapes.pill)); Spacer(Modifier.width(8.dp))
                 Label(kind, size = 10.sp, color = c.sub, modifier = Modifier.weight(1f), maxLines = 1)
-                Box(Modifier.size(36.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(36.dp).clip(BlazeShapes.pill).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
                     Text("\u00d7", style = TextStyle(fontFamily = Type.Sans, fontSize = 18.sp, color = c.sub))
                 }
             }
             Text(m.subject.ifBlank { "Memory" }, modifier = Modifier.padding(end = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 23.sp, letterSpacing = (-0.01).em, color = c.ink))
             Spacer(Modifier.height(10.dp))
-            Box(Modifier.fillMaxWidth().padding(end = 8.dp).background(c.paper).hairline(c.hair2).heightIn(min = 84.dp).padding(12.dp)) {
+            Box(Modifier.fillMaxWidth().padding(end = 8.dp).background(c.paper, BlazeShapes.medium).hairline(c.hair2).heightIn(min = 84.dp).padding(12.dp)) {
                 BasicTextField(text, { text = it; note = "" }, cursorBrush = SolidColor(c.accent),
                     textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 21.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
             }
@@ -458,9 +461,9 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
                             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                                 row.forEach { k ->
                                     val on = k == kind
-                                    Box(Modifier.weight(1f).background(if (on) c.accentSoft else androidx.compose.ui.graphics.Color.Transparent).clickable { kind = k; note = "" }
+                                    Box(Modifier.weight(1f).clip(BlazeShapes.pill).background(if (on) c.accentSoft else androidx.compose.ui.graphics.Color.Transparent, BlazeShapes.pill).clickable { kind = k; note = "" }
                                         .padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
-                                        Text(k.uppercase(), maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 9.sp, letterSpacing = 0.06.em, color = if (on) c.accent else c.sub))
+                                        Text(k.replaceFirstChar { it.uppercase() }, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 11.sp, color = if (on) c.accent else c.sub))
                                     }
                                 }
                             }
@@ -482,7 +485,7 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
             links.take(8).forEach { (j, e) ->
                 val o = graph.nodes[j].mem
                 Row(Modifier.fillMaxWidth().clickable { onSelect(o.id) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).background(c.ink.copy(alpha = 0.85f))); Spacer(Modifier.width(9.dp))
+                    Box(Modifier.size(7.dp).background(c.ink.copy(alpha = 0.85f), BlazeShapes.pill)); Spacer(Modifier.width(9.dp))
                     Column(Modifier.weight(1f)) {
                         Text(o.subject.ifBlank { o.text }, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, color = c.ink))

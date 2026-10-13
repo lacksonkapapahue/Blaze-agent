@@ -352,7 +352,8 @@ class BlazeAccessibilityService : AccessibilityService() {
                 val f = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = 0x226B8CFF }
                 override fun onDraw(c: android.graphics.Canvas) {
                     val h = p.strokeWidth
-                    c.drawRect(h, h, width - h, height - h, f); c.drawRect(h, h, width - h, height - h, p)
+                    val rr = 12 * resources.displayMetrics.density   // v0.24.8: rounded tap highlight
+                    c.drawRoundRect(h, h, width - h, height - h, rr, rr, f); c.drawRoundRect(h, h, width - h, height - h, rr, rr, p)
                 }
             }
             val lp = android.view.WindowManager.LayoutParams(r.width() + pad * 2, r.height() + pad * 2,

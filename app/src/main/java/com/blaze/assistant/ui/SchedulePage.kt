@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -50,7 +51,7 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
 
     PageHead("Schedule", "Routines", "Things Blaze does on a schedule, even when the app is closed. Or just ask: \u201cevery weekday at 7, brief me on my calendar\u201d.")
     if (adding) {
-        Column(Modifier.fillMaxWidth().background(c.raised).hairline(c.accent).padding(14.dp)) {
+        Column(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(c.accent).padding(14.dp)) {
             Label("New routine", size = 10.sp, color = c.accent, modifier = Modifier.padding(bottom = 12.dp))
             Field("Name", name, { name = it }, "Morning brief")
             Field("What should Blaze do?", prompt, { prompt = it }, "Summarise today's calendar and unread texts")
@@ -59,7 +60,7 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { i, d ->
                     val on = days and (1 shl i) != 0
-                    Box(Modifier.weight(1f).height(38.dp).background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair2)
+                    Box(Modifier.weight(1f).height(38.dp).background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(if (on) c.ink else c.hair2)
                         .clickable { days = days xor (1 shl i) }, contentAlignment = Alignment.Center) {
                         Text(d, style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, color = if (on) c.paper else c.sub))
                     }
@@ -99,7 +100,7 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
                 onClick = { open = if (open == r.id) -1 else r.id }) {
                 KitSwitch(r.enabled) { if (list0 == null) Routines.setEnabled(r.id, !r.enabled) }
             }
-            if (open == r.id) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+            if (open == r.id) Column(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).hairlineTop(c.hair).padding(start = 46.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
                 Label(if (r.isCommand) "Shell job" + (if (r.linux) " \u00b7 Linux" else "") else "Blaze does", size = 9.sp, color = c.weak)
                 Text(if (r.isCommand) "$ " + r.command else r.prompt, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
                     style = TextStyle(fontFamily = if (r.isCommand) Type.Mono else Type.Sans, fontSize = 12.5.sp, lineHeight = 18.sp, color = c.body))

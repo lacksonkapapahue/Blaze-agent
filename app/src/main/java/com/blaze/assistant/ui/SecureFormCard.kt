@@ -36,6 +36,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blaze.assistant.agent.Agent
 import com.blaze.assistant.browser.SecureInput
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
 
 /** The live card: whatever form the background browser is waiting on. */
 @Composable
@@ -63,12 +65,14 @@ fun SecureForm(site: String, title: String, reason: String, fields: List<SecureI
     // v0.20.0 (Luke): saved by default (one-time codes never are); untick to use once.
     var save by remember(fields) { mutableStateOf(true) }
     val ready = fields.all { values[it.name].orEmpty().isNotBlank() }
-    Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent).padding(16.dp)) {
+    // v0.24.8: a rounded card (accent outline) instead of a square strip with a top rule.
+    Column(Modifier.fillMaxWidth().background(c.paper).padding(horizontal = 12.dp, vertical = 6.dp).clip(BlazeShapes.large).background(c.raised, BlazeShapes.large)
+        .border(1.dp, c.accent.copy(alpha = 0.6f), BlazeShapes.large).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(3.dp).height(14.dp).background(c.accent))
+            Box(Modifier.size(8.dp).clip(BlazeShapes.pill).background(c.accent))
             Spacer(Modifier.width(8.dp))
             Label("Action required · ${site.take(36)}", color = c.accent, size = 10.sp, maxLines = 1, modifier = Modifier.weight(1f))
-            Label("Watch", color = c.sub, size = 10.sp, modifier = Modifier.clickable(onClick = onWatch).padding(horizontal = 6.dp, vertical = 4.dp))
+            ActionText("Watch", color = c.sub, size = 10.sp, modifier = Modifier.clickable(onClick = onWatch).padding(horizontal = 6.dp, vertical = 4.dp))
         }
         Spacer(Modifier.height(8.dp))
         Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 17.sp, lineHeight = 23.sp, color = c.ink))
@@ -78,7 +82,7 @@ fun SecureForm(site: String, title: String, reason: String, fields: List<SecureI
         fields.forEachIndexed { i, f ->
             val masked = f.kind.masked && shown[f.name] != true
             Label(f.label, size = 10.sp, modifier = Modifier.padding(top = if (i == 0) 0.dp else 8.dp, bottom = 4.dp))
-            Row(Modifier.fillMaxWidth().hairline(c.hair).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.pill).background(c.field, BlazeShapes.pill).hairline(c.fieldLine, BlazeShapes.pill).padding(start = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).padding(vertical = 12.dp)) {
                     if (values[f.name].isNullOrEmpty()) Text(hint(f.kind), style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = c.weak))
                     BasicTextField(values[f.name].orEmpty(), { values[f.name] = it.trimEnd('\n') }, singleLine = true,
@@ -88,12 +92,12 @@ fun SecureForm(site: String, title: String, reason: String, fields: List<SecureI
                             imeAction = if (i == fields.lastIndex) ImeAction.Done else ImeAction.Next),
                         cursorBrush = SolidColor(c.accent), modifier = Modifier.fillMaxWidth())
                 }
-                if (f.kind.masked) Label(if (masked) "Show" else "Hide", color = c.sub, size = 10.sp,
+                if (f.kind.masked) ActionText(if (masked) "Show" else "Hide", color = c.sub, size = 10.sp,
                     modifier = Modifier.clickable { shown[f.name] = masked }.padding(horizontal = 12.dp, vertical = 12.dp))
             }
         }
-        if (fields.any { it.kind.saveable }) Row(Modifier.fillMaxWidth().padding(top = 10.dp).clickable { save = !save }, verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(16.dp).hairline(if (save) c.accent else c.hair).background(if (save) c.accent else c.paper), contentAlignment = Alignment.Center) {
+        if (fields.any { it.kind.saveable }) Row(Modifier.fillMaxWidth().padding(top = 10.dp).clip(BlazeShapes.small).clickable { save = !save }, verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(18.dp).hairline(if (save) c.accent else c.hair, BlazeShapes.xs).background(if (save) c.accent else c.paper), contentAlignment = Alignment.Center) {
                 if (save) Text("✓", style = TextStyle(fontSize = 11.sp, color = c.paper))
             }
             Spacer(Modifier.width(10.dp))
@@ -104,12 +108,8 @@ fun SecureForm(site: String, title: String, reason: String, fields: List<SecureI
         NotificationsLine(notifPrompt)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Box(Modifier.weight(1f).height(46.dp).hairline(c.hair).clickable(onClick = onCancel), contentAlignment = Alignment.Center) {
-                Label("Cancel", color = c.ink, size = 11.sp)
-            }
-            Box(Modifier.weight(1f).height(46.dp).background(if (ready) c.accent else c.faint)
-                .clickable(enabled = ready) { onSubmit(fields.associate { it.name to values[it.name].orEmpty() }, save) },
-                contentAlignment = Alignment.Center) { Label("Fill in", color = if (ready) c.paper else c.weak, size = 11.sp) }
+            BlazeButton("Cancel", modifier = Modifier.weight(1f), kind = BtnKind.SECONDARY, height = 46.dp, onClick = onCancel)
+            BlazeButton("Fill in", modifier = Modifier.weight(1f), enabled = ready, height = 46.dp) { onSubmit(fields.associate { it.name to values[it.name].orEmpty() }, save) }
         }
     }
 }
@@ -127,7 +127,7 @@ private fun NotificationsLine(force: Boolean?) {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Allow notifications so Blaze can tell you when it needs you.", modifier = Modifier.weight(1f),
             style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-        Label("Allow", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+        ActionText("Allow", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
             if (sdk >= 33) try { launcher.launch("android.permission.POST_NOTIFICATIONS") } catch (_: Exception) { }
         }.padding(8.dp))
     }

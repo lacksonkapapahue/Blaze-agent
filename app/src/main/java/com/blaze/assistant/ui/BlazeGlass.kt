@@ -194,7 +194,7 @@ object EdgePath {
 }
 
 /**
- * The signature particle effect running around the screen edges while the assistant is summoned: square pixel
+ * The signature particle effect running around the screen edges while the assistant is summoned: round
  * dots in the memory graph's style (ink white with brand blue / orange sparks) drifting along the border, with
  * faint links between neighbours. ~24 fps, 40 dots, gone (no frames) as soon as it leaves composition.
  */
@@ -229,7 +229,7 @@ fun EdgeParticles(modifier: Modifier = Modifier, energy: Float = 1f) {
             val col = when { i % 7 == 0 -> Glass.orange; i % 4 == 0 -> Glass.blue; else -> Color.White }
             val s = (2.2f + (i % 3)) * d
             val alpha = (0.45f + 0.35f * kotlin.math.sin(time * 2f + dots[i][3]).let { (it + 1f) / 2f }) * energy
-            drawRect(col.copy(alpha = alpha), Offset(p.x - s / 2, p.y - s / 2), Size(s, s))
+            drawCircle(col.copy(alpha = alpha), s / 2, Offset(p.x, p.y))   // v0.24.8: round dots, no squares
         }
     }
 }

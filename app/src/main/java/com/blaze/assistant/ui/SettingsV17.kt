@@ -39,6 +39,7 @@ import com.blaze.assistant.connect.Mcp
 import com.blaze.assistant.connect.McpConfig
 import com.blaze.assistant.notify.NotificationBrain
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.clip
 
 @Composable
 private fun Note(text: String, top: Int = 0) {
@@ -50,8 +51,8 @@ private fun Note(text: String, top: Int = 0) {
 @Composable
 private fun Button(text: String, primary: Boolean = true, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.fillMaxWidth().height(44.dp).background(if (primary) c.ink else c.paper).hairline(if (primary) c.ink else c.hair)
-        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { Label(text, color = if (primary) c.paper else c.ink, size = 11.sp) }
+    Box(Modifier.fillMaxWidth().height(44.dp).background(if (primary) c.ink else c.paper, BlazeShapes.medium).hairline(if (primary) c.ink else c.hair)
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { ButtonText(text, color = if (primary) c.paper else c.ink, size = 13.sp) }
 }
 
 @Composable
@@ -92,15 +93,15 @@ fun AutoRouterSection() {
             Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
                 Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(6.dp).background(when { m == null -> c.weak; cooling -> c.sub; else -> c.accent }))
+                Box(Modifier.size(6.dp).background(when { m == null -> c.weak; cooling -> c.sub; else -> c.accent }, BlazeShapes.pill))
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(Providers.byId(pid).name.substringBefore(" ("), style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
                     Text(model + (if (cooling) " · resting ${FreeRouter.fmt(until - System.currentTimeMillis())}" else if ((m?.okAt ?: 0) > 0) " · worked" else ""), maxLines = 1,
                         style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
                 }
-                Box(Modifier.clickable(enabled = i > 0) { chain = chain.toMutableList().also { l -> l.add(i - 1, l.removeAt(i)) }; FreeRouter.save(chain) }.padding(10.dp)) { Label("↑", size = 13.sp) }
-                Box(Modifier.clickable { FreeRouter.removed(pid); chain = chain.filterIndexed { j, _ -> j != i }; FreeRouter.save(chain) }.padding(10.dp)) { Label("×", size = 13.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable(enabled = i > 0) { chain = chain.toMutableList().also { l -> l.add(i - 1, l.removeAt(i)) }; FreeRouter.save(chain) }.padding(10.dp)) { ActionText("↑", size = 13.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable { FreeRouter.removed(pid); chain = chain.filterIndexed { j, _ -> j != i }; FreeRouter.save(chain) }.padding(10.dp)) { ActionText("×", size = 13.sp) }
             }
         }
     }
@@ -128,7 +129,7 @@ fun FastLaneSection() {
         if (err.isNotBlank()) Note("Download failed: $err", top = 6)
     } else {
         ToggleRow("Use the fast lane", "Model downloaded · runs on this phone", on) { on = !on; Settings.fastLane = on; if (!on) FastLane.stop() }
-        Label("Remove model", color = c.accent, size = 10.sp, modifier = Modifier.padding(top = 4.dp).clickable { FastLane.delete(ctx); ready = false })
+        ActionText("Remove model", color = c.accent, size = 10.sp, modifier = Modifier.padding(top = 4.dp).clickable { FastLane.delete(ctx); ready = false })
     }
 }
 
@@ -144,9 +145,9 @@ fun StepsModelSection() {
     val options = listOf("" to "Same as main") + Providers.all.filter { it.id == Providers.AUTO || Settings.keyFor(it.id).isNotBlank() }.map { it.id to it.name }
     Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         options.forEach { (id, name) ->
-            Row(Modifier.fillMaxWidth().background(if (id == pid) c.faint else c.paper).hairlineBottom(c.hair)
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (id == pid) c.faint else c.paper).hairlineBottom(c.hair)
                 .clickable { pid = id; Settings.stepsProvider = id }.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(6.dp).background(if (id == pid) c.accent else c.paper)); Spacer(Modifier.width(10.dp))
+                Box(Modifier.size(6.dp).background(if (id == pid) c.accent else c.paper, BlazeShapes.pill)); Spacer(Modifier.width(10.dp))
                 Text(name, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink))
             }
         }
@@ -174,8 +175,8 @@ fun ConnectionsPage(connected0: Set<String>? = null, online0: Boolean? = null, o
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { com.blaze.assistant.connect.BlazeAccount.refreshProviders(true) } }
     }
     PageHead("Accounts", "Connected accounts", "Let Blaze use your apps: tap Connect, approve in your browser, and you're back. Tokens stay encrypted on this phone; sending or posting always asks you first.")
-    if (!acct.online) Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).background(c.sub)); Spacer(Modifier.width(10.dp))
+    if (!acct.online) Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).clip(BlazeShapes.small).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(6.dp).background(c.sub, BlazeShapes.pill)); Spacer(Modifier.width(10.dp))
         Text("Can't reach Blaze's sign-in service right now. Check your connection.", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, lineHeight = 17.sp, color = c.body))
     }
     val states = Connectors.all.map { conn -> conn to (connected0?.contains(conn.id) ?: remember(tick, st) { runCatching { Connectors.connected(conn.id) }.getOrDefault(false) }) }
@@ -185,8 +186,8 @@ fun ConnectionsPage(connected0: Set<String>? = null, online0: Boolean? = null, o
             val one = acct.connectors[conn.id] == true
             val tag = when { on -> "Connected"; one -> "Connect"; acct.online -> "Soon"; else -> "Offline" }
             KitRow(conn.name, st[conn.id]?.takeIf { it.isNotBlank() } ?: conn.blurb, first = i == 0, pill = tag, pillOn = on,
-                onClick = { open = if (open == conn.id) "" else conn.id }, lead = { Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2)) })
-            if (open == conn.id) Column(Modifier.fillMaxWidth().background(c.faint).hairlineTop(c.hair).padding(start = 33.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
+                onClick = { open = if (open == conn.id) "" else conn.id }, lead = { Box(Modifier.size(7.dp).background(if (on) c.accent else c.hair2, BlazeShapes.pill)) })
+            if (open == conn.id) Column(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).hairlineTop(c.hair).padding(start = 33.dp, end = 14.dp, top = 10.dp, bottom = 12.dp)) {
                 when {
                     on -> KitButton("Disconnect", Btn.LINE) { Connectors.disconnect(conn.id); tick++ }
                     one -> {
@@ -231,9 +232,9 @@ private fun McpSection() {
                     Text(s.url.ifBlank { "stdio" } + when (s.transport) { McpConfig.SSE -> " \u00b7 SSE"; McpConfig.HTTP -> " \u00b7 HTTP"; else -> "" },
                         maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 10.sp, color = c.weak))
                 }
-                if (s.remote) Box(Modifier.clickable { scope.launch { Mcp.refresh(s) } }.padding(8.dp)) { Label("Test", size = 10.sp) }
-                Box(Modifier.clickable { Mcp.toggle(s.name) }.padding(8.dp)) { Label(if (s.enabled) "On" else "Off", color = if (s.enabled) c.accent else c.weak, size = 10.sp) }
-                Box(Modifier.clickable { Mcp.remove(s.name) }.padding(10.dp)) { Label("\u00d7", size = 13.sp) }
+                if (s.remote) Box(Modifier.clip(BlazeShapes.pill).clickable { scope.launch { Mcp.refresh(s) } }.padding(8.dp)) { ActionText("Test", size = 10.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable { Mcp.toggle(s.name) }.padding(8.dp)) { ActionText(if (s.enabled) "On" else "Off", color = if (s.enabled) c.accent else c.weak, size = 10.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable { Mcp.remove(s.name) }.padding(10.dp)) { ActionText("\u00d7", size = 13.sp) }
             }
             if (open == s.name) {
                 val tools = toolLists[s.name]
@@ -247,7 +248,7 @@ private fun McpSection() {
                             Text(when (t.risk) { McpConfig.Risk.READ -> "reads only"; McpConfig.Risk.WRITE -> "can delete or change data"; else -> "acts" }, style = TextStyle(fontFamily = Type.Sans, fontSize = 10.sp, color = c.weak))
                         }
                         listOf(McpConfig.ASK to "Ask", McpConfig.ALWAYS to "Always", McpConfig.OFF to "Off").forEach { (m, label) ->
-                            Box(Modifier.clickable { Mcp.setToolMode(s.name, t.name, if (m == McpConfig.defaultMode(t.risk)) "" else m) }.padding(6.dp)) {
+                            Box(Modifier.clip(BlazeShapes.pill).clickable { Mcp.setToolMode(s.name, t.name, if (m == McpConfig.defaultMode(t.risk)) "" else m) }.padding(6.dp)) {
                                 Label(label, size = 10.sp, color = if (mode == m) c.accent else c.weak)
                             }
                         }
@@ -264,7 +265,7 @@ private fun McpSection() {
     Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Label("Transport", modifier = Modifier.weight(1f))
         listOf(McpConfig.AUTO to "Auto", McpConfig.HTTP to "HTTP", McpConfig.SSE to "SSE").forEach { (t, label) ->
-            Box(Modifier.clickable { transport = t }.padding(8.dp)) { Label(label, size = 11.sp, color = if (transport == t) c.accent else c.weak) }
+            Box(Modifier.clip(BlazeShapes.pill).clickable { transport = t }.padding(8.dp)) { ActionText(label, size = 11.sp, color = if (transport == t) c.accent else c.weak) }
         }
     }
     Button("Add server") {
@@ -321,8 +322,8 @@ fun LearningSection() {
             pending.forEach { p ->
                 Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(p.title, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.body))
-                    Box(Modifier.clickable { Learning.approve(p.id) }.padding(10.dp)) { Label("Keep", color = c.accent, size = 10.sp) }
-                    Box(Modifier.clickable { Learning.reject(p.id) }.padding(10.dp)) { Label("×", size = 13.sp) }
+                    Box(Modifier.clip(BlazeShapes.pill).clickable { Learning.approve(p.id) }.padding(10.dp)) { ActionText("Keep", color = c.accent, size = 10.sp) }
+                    Box(Modifier.clip(BlazeShapes.pill).clickable { Learning.reject(p.id) }.padding(10.dp)) { ActionText("×", size = 13.sp) }
                 }
             }
         }
@@ -337,8 +338,8 @@ fun LearningSection() {
                         Text(s.name + if (s.replay != null) "  ▶" else "", style = TextStyle(fontFamily = Type.Mono, fontSize = 13.sp, color = c.ink))
                         Text(s.description + " · used ${s.uses}×", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                     }
-                    Box(Modifier.clickable { com.blaze.assistant.agent.Agent.send("Run my skill \"${s.name}\"") }.padding(10.dp)) { Label("Run", color = c.accent, size = 10.sp) }
-                    Box(Modifier.clickable { Learning.deleteSkill(s.name) }.padding(10.dp)) { Label("×", size = 13.sp) }
+                    Box(Modifier.clip(BlazeShapes.pill).clickable { com.blaze.assistant.agent.Agent.send("Run my skill \"${s.name}\"") }.padding(10.dp)) { ActionText("Run", color = c.accent, size = 10.sp) }
+                    Box(Modifier.clip(BlazeShapes.pill).clickable { Learning.deleteSkill(s.name) }.padding(10.dp)) { ActionText("×", size = 13.sp) }
                 }
                 if (shown == s.name) Text(s.steps, modifier = Modifier.padding(top = 6.dp, end = 12.dp),
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 18.sp, color = c.body))
@@ -348,7 +349,7 @@ fun LearningSection() {
     Section("Screen memory")
     ToggleRow("Remember what I see", "Keeps short text snapshots of screens when you switch apps, only on this phone (needs phone control). Password screens are skipped.", screen) { screen = !screen; Settings.screenMemory = screen }
     var count by remember(screen) { mutableStateOf(ScreenMemory.count(ctx)) }
-    if (count > 0) Label("Clear $count snapshots", color = c.accent, size = 10.sp, modifier = Modifier.padding(top = 4.dp).clickable { ScreenMemory.clear(ctx); count = 0 })
+    if (count > 0) ActionText("Clear $count snapshots", color = c.accent, size = 10.sp, modifier = Modifier.padding(top = 4.dp).clickable { ScreenMemory.clear(ctx); count = 0 })
 }
 
 // ---------------- Notification access ----------------
@@ -362,7 +363,7 @@ fun NotificationAccessRow() {
     Section("Notification brain")
     Row(Modifier.fillMaxWidth().hairline(if (on) c.hair else c.accent).clickable { ctx.startActivity(NotificationBrain.settingsIntent()) }.padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).background(if (on) c.accent else c.weak)); Spacer(Modifier.width(10.dp))
+        Box(Modifier.size(6.dp).background(if (on) c.accent else c.weak, BlazeShapes.pill)); Spacer(Modifier.width(10.dp))
         Text(if (on) "Notification access is on" else "Let Blaze read notifications", modifier = Modifier.weight(1f),
             style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.body))
         Label("Open →", color = c.accent)

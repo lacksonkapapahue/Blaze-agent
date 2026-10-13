@@ -97,7 +97,8 @@ fun ShellTopBar(
     val c = LocalBlaze.current
     Column(Modifier.fillMaxWidth().background(c.paper).hairlineBottom(c.hair)) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 10.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).clickable(onClick = onLogo), contentAlignment = Alignment.Center) { BrandMark(mood, 26.dp) }
+            // v0.24.8: the mascot in a circle (was a square pixel "B").
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onLogo).semantics { contentDescription = "Blaze" }, contentAlignment = Alignment.Center) { BrandMark(mood, 34.dp) }
             Spacer(Modifier.width(6.dp))
             if (isPrivate) PrivatePill(onGhost) else Pill(mode, onMode)
             Spacer(Modifier.weight(1f))
@@ -114,7 +115,7 @@ fun ShellTopBar(
         }
         if (viewChip.isNotBlank()) Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(c.accent))
+            Box(Modifier.size(6.dp).clip(CircleShape).background(c.accent))
             Spacer(Modifier.width(8.dp))
             Label(viewChip.uppercase(), color = c.ink, size = 10.sp, modifier = Modifier.weight(1f))
             Row(Modifier.clip(RoundedCornerShape(16.dp)).background(c.faint).clickable(onClick = onExit).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -204,8 +205,8 @@ fun AvatarMenu(name: String, email: String, items: List<MenuItem>, onPick: (Stri
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
             }
             items.forEach { m ->
-                Row(Modifier.fillMaxWidth().combinedClickable(onClick = { onPick(m.id) }, onLongClick = { onLongPick(m.id) })
-                    .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp).clip(BlazeShapes.small).combinedClickable(onClick = { onPick(m.id) }, onLongClick = { onLongPick(m.id) })
+                    .padding(horizontal = 10.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(m.label, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = if (m.id == "signout") c.accent else c.ink))
                     if (m.sub.isNotBlank()) Label(m.sub, color = c.sub, size = 9.sp)
                 }
@@ -231,8 +232,10 @@ fun ViewsSheet(badges: Map<String, String>, onPick: (BlazeView) -> Unit, onDismi
     val rows = remember(q) { Views.filter(q) }
     val focus = remember { FocusRequester() }
     if (autoFocus) LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Exception) { } }
-    Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.ink)) {
-        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    // v0.24.8: a rounded sheet with a pill search field and rounded rows (no square top rule, no row numbers).
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)).background(c.raised).padding(top = 10.dp)) {
+        Row(Modifier.padding(horizontal = 12.dp).fillMaxWidth().clip(BlazeShapes.pill).background(c.field).border(1.dp, c.fieldLine, BlazeShapes.pill)
+            .padding(start = 16.dp, end = 6.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             SearchGlyph(c.sub, 14.dp)
             Spacer(Modifier.width(10.dp))
             Box(Modifier.weight(1f).padding(vertical = 10.dp)) {
@@ -243,13 +246,15 @@ fun ViewsSheet(badges: Map<String, String>, onPick: (BlazeView) -> Unit, onDismi
                     keyboardActions = KeyboardActions(onGo = { rows.firstOrNull()?.let(onPick) }),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus))
             }
-            Label("ESC", color = c.weak, size = 9.sp, modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp))
+            Box(Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onDismiss).semantics { contentDescription = "Close" }, contentAlignment = Alignment.Center) {
+                Text("\u00d7", style = TextStyle(fontFamily = Type.Sans, fontSize = 18.sp, color = c.sub))
+            }
         }
-        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp)) {
             rows.forEachIndexed { i, v ->
-                Row(Modifier.fillMaxWidth().background(if (i == 0 && q.isNotEmpty()) c.faint else Color.Transparent)
-                    .clickable { onPick(v) }.padding(horizontal = 16.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
+                Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (i == 0 && q.isNotEmpty()) c.faint else Color.Transparent)
+                    .clickable { onPick(v) }.padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(c.accent))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(v.name, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
@@ -315,14 +320,14 @@ fun SearchScreen(onView: (BlazeView) -> Unit, onAsk: (String) -> Unit, onDismiss
 @Composable
 fun ChatRow(ch: ChatMeta, busy: Boolean, current: Boolean = false, chip: String = "", onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(if (current) c.faint else Color.Transparent).clickable(onClick = onClick)
-        .padding(horizontal = 20.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 3.dp).fillMaxWidth().clip(BlazeShapes.medium).background(if (current) c.faint else c.raised)
+        .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(ch.title.ifBlank { "Untitled" }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink))
             if (ch.preview.isNotBlank()) Text(ch.preview, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
         }
         // Pinned mark sits on the right so every title lines up (v0.15.0).
-        if (ch.pinned) { Spacer(Modifier.width(8.dp)); Box(Modifier.size(5.dp).background(c.accent)); Spacer(Modifier.width(8.dp)) }
+        if (ch.pinned) { Spacer(Modifier.width(8.dp)); Box(Modifier.size(6.dp).clip(CircleShape).background(c.accent)); Spacer(Modifier.width(8.dp)) }
         if (busy) Label("Working", color = c.accent, size = 9.sp)
         else if (chip.isNotBlank()) Label(chip, color = c.sub, size = 9.sp)
     }
@@ -412,7 +417,7 @@ fun FreshChatOffer(onFresh: () -> Unit) {
             Text("Start a fresh chat that opens with a summary of this one.", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 17.sp, color = c.sub))
         }
         Spacer(Modifier.width(10.dp))
-        Label("Fresh chat →", color = c.accent, size = 9.sp, maxLines = 1)
+        Text("Fresh chat →", maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = c.accent))
     }
 }
 
@@ -490,7 +495,7 @@ fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boo
     Column(Modifier.fillMaxWidth().background(c.paper).padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)) {
         if (chip.isNotBlank() || agents > 0) Row(Modifier.padding(start = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             if (chip.isNotBlank()) Box(Modifier.clip(RoundedCornerShape(12.dp)).background(c.accent).clickable(onClick = onChip).padding(horizontal = 10.dp, vertical = 4.dp)) {
-                Label(chip, color = c.onAccent, size = 9.sp)
+                ButtonText(chip, color = c.onAccent, size = 12.sp)
             }
             if (agents > 0) Label((if (chip.isNotBlank()) "   " else "") + "$agents AGENT" + (if (agents > 1) "S" else "") + " WORKING", color = c.accent, size = 9.sp)
         }
@@ -522,8 +527,8 @@ fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boo
             when {
                 busy -> Box(Modifier.size(44.dp).clip(CircleShape).background(c.accent).clickable(onClick = onStop)
                     .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) { SendMark(c.onAccent, stop = true) }
-                canSend -> Box(Modifier.size(44.dp).clip(CircleShape).background(c.ink).clickable(onClick = onSend)
-                    .semantics { contentDescription = "Send" }, contentAlignment = Alignment.Center) { SendMark(c.paper, stop = false) }
+                canSend -> Box(Modifier.size(44.dp).clip(CircleShape).background(BlazeBrush.primary).clickable(onClick = onSend)
+                    .semantics { contentDescription = "Send" }, contentAlignment = Alignment.Center) { SendMark(Color.White, stop = false) }
                 else -> {
                     val micOn = listening || speaking
                     Box(Modifier.size(44.dp).clip(CircleShape).background(if (micOn) c.accent else Color.Transparent).clickable(onClick = onMic)
@@ -566,11 +571,12 @@ fun MicIcon(color: Color, size: androidx.compose.ui.unit.Dp = 22.dp) {
 fun MicMark(color: Color, speaking: Boolean) {
     Canvas(Modifier.size(18.dp)) {
         val u = size.width / 10f
-        if (speaking) { drawRect(color, Offset(3 * u, 3 * u), Size(4 * u, 4 * u)); return@Canvas }
-        drawRect(color, Offset(3.5f * u, 0f), Size(3 * u, 6 * u))
-        drawArc(color, 0f, 180f, false, Offset(1.8f * u, 1.5f * u), Size(6.4f * u, 6.4f * u), style = Stroke(1.2f * u))
-        drawRect(color, Offset(4.4f * u, 7.9f * u), Size(1.2f * u, 1.6f * u))
-        drawRect(color, Offset(3f * u, 9f * u), Size(4f * u, 1f * u))
+        // v0.24.8: rounded mic (was square blocks).
+        if (speaking) { drawRoundRect(color, Offset(3 * u, 3 * u), Size(4 * u, 4 * u), androidx.compose.ui.geometry.CornerRadius(1.2f * u)); return@Canvas }
+        drawRoundRect(color, Offset(3.5f * u, 0f), Size(3 * u, 6 * u), androidx.compose.ui.geometry.CornerRadius(1.5f * u))
+        drawArc(color, 0f, 180f, false, Offset(1.8f * u, 1.5f * u), Size(6.4f * u, 6.4f * u), style = Stroke(1.2f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        drawLine(color, Offset(5f * u, 7.9f * u), Offset(5f * u, 9.4f * u), 1.2f * u, androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(color, Offset(3.4f * u, 9.5f * u), Offset(6.6f * u, 9.5f * u), 1f * u, androidx.compose.ui.graphics.StrokeCap.Round)
     }
 }
 
@@ -586,39 +592,38 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
     Column(Modifier.fillMaxSize().background(c.paper)) {
         if (open == null) {
             var name by remember { mutableStateOf("") }
+            // v0.24.8: rounded everything: a filled pill field, a gradient pill button, projects as separate rounded cards.
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 18.dp)) {
-                Label("Projects", modifier = Modifier.padding(horizontal = 20.dp))
-                Spacer(Modifier.height(10.dp))
+                Text("Projects", modifier = Modifier.padding(horizontal = 20.dp),
+                    style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.SemiBold, fontSize = 24.sp, letterSpacing = (-0.02).em, color = c.ink))
+                Spacer(Modifier.height(6.dp))
                 Text("Group chats around one goal, with instructions Blaze follows in every chat inside it.", modifier = Modifier.padding(horizontal = 20.dp),
-                    style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.sub))
                 Spacer(Modifier.height(16.dp))
                 Row(Modifier.padding(horizontal = 16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).hairline(c.hair).padding(horizontal = 12.dp, vertical = 12.dp)) {
-                        if (name.isEmpty()) Text("New project name", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.weak))
-                        BasicTextField(name, { name = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
-                            textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
-                    }
+                    BlazeTextField(name, { name = it }, "New project name", modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank()) { onCreate(name); name = "" } }))
                     Spacer(Modifier.width(8.dp))
-                    Box(Modifier.height(46.dp).background(c.ink).clickable { onCreate(name); name = "" }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                        Label("+ Create", color = c.paper, size = 10.sp)
-                    }
+                    BlazeButton("Create", lead = "+", height = 46.dp) { onCreate(name); name = "" }
                 }
-                Spacer(Modifier.height(14.dp))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(c.hair))
-                projects.forEachIndexed { i, p ->
+                Spacer(Modifier.height(18.dp))
+                projects.forEach { p ->
                     val working = p.chats.any { it in busy }
                     val needs = p.chats.any { it in needsYou }
-                    Row(Modifier.fillMaxWidth().clickable { onOpen(p.id) }.hairlineBottom(c.hair).padding(horizontal = 20.dp, vertical = 14.dp),
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(BlazeShapes.medium).background(c.raised, BlazeShapes.medium)
+                        .border(1.dp, c.hair2, BlazeShapes.medium).clickable { onOpen(p.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Label("%02d".format(i + 1), color = c.weak, size = 10.sp)
-                        Spacer(Modifier.width(14.dp))
+                        ProjectBadge(p.name)
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 17.sp, color = c.ink))
+                            Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = c.ink))
                             Text(if (p.chats.size == 1) "1 chat" else "${p.chats.size} chats", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                         }
                         when {
                             needs -> StatusChip("Needs you", c.accent, filled = true)
                             working -> StatusChip("Working", c.accent, filled = false)
+                            else -> Text("›", style = TextStyle(fontFamily = Type.Display, fontSize = 20.sp, color = c.weak))
                         }
                     }
                 }
@@ -629,34 +634,28 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
             var brief by remember(open.id, open.brief) { mutableStateOf(open.brief) }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                 Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack).semantics { contentDescription = "Back" }, contentAlignment = Alignment.Center) {
                         Text("←", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
                     }
                     Text(open.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                         style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 22.sp, letterSpacing = (-0.02).em, color = c.ink))
                 }
-                Box(Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().height(46.dp).background(c.ink).clickable { onNewChat(open.id) },
-                    contentAlignment = Alignment.Center) { Label("+  New chat in this project", color = c.paper, size = 10.sp) }
+                BlazeButton("New chat in this project", lead = "+", modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(), height = 46.dp) { onNewChat(open.id) }
                 Label("Instructions", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 6.dp))
-                Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 72.dp).hairline(c.hair).padding(12.dp)) {
-                    if (ins.isEmpty()) Text("What Blaze should know in every chat here", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.weak))
-                    BasicTextField(ins, { ins = it; onInstructions(open.id, it) }, cursorBrush = SolidColor(c.accent),
-                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
-                }
+                BlazeTextField(ins, { ins = it; onInstructions(open.id, it) }, "What Blaze should know in every chat here",
+                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), singleLine = false, minHeight = 72.dp)
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Label("Brief", size = 9.sp, modifier = Modifier.weight(1f))
                     Label("${brief.length / 4} / 600 tokens", color = if (brief.length > com.blaze.assistant.agent.Projects.BRIEF_MAX * 9 / 10) c.accent else c.weak, size = 9.sp)
                 }
-                Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 96.dp).hairline(c.hair).padding(12.dp)) {
-                    if (brief.isEmpty()) Text("Pinned brief: purpose, rules, key files, what's in progress. Blaze keeps it up to date.", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.weak))
-                    BasicTextField(brief, { brief = it.take(com.blaze.assistant.agent.Projects.BRIEF_MAX); onBrief(open.id, brief) }, cursorBrush = SolidColor(c.accent),
-                        textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
-                }
+                BlazeTextField(brief, { brief = it.take(com.blaze.assistant.agent.Projects.BRIEF_MAX); onBrief(open.id, brief) },
+                    "Pinned brief: purpose, rules, key files, what's in progress. Blaze keeps it up to date.",
+                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), singleLine = false, minHeight = 96.dp)
                 Label("Chats", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp))
                 val list = open.chats.mapNotNull { id -> chats.firstOrNull { it.id == id } }
                 list.forEach { ch -> ChatRow(ch, ch.id in busy, chip = if (ch.id in needsYou) "Needs you" else "") { onChat(ch.id) } }
                 if (list.isEmpty()) Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { Rows { EmptyState("No chats yet", "Start one with + New chat. It keeps this project's instructions and brief.", mark = false) } }
-                Label("Delete project (chats stay)", color = c.sub, size = 9.sp, modifier = Modifier.padding(20.dp).clickable { onDelete(open.id) }.padding(4.dp))
+                BlazeButton("Delete project (chats stay)", kind = BtnKind.DANGER, modifier = Modifier.padding(20.dp), height = 40.dp) { onDelete(open.id) }
             }
         }
     }
@@ -665,7 +664,16 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
 @Composable
 fun StatusChip(text: String, color: Color, filled: Boolean) {
     val c = LocalBlaze.current
-    Box(Modifier.background(if (filled) color else Color.Transparent).hairline(color).padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Label(text, color = if (filled) c.paper else color, size = 9.sp)
+    Box(Modifier.clip(BlazeShapes.pill).background(if (filled) color else Color.Transparent, BlazeShapes.pill).hairline(color, BlazeShapes.pill).padding(horizontal = 10.dp, vertical = 4.dp)) {
+        Text(text.sentence(), maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 11.sp, color = if (filled) c.paper else color))
+    }
+}
+
+/** v0.24.8: a project's round initial badge (soft orange-to-blue wash) instead of the old "01 / 02" numbers. */
+@Composable
+fun ProjectBadge(name: String) {
+    val c = LocalBlaze.current
+    Box(Modifier.size(38.dp).clip(CircleShape).background(BlazeBrush.primarySoft), contentAlignment = Alignment.Center) {
+        Text(name.trim().take(1).uppercase().ifBlank { "#" }, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = c.ink))
     }
 }

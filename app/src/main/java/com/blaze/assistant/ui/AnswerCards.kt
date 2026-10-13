@@ -207,7 +207,7 @@ private fun CopyLabel(raw: String) {
     val c = LocalBlaze.current
     val clip = LocalClipboardManager.current
     val ctx = LocalContext.current
-    Label("Copy", color = c.accent, size = 9.sp, modifier = Modifier.clickable {
+    ActionText("Copy", color = c.accent, size = 9.sp, modifier = Modifier.clickable {
         clip.setText(AnnotatedString(raw)); Toast.makeText(ctx, "Copied as Markdown", Toast.LENGTH_SHORT).show()
     }.padding(horizontal = 6.dp, vertical = 6.dp))
 }

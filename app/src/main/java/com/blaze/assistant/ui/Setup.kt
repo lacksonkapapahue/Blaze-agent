@@ -54,6 +54,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 /**
  * Watches for a system toggle the user was sent to flip, and brings Blaze back to the front the
@@ -157,11 +159,11 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 18.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // v0.19.0: progress segments, like Desktop's onboarding.
-                (0 until 3).forEach { i -> Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).background(if (i <= page) c.accent else c.hair2)) }
+                (0 until 3).forEach { i -> Box(Modifier.padding(end = 4.dp).width(22.dp).height(3.dp).clip(BlazeShapes.pill).background(if (i <= page) c.accent else c.hair2)) }
                 Spacer(Modifier.width(8.dp))
                 Label("0${page + 1} / 03", color = c.weak, size = 10.sp)
                 Spacer(Modifier.weight(1f))
-                Box(Modifier.clickable { finish(null) }.padding(8.dp)) { Label("Skip", color = c.sub, size = 10.sp) }
+                Box(Modifier.clip(BlazeShapes.pill).clickable { finish(null) }.padding(8.dp)) { ActionText("Skip", color = c.sub, size = 10.sp) }
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 18.dp)) {
                 OrbFace(64.dp)
@@ -188,9 +190,9 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                         }
                         Spacer(Modifier.height(10.dp))
                         if (!gOn && Settings.bool("key_catch_armed", false)) {
-                            Box(Modifier.fillMaxWidth().height(52.dp).background(c.accent).clickable {
+                            Box(Modifier.fillMaxWidth().height(52.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                                 scope.launch { Brains.takeFromClipboard(ctx, userTapped = true) }
-                            }, contentAlignment = Alignment.Center) { Label("I copied my key \u2713  tap here", color = c.onAccent, size = 11.sp) }
+                            }, contentAlignment = Alignment.Center) { ButtonText("I copied my key \u2713  tap here", color = Color.White) }
                             Spacer(Modifier.height(10.dp))
                         }
                         if (brainStatus.isNotBlank()) Label(brainStatus, color = c.accent, size = 10.sp)
@@ -214,13 +216,13 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                 1 -> if (nextNeed != null) "Turn on: ${nextNeed.title.lowercase()}" else "Continue"
                 else -> "Say hi to Blaze"
             }
-            Box(Modifier.fillMaxWidth().height(56.dp).background(c.ink).clickable {
+            Box(Modifier.fillMaxWidth().height(56.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                 when (page) {
                     0 -> { if (!Brains.hasAny() || Settings.providerId != Providers.AUTO && Settings.apiKey.isBlank()) Settings.providerId = Providers.AUTO; page = 1 }
                     1 -> if (nextNeed != null) fix(nextNeed) else page = 2
                     else -> finish("Hi! Introduce yourself in two sentences and tell me three useful things you can do for me.")
                 }
-            }, contentAlignment = Alignment.Center) { Label(label, color = c.paper, size = 11.sp) }
+            }, contentAlignment = Alignment.Center) { ButtonText(label, color = Color.White) }
             if (page == 1 && nextNeed != null) Box(Modifier.fillMaxWidth().clickable { page = 2 }.padding(14.dp), contentAlignment = Alignment.Center) {
                 Label("Later", color = c.sub, size = 10.sp)
             }
@@ -232,7 +234,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
 @Composable
 private fun SetupRow(title: String, sub: String, on: Boolean, working: Boolean = false, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
+    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised, BlazeShapes.medium).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))
@@ -263,8 +265,8 @@ fun BrainCard() {
             style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
         Spacer(Modifier.height(10.dp))
         Row {
-            if ("OpenRouter" !in have.joinToString()) Box(Modifier.weight(1f).background(c.ink).clickable { scope.launch { Brains.connectOpenRouter(ctx) } }.padding(12.dp)) {
-                Label("Sign in: OpenRouter", color = c.paper, size = 10.sp) }
+            if ("OpenRouter" !in have.joinToString()) Box(Modifier.weight(1f).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable { scope.launch { Brains.connectOpenRouter(ctx) } }.padding(12.dp)) {
+                ButtonText("Sign in: OpenRouter", color = Color.White) }
             if ("OpenRouter" !in have.joinToString() && have.none { it.startsWith("Google") }) Spacer(Modifier.width(8.dp))
             if (have.none { it.startsWith("Google") }) Box(Modifier.weight(1f).hairline(c.ink).clickable { Brains.getGoogleKey(ctx) }.padding(12.dp)) {
                 Label("Get Google key", color = c.ink, size = 10.sp) }

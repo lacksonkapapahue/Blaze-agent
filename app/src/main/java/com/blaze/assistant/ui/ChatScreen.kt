@@ -52,6 +52,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -475,8 +476,8 @@ fun ChatScreen() {
                 if (clipHasImage && pending.isEmpty() && !plusOpen) Row(Modifier.fillMaxWidth().background(c.paper)
                     .padding(horizontal = 14.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                     Label("Image on your clipboard", size = 10.sp, modifier = Modifier.weight(1f))
-                    Label("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
-                    Label("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
+                    ActionText("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
+                    ActionText("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
                 }
                 if (showViews) {
                     val badges = mapOf("agents" to bgAgents.count { it.live }.let { if (it > 0) "$it LIVE" else "" })
@@ -521,7 +522,7 @@ fun ChatScreen() {
             val d = LocalDensity.current
             val y = (r.top - with(d) { 52.dp.toPx() }).coerceAtLeast(with(d) { 40.dp.toPx() })
             Row(Modifier.offset { IntOffset(r.left.toInt().coerceAtMost((r.right - with(d) { 230.dp.toPx() }).toInt().coerceAtLeast(0)).coerceAtLeast(12), y.toInt()) }
-                .background(c.ink), verticalAlignment = Alignment.CenterVertically) {
+                .shadow(8.dp, BlazeShapes.pill).clip(BlazeShapes.pill).background(c.ink, BlazeShapes.pill).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 listOf("Copy" to { tbCopy?.invoke(); toolbar.hide() },
                     "Quote" to {
                         tbCopy?.invoke()
@@ -530,7 +531,7 @@ fun ChatScreen() {
                         toolbar.hide()
                     },
                     "Select all" to { tbAll?.invoke() }).forEach { (label, act) ->
-                    Box(Modifier.clickable { act() }.padding(horizontal = 14.dp, vertical = 12.dp)) { Label(label, color = c.paper, size = 11.sp) }
+                    Box(Modifier.clip(BlazeShapes.pill).clickable { act() }.padding(horizontal = 14.dp, vertical = 12.dp)) { ActionText(label, color = c.paper, size = 11.sp) }
                 }
             }
         }
@@ -686,9 +687,11 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                 .semantics { contentDescription = "Jump to the newest message" }, contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(14.dp)) {
                     val u = size.width / 7f
-                    // pixel down-arrow
-                    for (y in 0..3) drawRect(c.paper, Offset(3 * u, y * u), Size(u, u))
-                    listOf(0 to 3, 1 to 4, 2 to 5, 3 to 6, 6 to 3, 5 to 4, 4 to 5).forEach { (x, y) -> drawRect(c.paper, Offset(x * u, y * u), Size(u, u)) }
+                    // v0.24.8: a smooth rounded down-arrow (was pixel squares)
+                    val sw = 1.8.dp.toPx(); val cap = androidx.compose.ui.graphics.StrokeCap.Round
+                    drawLine(c.paper, Offset(3.5f * u, 0.5f * u), Offset(3.5f * u, 6.3f * u), sw, cap)
+                    drawLine(c.paper, Offset(0.8f * u, 3.6f * u), Offset(3.5f * u, 6.3f * u), sw, cap)
+                    drawLine(c.paper, Offset(6.2f * u, 3.6f * u), Offset(3.5f * u, 6.3f * u), sw, cap)
                 }
             }
         }
@@ -702,7 +705,7 @@ private fun StepsGroup(steps: List<ChatMessage>, live: Boolean) {
     var open by rememberSaveable(steps.first().id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(if (live) c.accent else c.weak))
+            Box(Modifier.size(6.dp).background(if (live) c.accent else c.weak, BlazeShapes.pill))
             Spacer(Modifier.width(10.dp))
             Label(if (steps.size == 1) "1 step" else "${steps.size} steps", color = c.sub, size = 10.sp)
             Spacer(Modifier.width(10.dp))
@@ -770,7 +773,7 @@ fun BrainGlyph(color: Color) {
         "....#....")
     Canvas(Modifier.size(15.dp, 13.dp)) {
         val u = size.width / 9f
-        rows.forEachIndexed { y, r -> r.forEachIndexed { x, ch -> if (ch == '#') drawRect(color, Offset(x * u, y * u), Size(u * 0.92f, u * 0.92f)) } }
+        rows.forEachIndexed { y, r -> r.forEachIndexed { x, ch -> if (ch == '#') drawCircle(color, u * 0.5f, Offset(x * u + u / 2f, y * u + u / 2f)) } }
     }
 }
 
@@ -853,7 +856,7 @@ private fun QuoteStrip(q: String, onClear: () -> Unit) {
             Label("Replying to", color = c.accent, size = 9.sp)
             Text(q, maxLines = 2, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.body))
         }
-        Label("×", size = 14.sp, modifier = Modifier.clip(CircleShape).clickable(onClick = onClear).semantics { contentDescription = "Cancel reply" }.padding(12.dp))
+        ActionText("×", size = 14.sp, modifier = Modifier.clip(CircleShape).clickable(onClick = onClear).semantics { contentDescription = "Cancel reply" }.padding(12.dp))
     }
 }
 
@@ -902,7 +905,7 @@ internal fun Welcome(needsSetup: Boolean, onSetup: () -> Unit, onPick: (String) 
 
         if (needsSetup) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.ink).clickable(onClick = onSetup).padding(18.dp)) {
-                Label("Make me smarter · one tap  →", color = c.paper, size = 12.sp)
+                ButtonText("Make me smarter · one tap  →", color = c.paper)
                 Spacer(Modifier.height(4.dp))
                 Text("I already work. Signing in makes me faster and smarter.", style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.paper.copy(alpha = 0.75f)))
             }
@@ -942,8 +945,8 @@ private fun ListeningStrip() {
         Row(verticalAlignment = Alignment.CenterVertically) {
             BlinkLabel("Listening")
             Spacer(Modifier.width(12.dp))
-            Box(Modifier.weight(1f).height(2.dp).background(c.faint)) {
-                Box(Modifier.fillMaxWidth(w).height(2.dp).background(c.accent))
+            Box(Modifier.weight(1f).height(2.dp).clip(BlazeShapes.pill).background(c.faint)) {
+                Box(Modifier.fillMaxWidth(w).height(2.dp).clip(BlazeShapes.pill).background(c.accent))
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -992,11 +995,11 @@ private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(c.ink).clickable { open = !open }.padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Label("Switch brain and continue", color = c.paper, size = 10.sp, modifier = Modifier.weight(1f))
-            Label(if (open) "\u25B2" else "\u25BC", color = c.paper, size = 10.sp)
+            ButtonText(if (open) "\u25B2" else "\u25BC", color = c.paper)
         }
         if (open) Column(Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.bubble).padding(12.dp)) {
             // Fastest option: hand it to the free brains.
-            Label("Auto \u00b7 free brains", color = c.accent, size = 10.sp, modifier = Modifier.fillMaxWidth().clickable {
+            ActionText("Auto \u00b7 free brains", color = c.accent, size = 10.sp, modifier = Modifier.fillMaxWidth().clickable {
                 Settings.providerId = P.AUTO; open = false; onPicked() }.padding(vertical = 10.dp))
             if (providers.isNotEmpty()) {
                 Label("Provider", size = 9.sp, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
@@ -1005,7 +1008,7 @@ private fun BrainSwitcher(spent: String, onPicked: () -> Unit) {
                         val on = p.id == pid
                         Box(Modifier.padding(end = 6.dp).clip(RoundedCornerShape(14.dp)).background(if (on) c.ink else c.paper).clickable { pid = p.id }
                             .padding(horizontal = 10.dp, vertical = 8.dp)) {
-                            Label(p.name.substringBefore(" ("), color = if (on) c.paper else c.ink, size = 9.sp)
+                            ButtonText(p.name.substringBefore(" ("), color = if (on) c.paper else c.ink, size = 13.sp)
                         }
                     }
                 }

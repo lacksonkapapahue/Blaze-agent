@@ -2,6 +2,13 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.24.8: rounded everything (no square UI)
+- **Shape tokens** (`ui/Theme.kt` `BlazeShapes`: xs 8, small 12, medium 16, large 24 dp, pill; Material's shapes mapped to them) and the brand gradient `BlazeBrush` for primary buttons; `BlazeButton` / `BlazeTextField` / `BlazeCard` and a rounded `ui/Kit.kt` (rows, tags, buttons as sentence-case pills, switches, search, segmented). `Modifier.hairline` now follows a rounded shape and clips to it.
+- **Brand mark** is the mascot in a dark circle (was the square pixel "B"); Projects restyled.
+- **Audit**: every screen rounded, Magic Hand included: selected rows, expanded detail panels, the Saved logins / Accounts notices, the model list, design preview, progress bars, onboarding dashes, the memory card's accent bar, the tap highlight over other apps (rounded rect), the edge particles and the orb bin (round dots), widget field and mic.
+- **`ui/NoSquareTest`** fails the build if `RectangleShape`, `CutCornerShape` or `RoundedCornerShape(0…)` appears in app sources (comments ignored; empty allow-list).
+- No database or pref changes.
+
 ## v0.24.7: Magic Hand (point at anything on screen), one Blaze task in Recents
 - **Magic Hand**: the new hand button in the quick assistant panel (hold Home) summons Blaze's mascot as a pointer you move yourself over any app (`phone/MagicHand.kt`). Drag it and the element under the flame tip lights up; the dock at the bottom shows what it's on, the menu, Blaze's answer, the confirm card and Close (`phone/MagicHandUi.kt`, state in `phone/MagicHandState.kt`). **Closing the dock stops everything**: the windows, a question in flight, whatever the hand carries and a teach recording.
 - **Point & ask**: double-tap the hand for the menu (the v0.24.6 browser pointer tiles and its element → action mapping, `BrowserMenuMapper`, plus Carry / Watch / Drop). Ask, Explain, Describe and the like send the element's words and a screenshot crop around it (Magic Hand's windows hidden while it captures) to Blaze; the answer shows in the dock.

@@ -94,6 +94,7 @@ import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.assist.BlazeInteractionService
 import com.blaze.assistant.phone.BlazeAccessibilityService
 import com.blaze.assistant.voice.Voice
+import androidx.compose.foundation.shape.RoundedCornerShape
 
 /** Lets a ComposeView live outside an Activity (assistant session window, floating orb). */
 class OverlayOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
@@ -413,9 +414,8 @@ private fun Scatter(size: androidx.compose.ui.unit.Dp, onGone: () -> Unit) {
         bits.forEach { (ang, sp, k) ->
             val dist = this.size.width * 0.9f * sp * t
             val col = if (k == 0) c.accent else c.ink
-            drawRect(col.copy(alpha = (1f - t).coerceIn(0f, 1f)),
-                Offset(cx + kotlin.math.cos(ang) * dist - px / 2, cy + kotlin.math.sin(ang) * dist - px / 2),
-                androidx.compose.ui.geometry.Size(px * (1f - t * 0.5f), px * (1f - t * 0.5f)))
+            drawCircle(col.copy(alpha = (1f - t).coerceIn(0f, 1f)), px * (1f - t * 0.5f) / 2f,
+                Offset(cx + kotlin.math.cos(ang) * dist, cy + kotlin.math.sin(ang) * dist))
         }
         if (t < 0.25f) drawCircle(c.accent.copy(alpha = 0.3f * (1f - t * 4f)), radius = this.size.width / 2f * (1f + t))
     }
@@ -453,16 +453,15 @@ private fun ParticleBin(shown: Boolean, hot: Boolean) {
             val spread = (1f - heat * 0.75f) * 18.dp.toPx()
             val rad = ringR + (rr - 0.5f) * spread + kotlin.math.sin(time * 2 + ph * 9) * 3.dp.toPx() * (1f - heat)
             val col = if (heat > 0.5f || ph > 0.86f) c.accent else Color.White
-            drawRect(col.copy(alpha = vis * (0.55f + 0.45f * heat)),
-                Offset(cx + kotlin.math.cos(a) * rad - px / 2, cy + kotlin.math.sin(a) * rad - px / 2),
-                androidx.compose.ui.geometry.Size(px, px))
+            drawCircle(col.copy(alpha = vis * (0.55f + 0.45f * heat)), px / 2f,
+                Offset(cx + kotlin.math.cos(a) * rad, cy + kotlin.math.sin(a) * rad))
         }
         // Pixel "×" in the middle (hidden under the orb when it snaps in).
         val cell = 4.dp.toPx()
         for (i in -3..3) {
             for (sgn in listOf(1, -1)) {
-                drawRect((if (heat > 0.5f) c.accent else Color.White).copy(alpha = vis * 0.9f),
-                    Offset(cx + i * cell - cell / 2, cy + sgn * i * cell - cell / 2), androidx.compose.ui.geometry.Size(cell * 0.9f, cell * 0.9f))
+                drawCircle((if (heat > 0.5f) c.accent else Color.White).copy(alpha = vis * 0.9f), cell * 0.45f,
+                    Offset(cx + i * cell, cy + sgn * i * cell))
             }
         }
     }
@@ -472,7 +471,7 @@ private fun ParticleBin(shown: Boolean, hot: Boolean) {
 
 @Composable
 private fun PanelButton(label: String, onClick: () -> Unit) {
-    Box(Modifier.clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp)) {
+    Box(Modifier.clip(BlazeShapes.pill).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp)) {
         Label(label, color = if (label == "Pin orb") LocalBlaze.current.accent else LocalBlaze.current.sub, size = if (label == "×") 16.sp else 10.sp)
     }
 }

@@ -32,6 +32,8 @@ import com.blaze.assistant.agent.Card
 import com.blaze.assistant.agent.Flashcards
 import com.blaze.assistant.agent.Settings
 import com.blaze.assistant.connect.Classroom
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 
 /**
  * Learn (student pack, v0.16.0): flashcard decks with spaced repetition (the tutor skill fills them),
@@ -87,7 +89,7 @@ private fun Review(deck: String, card: Card?, left: Int, reveal0: Boolean, now: 
     val c = LocalBlaze.current
     var reveal by remember(card?.id) { mutableStateOf(reveal0) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Label("\u2190 Decks", color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 12.dp, top = 6.dp, bottom = 6.dp))
+        ActionText("\u2190 Decks", color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 12.dp, top = 6.dp, bottom = 6.dp))
         Spacer(Modifier.weight(1f))
         Label(if (card == null) deck else "$deck \u00b7 $left left", color = c.sub, size = 9.sp, maxLines = 1)
     }
@@ -109,19 +111,19 @@ private fun Review(deck: String, card: Card?, left: Int, reveal0: Boolean, now: 
     }
     Spacer(Modifier.height(12.dp))
     if (!reveal) {
-        Box(Modifier.fillMaxWidth().height(48.dp).background(c.ink).clickable { reveal = true }, contentAlignment = Alignment.Center) {
-            Label("Show answer", color = c.paper, size = 11.sp)
+        Box(Modifier.fillMaxWidth().height(48.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable { reveal = true }, contentAlignment = Alignment.Center) {
+            ButtonText("Show answer", color = Color.White)
         }
     } else Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(Flashcards.AGAIN to "Again", Flashcards.HARD to "Hard", Flashcards.GOOD to "Good", Flashcards.EASY to "Easy").forEach { (g, name) ->
             val main = g == Flashcards.GOOD
-            Column(Modifier.weight(1f).height(56.dp).background(if (main) c.ink else c.paper).hairline(if (main) c.ink else c.hair)
+            Column(Modifier.weight(1f).height(56.dp).background(if (main) c.ink else c.paper, BlazeShapes.medium).hairline(if (main) c.ink else c.hair)
                 .clickable { Flashcards.answer(card.id, g) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Label(name, color = if (main) c.paper else c.ink, size = 10.sp, maxLines = 1)
+                ButtonText(name, color = if (main) c.paper else c.ink, size = 13.sp)
                 Text(Flashcards.label(card, g, now), maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 10.sp, color = if (main) c.paper.copy(alpha = 0.7f) else c.sub))
             }
         }
     }
     Spacer(Modifier.height(10.dp))
-    Label("Delete this card", color = c.weak, size = 9.sp, modifier = Modifier.clickable { Flashcards.deleteCard(card.id) }.padding(vertical = 8.dp))
+    ActionText("Delete this card", color = c.weak, size = 9.sp, modifier = Modifier.clickable { Flashcards.deleteCard(card.id) }.padding(vertical = 8.dp))
 }

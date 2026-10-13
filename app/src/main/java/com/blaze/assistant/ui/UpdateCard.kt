@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -42,7 +43,7 @@ fun UpdateCard() {
     }
     val busy = st is State.Checking || st is State.Downloading || st is State.Installing
     val bad = st is State.Failed
-    Column(Modifier.widthIn(max = 330.dp).fillMaxWidth().background(c.paper).hairline(if (bad) c.accent else c.hair).padding(14.dp)) {
+    Column(Modifier.widthIn(max = 330.dp).fillMaxWidth().background(c.paper, BlazeShapes.medium).hairline(if (bad) c.accent else c.hair).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (busy) Shimmer(title, Modifier.weight(1f)) else Label(title, color = if (bad) c.accent else c.ink, size = 10.sp, modifier = Modifier.weight(1f))
         }
@@ -50,8 +51,8 @@ fun UpdateCard() {
         Text(line, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
         if (pct >= 0) {
             Spacer(Modifier.height(10.dp))
-            Box(Modifier.fillMaxWidth().height(4.dp).background(c.faint)) {
-                Box(Modifier.fillMaxWidth(pct / 100f).height(4.dp).background(c.accent))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(BlazeShapes.pill).background(c.faint)) {
+                Box(Modifier.fillMaxWidth(pct / 100f).height(4.dp).clip(BlazeShapes.pill).background(c.accent))
             }
         }
         val action = when (st) {
@@ -62,7 +63,7 @@ fun UpdateCard() {
         }
         if (action != null) {
             Spacer(Modifier.height(10.dp))
-            Label(action, color = c.accent, size = 10.sp, modifier = Modifier.hairline(c.accent).clickable { Updater.retry(ctx) }.padding(horizontal = 12.dp, vertical = 8.dp))
+            ActionText(action, color = c.accent, size = 10.sp, modifier = Modifier.hairline(c.accent).clickable { Updater.retry(ctx) }.padding(horizontal = 12.dp, vertical = 8.dp))
         }
     }
 }

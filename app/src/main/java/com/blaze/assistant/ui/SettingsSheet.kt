@@ -53,6 +53,7 @@ import com.blaze.assistant.agent.Quota
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.clip
 
 /** Settings, grouped into pages. [page] null = the category list. */
 data class SettingsPage(val id: String, val title: String, val sub: String)
@@ -134,7 +135,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
     Column(Modifier.fillMaxSize().background(c.paper).statusBarsPadding().navigationBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clickable { back() }, contentAlignment = Alignment.Center) {
+            Box(Modifier.size(44.dp).clip(BlazeShapes.pill).clickable { back() }, contentAlignment = Alignment.Center) {
                 Text("←", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
             }
             Text(current?.title ?: "Settings", modifier = Modifier.weight(1f),
@@ -265,7 +266,7 @@ private fun AiPage() {
         val uri = LocalUriHandler.current
         Row(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
             Text("No key yet?", modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-            Label("Get a key →", color = c.accent, size = 11.sp, modifier = Modifier.clickable { uri.openUri(prov.keyPage) })
+            ActionText("Get a key →", color = c.accent, size = 11.sp, modifier = Modifier.clickable { uri.openUri(prov.keyPage) })
         }
     }
     if (pid == Providers.CUSTOM) Field("Service address", base, { base = it; Settings.customBase = it }, "https://…/v1/")
@@ -299,7 +300,7 @@ private fun ControlPage(a11yOn: Boolean, onOpenAccessibility: () -> Unit) {
     Spacer(Modifier.height(12.dp))
     Row(Modifier.fillMaxWidth().hairline(if (a11yOn) c.hair else c.accent).clickable(onClick = onOpenAccessibility).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(6.dp).background(if (a11yOn) c.accent else c.weak))
+        Box(Modifier.size(6.dp).background(if (a11yOn) c.accent else c.weak, BlazeShapes.pill))
         Spacer(Modifier.width(10.dp))
         Text(if (a11yOn) "Accessibility access is on" else "Turn on \u201cBlaze phone control\u201d in Accessibility",
             modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.body))
@@ -332,7 +333,7 @@ private fun CommandsSection() {
                         Text("/" + cmd.name, style = TextStyle(fontFamily = Type.Mono, fontSize = 14.sp, color = c.ink))
                         Text(cmd.prompt.orEmpty().take(80), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                     }
-                    Box(Modifier.clickable { com.blaze.assistant.agent.Commands.deleteCustom(cmd.name); list = com.blaze.assistant.agent.Commands.custom() }
+                    Box(Modifier.clip(BlazeShapes.pill).clickable { com.blaze.assistant.agent.Commands.deleteCustom(cmd.name); list = com.blaze.assistant.agent.Commands.custom() }
                         .padding(12.dp)) { Label("×", size = 14.sp) }
                 }
             }
@@ -346,19 +347,17 @@ private fun CommandsSection() {
     Spacer(Modifier.height(10.dp))
     Field("Prompt", prompt, { prompt = it }, "Turn these notes into a 3-line standup: {input}")
     Spacer(Modifier.height(10.dp))
-    Box(Modifier.fillMaxWidth().height(46.dp).background(c.ink).clickable {
+    Box(Modifier.fillMaxWidth().height(46.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
         com.blaze.assistant.agent.Commands.saveCustom(name, desc, prompt)
         list = com.blaze.assistant.agent.Commands.custom(); name = ""; desc = ""; prompt = ""
-    }, contentAlignment = Alignment.Center) { Label("Save command", color = c.paper, size = 11.sp) }
+    }, contentAlignment = Alignment.Center) { ButtonText("Save command", color = Color.White) }
 }
 
 @Composable
 private fun SquareToggle(on: Boolean) {
     val c = LocalBlaze.current
-    val x by animateDpAsState(if (on) 22.dp else 2.dp, label = "knob")
-    Box(Modifier.width(46.dp).height(26.dp).background(if (on) c.ink else c.faint).hairline(if (on) c.ink else c.hair)) {
-        Box(Modifier.offset(x = x, y = 2.dp).size(22.dp).background(if (on) c.paper else c.weak))
-    }
+    // v0.24.8: round (pill track, round knob, blue when on); the name stays so callers don't change.
+    BlazeSwitchTrack(on, 46.dp, 26.dp)
 }
 
 @Composable
@@ -459,12 +458,12 @@ private fun ProviderPicker(pid: String, onPick: (String) -> Unit) {
                 val on = p.id == pid
                 val hasKey = Settings.keyFor(p.id).isNotBlank()
                 Row(
-                    Modifier.fillMaxWidth().background(if (on) c.faint else c.paper)
+                    Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (on) c.faint else c.paper)
                         .clickable { onPick(p.id); open = false }
                         .hairlineBottom(c.hair).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(Modifier.size(6.dp).background(if (on) c.accent else c.paper))
+                    Box(Modifier.size(6.dp).background(if (on) c.accent else c.paper, BlazeShapes.pill))
                     Spacer(Modifier.width(10.dp))
                     Text(p.name, modifier = Modifier.weight(1f),
                         style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 15.sp, color = c.ink))
@@ -594,7 +593,7 @@ private fun VoiceSection() {
             .clickable { BlazeInteractionService.openPicker(ctx) }.padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.size(6.dp).background(if (isDefault) c.accent else c.weak))
+        Box(Modifier.size(6.dp).background(if (isDefault) c.accent else c.weak, BlazeShapes.pill))
         Spacer(Modifier.width(10.dp))
         Text(
             if (isDefault) "Blaze is your default assistant" else "Make Blaze your default assistant",
@@ -645,10 +644,10 @@ private fun PersonaSection() {
     Label("Personality", modifier = Modifier.padding(bottom = 8.dp))
     Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         com.blaze.assistant.agent.Personas.all.forEach { p ->
-            Row(Modifier.fillMaxWidth().background(if (p.id == pid) c.faint else c.paper)
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(if (p.id == pid) c.faint else c.paper)
                 .clickable { pid = p.id; Settings.personaId = p.id }.padding(horizontal = 14.dp, vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(6.dp).background(if (p.id == pid) c.accent else Color.Transparent))
+                Box(Modifier.size(6.dp).background(if (p.id == pid) c.accent else Color.Transparent, BlazeShapes.pill))
                 Spacer(Modifier.width(10.dp))
                 Text(p.name, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Display, fontSize = 15.sp, color = c.ink))
                 Text(p.blurb, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
@@ -742,7 +741,7 @@ private fun UsageSection() {
     Spacer(Modifier.height(22.dp))
     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
         Label("Usage", modifier = Modifier.weight(1f))
-        Label("Reset", color = c.sub, size = 10.sp, modifier = Modifier.clickable { com.blaze.assistant.agent.Usage.reset() })
+        ActionText("Reset", color = c.sub, size = 10.sp, modifier = Modifier.clickable { com.blaze.assistant.agent.Usage.reset() })
     }
     Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         listOf("Today" to today, "This month" to month).forEach { (k, t) ->
@@ -779,12 +778,12 @@ internal fun ExtraKeys(pid: String) {
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Key ${i + 2}  \u2022\u2022\u2022\u2022${k.takeLast(4)}", modifier = Modifier.weight(1f),
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.ink))
-                Label("Remove", color = c.accent, size = 9.sp, modifier = Modifier.clickable {
+                ActionText("Remove", color = c.accent, size = 9.sp, modifier = Modifier.clickable {
                     com.blaze.assistant.agent.KeyRing.removeExtra(pid, k); tick++ }.padding(6.dp))
             }
         }
         Field("Add another key (optional)", adding, { adding = it }, "Used when the first key runs out", secret = true)
-        if (adding.isNotBlank()) Label("Save this key", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+        if (adding.isNotBlank()) ActionText("Save this key", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
             com.blaze.assistant.agent.KeyRing.add(pid, adding); com.blaze.assistant.agent.KeyRing.clear(pid); adding = ""; tick++
         }.padding(vertical = 8.dp))
     }

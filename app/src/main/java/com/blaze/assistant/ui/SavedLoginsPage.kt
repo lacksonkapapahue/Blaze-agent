@@ -1,5 +1,6 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -53,9 +54,9 @@ fun SavedLoginsPage() {
     }
     sites.forEach { (host, names) ->
         Column(Modifier.fillMaxWidth().padding(bottom = 14.dp).hairline(c.hair)) {
-            Row(Modifier.fillMaxWidth().background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).background(c.faint).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(host, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = c.ink))
-                Label("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Vault.forget(host); tick++ }.padding(6.dp))
+                ActionText("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Vault.forget(host); tick++ }.padding(6.dp))
             }
             names.forEach { name ->
                 val kind = SecureInput.kindOf(name)
@@ -71,12 +72,12 @@ fun SavedLoginsPage() {
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
                     }
                     if (isEditing) {
-                        Label("Save", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
+                        ActionText("Save", color = c.accent, size = 10.sp, modifier = Modifier.clickable {
                             if (draft.isNotEmpty()) Vault.save(host, name, draft); draft = ""; editing = null; tick++ }.padding(10.dp))
-                        Label("Cancel", size = 10.sp, modifier = Modifier.clickable { draft = ""; editing = null }.padding(10.dp))
+                        ActionText("Cancel", size = 10.sp, modifier = Modifier.clickable { draft = ""; editing = null }.padding(10.dp))
                     } else {
-                        Label("Edit", color = c.accent, size = 10.sp, modifier = Modifier.clickable { draft = ""; editing = host to name }.padding(10.dp))
-                        Label("×", size = 12.sp, modifier = Modifier.clickable { Vault.remove(host, name); tick++ }.padding(10.dp))
+                        ActionText("Edit", color = c.accent, size = 10.sp, modifier = Modifier.clickable { draft = ""; editing = host to name }.padding(10.dp))
+                        ActionText("×", size = 12.sp, modifier = Modifier.clickable { Vault.remove(host, name); tick++ }.padding(10.dp))
                     }
                 }
             }
