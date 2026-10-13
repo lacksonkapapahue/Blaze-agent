@@ -101,3 +101,10 @@
 - **Branch:** `pointer-always` from main 0336aba. v0.24.5 = main's v0.24.4 (PR #40, versionCode 76) + 1.
 - **What:** spark-blob pointer (`phone/SparkBlob.kt` = icon geometry, `Pointer.Dot` redrawn: 48 dp blob, 64 dp window, tip marker, pulse while gliding, squish on click), always on until the task ends (no 3 s hide; `Pointer.enabled` is a constant, `show_pointer` ignored), pointer on every gesture path (`BlazeAccessibilityService.pointTo` in type / scroll / swipe / tapNode), manual double-tap check (`labelAt` + `Pointer.checkClick` / `clickLine` / `showCheck`, confirm card for unreadable / ambiguous / risky). Tests `PointerTest`; screenshots 34, 44.
 - **Left (needs the A12):** check the blob is visible over WhatsApp (light and dark), YouTube and a photo; that it stays on screen during a whole run_plan and leaves when the task ends; double-tap the pointer on a button and watch for the "Click '…'?" bubble, and on "Send" for the confirm card. Settings › Phone control: the "Show the pointer" switch is replaced by a one-line note (pref kept, ignored).
+
+## Magic Hand (PR #45, branch magic-hand) — updated 2026-10-14 00:52 CAT
+- Head 18e6ff2 (WIP). main v0.24.6 merged in. Version still 0.24.6/78 (bump to 0.24.7/79 when ready).
+- Done: MagicHandLogic/Menu(BrowserMenuMapper, MagicHandGuard)/Teach/Watch/Screen(OCR)/Watches(WorkManager), TaskDedupe fix, PointerTiles refactor, ML Kit dep.
+- Next, in order: 1) MagicHand controller + overlay (pointer, highlight, dock, close stops all) 2) hand button in AssistPanel 3) point-and-ask -> Agent.send with crop 4) grab actions 5) carry/drop w/ confirm 6) teach capture + review -> SkillPacks.saveWorkflow(tested=false) 7) watches settings page 8) ShotsTest previews + tests 9) bump, push, Build APK green, squash-merge, release.
+- Then PR #44 rounded-everything -> v0.24.8.
+- Next command: cd work/Blaze-agent && git checkout magic-hand && git pull
