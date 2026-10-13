@@ -1,5 +1,15 @@
 # Blaze Gateway changelog
 
+## 0.2.1 (2026-10-14)
+
+- Model picker: the native dropdown (square OS popup) is replaced by a rounded, searchable list
+  grouped by provider, opened with "+ Add a model"; shows context size and a ✓ for models already
+  in the list.
+- No duplicate names: aliases are named from their own ids (Mistral reports its canonical id as
+  the name of every alias), and same-name models of one provider get distinct names.
+- Drops Gemini image-generation ("Nano Banana") and Antigravity agent models from discovery.
+- Higher-contrast labels, id chips, placeholders; wider provider name field.
+
 ## 0.2.0 (2026-10-14)
 
 - Model discovery: every provider's own model-list API (Gemini v1beta/models; OpenAI-style

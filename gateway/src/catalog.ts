@@ -48,7 +48,7 @@ export const LONG_CONTEXT = 120_000;
 // ---------------- classification ----------------
 
 /** Ids that aren't chat models at all (embeddings, speech, images, moderation, …). */
-const NOT_CHAT = /(embed|whisper|tts|speech|audio|transcri|moderation|guard|rerank|imagen|veo|image-gen|image-preview|-image$|-image-|flux|stable-diffusion|dreamshaper|lucid|aqa|lyria|realtime|-live|native-audio|ocr|playai|orpheus|computer-use|robotics|bge-|m2m100|resnet|detr|melotts|nova-3|aura-|smart-turn|translat|-classif|distilbert|bart-large|sdxl|phoenix|leonardo)/;
+const NOT_CHAT = /(embed|whisper|tts|speech|audio|transcri|moderation|guard|rerank|imagen|veo|image-gen|image-preview|-image$|-image-|flux|stable-diffusion|dreamshaper|lucid|aqa|lyria|realtime|-live|native-audio|ocr|playai|orpheus|computer-use|robotics|nano-banana|antigravity|bge-|m2m100|resnet|detr|melotts|nova-3|aura-|smart-turn|translat|-classif|distilbert|bart-large|sdxl|phoenix|leonardo)/;
 
 const VISION = /(vision|-vl\b|-vl-|vl-|pixtral|llava|scout|maverick|gemma-3-(?:4|12|27)b|gemma3|gemini|mistral-small-(?:latest|25|3)|mistral-medium|magistral-medium|ministral-(?:3|8|14)b-25|gpt-4o|gpt-4\.1|qwen2\.5-vl|qwen3-vl|kimi-vl|glm-4\.\dv|uform|internvl|nemotron-nano-12b-v2-vl)/;
 const CODE = /(coder|codestral|devstral|code|gpt-oss|kimi-k2|qwen3-235b|qwen3-480b|glm-4\.[56]|deepseek-(?:v3|r1|chat)|sqlcoder)/;
@@ -119,11 +119,28 @@ export function friendly(base: string, caps: Cap[]): string {
 
 function cleanName(raw: unknown, id: string): string {
   let n = typeof raw === "string" ? raw.trim() : "";
-  if (!n || n === id || n.includes("/") && !n.includes(" ")) return prettify(id);
+  // No name, or a slug instead of a name (Mistral reports its canonical id, e.g. "mistral-medium-2508",
+  // for every alias): name it from this model's own id so aliases stay distinguishable.
+  if (!n || n === id || !n.includes(" ")) return prettify(id);
   n = n.replace(/\s*\(free\)\s*$/i, "");
   const colon = n.indexOf(": ");
   if (colon > 0 && colon < 30) n = n.slice(colon + 2); // OpenRouter "Vendor: Model"
   return n.slice(0, 80);
+}
+
+/** Two models of one provider with the same friendly name: name them from their ids instead,
+ *  and if that still collides, add the id. Keeps the dropdowns unambiguous. */
+export function uniqueNames(models: ModelInfo[]): ModelInfo[] {
+  const count = (list: ModelInfo[]) => {
+    const n = new Map<string, number>();
+    for (const m of list) n.set(`${m.provider}|${m.name}`, (n.get(`${m.provider}|${m.name}`) ?? 0) + 1);
+    return n;
+  };
+  let n = count(models);
+  let out = models.map(m => (n.get(`${m.provider}|${m.name}`)! > 1 ? { ...m, name: friendly(prettify(m.id), m.caps) } : m));
+  n = count(out);
+  out = out.map(m => (n.get(`${m.provider}|${m.name}`)! > 1 ? { ...m, name: `${m.name} · ${m.id}` } : m));
+  return out;
 }
 
 function mk(provider: string, id: string, rawName: unknown, meta: { vision?: boolean; tools?: boolean; context?: number }, free = true): ModelInfo {
@@ -161,7 +178,7 @@ export function parseOpenAIList(provider: string, body: any): ModelInfo[] {
     seen.add(id);
     out.push(mk(provider, id, m.name, meta, free));
   }
-  return out;
+  return uniqueNames(out);
 }
 
 /** Gemini native v1beta/models: {models:[{name:"models/…", displayName, inputTokenLimit, supportedGenerationMethods}]} */
@@ -179,7 +196,7 @@ export function parseGemini(body: any): ModelInfo[] {
     const meta = { context: Number(m.inputTokenLimit) || 0, vision: gemma ? VISION.test(l) : true, tools: !gemma };
     out.push(mk("gemini", id, m.displayName, meta, !PAID_GEMINI.test(l)));
   }
-  return out;
+  return uniqueNames(out);
 }
 
 export interface CfModel { name?: string; id?: string; task?: { name?: string }; properties?: { property_id: string; value: unknown }[]; description?: string }
@@ -204,7 +221,7 @@ export function parseWorkersAI(list: CfModel[]): ModelInfo[] {
     seen.add(id);
     out.push(mk(WORKERS_AI, id, undefined, meta));
   }
-  return out;
+  return uniqueNames(out);
 }
 
 /** Used when the AI binding can't list models (local dev, older runtimes). Ids from Cloudflare's catalogue. */
