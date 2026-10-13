@@ -91,17 +91,21 @@ fun ShellTopBar(
     mode: String, onMode: (String) -> Unit, onLogo: () -> Unit, onSearch: () -> Unit,
     routerOk: Boolean, onRouter: () -> Unit, avatar: String, onAvatar: () -> Unit,
     mood: Mood = Mood.IDLE, viewChip: String = "", onExit: () -> Unit = {},
+    /** v0.24.2: private chat on (ghost filled + "Private" pill) and the ghost button. */
+    private: Boolean = false, onGhost: () -> Unit = {},
 ) {
     val c = LocalBlaze.current
     Column(Modifier.fillMaxWidth().background(c.paper).hairlineBottom(c.hair)) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 10.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).clickable(onClick = onLogo), contentAlignment = Alignment.Center) { BrandMark(mood, 26.dp) }
             Spacer(Modifier.width(6.dp))
-            Pill(mode, onMode)
+            if (private) PrivatePill(onGhost) else Pill(mode, onMode)
             Spacer(Modifier.weight(1f))
             Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onSearch).semantics { contentDescription = "Search" }, contentAlignment = Alignment.Center) { SearchGlyph(c.ink) }
-            Box(Modifier.size(32.dp).clickable(onClick = onRouter), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(if (routerOk) c.accent else c.weak))
+            // v0.24.2: the router status dot is gone (no router dashboard); the ghost opens / leaves a private chat.
+            Box(Modifier.size(40.dp).clip(CircleShape).background(if (private) c.ink else Color.Transparent).clickable(onClick = onGhost)
+                .semantics { contentDescription = if (private) "Leave private chat" else "Private chat" }, contentAlignment = Alignment.Center) {
+                GhostGlyph(if (private) c.paper else c.ink, filled = private, eyes = c.ink)
             }
             Spacer(Modifier.width(4.dp))
             Box(Modifier.size(34.dp).clip(CircleShape).background(c.ink).clickable(onClick = onAvatar).semantics { contentDescription = "Account menu" }, contentAlignment = Alignment.Center) {
@@ -134,6 +138,41 @@ private fun Pill(mode: String, onMode: (String) -> Unit) {
                 Text(label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = if (on) c.paper else c.sub))
             }
         }
+    }
+}
+
+/** v0.24.2: shown instead of Chat | Projects while a private chat is open. Tapping it offers to leave. */
+@Composable
+private fun PrivatePill(onLeave: () -> Unit) {
+    val c = LocalBlaze.current
+    Row(Modifier.clip(RoundedCornerShape(20.dp)).background(c.ink).clickable(onClickLabel = "Leave private chat", onClick = onLeave)
+        .padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        GhostGlyph(c.paper, filled = true, size = 14.dp, eyes = c.ink)
+        Spacer(Modifier.width(6.dp))
+        Text("Private", style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = c.paper))
+    }
+}
+
+/** v0.24.2: the private-chat ghost: a rounded head, wavy hem, two eyes. */
+@Composable
+fun GhostGlyph(color: Color, filled: Boolean = false, size: androidx.compose.ui.unit.Dp = 20.dp, eyes: Color = Color.Black) {
+    Canvas(Modifier.size(size)) {
+        val u = this.size.width / 20f
+        val body = androidx.compose.ui.graphics.Path().apply {
+            moveTo(4f * u, 18f * u)
+            lineTo(4f * u, 9f * u)
+            cubicTo(4f * u, 4.6f * u, 6.9f * u, 2f * u, 10f * u, 2f * u)
+            cubicTo(13.1f * u, 2f * u, 16f * u, 4.6f * u, 16f * u, 9f * u)
+            lineTo(16f * u, 18f * u)
+            quadraticBezierTo(14.6f * u, 16.2f * u, 13.3f * u, 18f * u)
+            quadraticBezierTo(11.65f * u, 16.2f * u, 10f * u, 18f * u)
+            quadraticBezierTo(8.35f * u, 16.2f * u, 6.7f * u, 18f * u)
+            quadraticBezierTo(5.4f * u, 16.2f * u, 4f * u, 18f * u)
+            close()
+        }
+        if (filled) drawPath(body, color) else drawPath(body, color, style = Stroke(1.6f * u, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        val eye = if (filled) eyes else color
+        drawCircle(eye, 1.2f * u, Offset(8f * u, 9f * u)); drawCircle(eye, 1.2f * u, Offset(12f * u, 9f * u))
     }
 }
 

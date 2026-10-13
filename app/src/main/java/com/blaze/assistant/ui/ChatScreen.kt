@@ -177,6 +177,8 @@ fun ChatScreen() {
     var setupPage by rememberSaveable { mutableStateOf(0) }
     val galleryOpen by GalleryUi.open.collectAsState()
     LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
+    // v0.24.2: the dependency gate. Upgraded (and new) users finish whatever required setup is missing; never again once done.
+    var gate by remember { mutableStateOf(!onboard && com.blaze.assistant.setup.SetupGate.shouldGate(ctx)) }
     // Blaze opening one of its own settings pages (setup help).
     val askedPage by com.blaze.assistant.agent.SelfSetup.openPage.collectAsState()
     LaunchedEffect(askedPage) { askedPage?.let { settingsPage = it; com.blaze.assistant.agent.SelfSetup.openPage.value = null } }
@@ -388,6 +390,10 @@ fun ChatScreen() {
 
     if (inCall) { CallScreen(onHangUp = { inCall = false }); return }
     val me = account.user
+    // v0.24.2 private chat: confirm before leaving (the chat is thrown away).
+    val isPrivate by Agent.privateChat.collectAsState()
+    var confirmLeavePrivate by remember { mutableStateOf(false) }
+    BackHandler(enabled = isPrivate && !confirmLeavePrivate) { confirmLeavePrivate = true }
     Box(Modifier.fillMaxSize().background(c.paper)) {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -401,7 +407,9 @@ fun ChatScreen() {
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
                 onAvatar = { avatarMenu = true }, mood = mood,
                 viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
-                onExit = { exitView() })
+                onExit = { exitView() },
+                private = isPrivate,
+                onGhost = { if (isPrivate) confirmLeavePrivate = true else { exitView(); shellMode = "chat"; Agent.enterPrivate() } })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (shellMode == "projects") {
                     val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
@@ -556,8 +564,16 @@ fun ChatScreen() {
             BackHandler { showSearch = false }
         }
         if (galleryOpen) GalleryScreen(onDismiss = { GalleryUi.open.value = false })
+        if (confirmLeavePrivate) androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmLeavePrivate = false },
+            title = { Text(com.blaze.assistant.agent.PrivateChat.LEAVE_TITLE) },
+            text = { Text(com.blaze.assistant.agent.PrivateChat.LEAVE_TEXT) },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { confirmLeavePrivate = false; Agent.leavePrivate() }) { Text("Leave") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmLeavePrivate = false }) { Text("Stay") } })
+        if (!onboard && gate) SetupGateScreen(onOpenPage = { settingsPage = it }, onDone = { gate = false })
         if (onboard) SetupFlow(setupPage) { prompt ->
             onboard = false; setupPage = 0
+            gate = com.blaze.assistant.setup.SetupGate.shouldGate(ctx)
             when {
                 prompt == null -> {}
                 prompt.startsWith("/settings") -> settingsPage = "ai"

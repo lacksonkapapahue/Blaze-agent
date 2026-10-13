@@ -11,6 +11,10 @@ class BlazeApp : Application() {
         com.blaze.assistant.device.CrashLog.init(this)
         com.blaze.assistant.device.CrashLog.shieldMainThread()
         Settings.init(this)
+        // v0.24.2: back up prefs and data once per build before the setup gate (or anything after it) runs.
+        try {
+            if (!com.blaze.assistant.setup.SetupGate.isDone()) com.blaze.assistant.setup.SetupGate.backup(this, com.blaze.assistant.update.Updater.installedCode(this))
+        } catch (_: Throwable) { }
         // v0.23.4: Auto's per-provider model lists and per-model cooldowns (new files, no prefs changes).
         try { com.blaze.assistant.agent.ProviderCatalog.init(filesDir); com.blaze.assistant.agent.ModelMemory.init(filesDir) } catch (_: Exception) { }
         try { com.blaze.assistant.agent.Projects.load() } catch (_: Exception) { }

@@ -230,6 +230,7 @@ object LongChat {
 
         /** Adds history[from until h.length] for [chat]; a shorter history than indexed is re-indexed. */
         @Synchronized fun sync(chat: String, h: JSONArray) {
+            if (PrivateChat.isPrivateId(chat)) return   // v0.24.2: private chats are never indexed
             var from = indexed(chat)
             if (from > h.length()) { forget(chat); from = 0 }
             if (from >= h.length()) return
