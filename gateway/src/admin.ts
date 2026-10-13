@@ -2,6 +2,7 @@
 // Keys go in once and come back only as "••••" + last 4.
 
 import { adminEmails, requireAdmin } from "./auth";
+import { discoverAll, discoverProvider, isRoutable, loadModels, suggestLineup, TASK_INFO } from "./catalog";
 import { encryptKey, last4, masked, MIN_SECRET_LEN, decryptKey } from "./crypto";
 import { ensureSeeded, invalidateConfig, loadConfig, loadMarks, saveMarkStmt, seed } from "./db";
 import { DEFAULT_PLAN, DEFAULT_ROUTES, WORKERS_AI, type Candidate } from "./defaults";
@@ -63,6 +64,7 @@ async function state(env: Env): Promise<Response> {
   const cfg = await loadConfig(env.DB);
   const marks = await loadMarks(env.DB);
   const day = utcDay();
+  const disc = await env.DB.prepare("SELECT provider_id, ran_at, ok, count, source, error FROM discovery").all<any>().catch(() => ({ results: [] as any[] }));
   const [stats, allState, usage] = await env.DB.batch([
     env.DB.prepare("SELECT provider_id, model, ok, fail, ms_total FROM model_stats WHERE day = ?1").bind(day),
     env.DB.prepare("SELECT provider_id, model, state, until, reason, ok_at, fail_at FROM model_state"),
@@ -110,7 +112,8 @@ async function state(env: Env): Promise<Response> {
   void marks;
   return json({
     version: VERSION, now, day, warnings,
-    providers, routes: cfg.routes, tasks: TASKS,
+    providers, routes: cfg.routes, tasks: TASKS, task_info: TASK_INFO,
+    discovery: disc.results,
     plans: cfg.plans, default_plan: DEFAULT_PLAN,
     assignments: [...cfg.assignments.entries()].map(([email, plan]) => ({ email, plan })),
     health, usage_today: (usage!.results as any[])[0] ?? { users: 0, requests: 0, tokens: 0 },
@@ -146,17 +149,82 @@ async function deleteProvider(env: Env, id: string): Promise<Response> {
   return json({ ok: true });
 }
 
+const DUP_WINDOW_MS = 60_000;
+
 async function addKey(req: Request, env: Env, provider: string): Promise<Response> {
   const b = await readJSON(req, 16_384);
   const key = str(b.key, 2000);
   if (key.length < 8 || /\s/.test(key)) throw new HttpError(400, "bad_key", "Paste the whole key (no spaces)");
   const p = await env.DB.prepare("SELECT id FROM providers WHERE id = ?1").bind(provider).first();
   if (!p) throw new HttpError(404, "no_provider", "No such provider");
+  // Same key twice (a double click, a second try): keep the first one. Ciphertexts differ every
+  // time (fresh nonce), so compare the decrypted values; an undecryptable row with the same last 4
+  // added under a minute ago also counts as the same key.
+  const now = Date.now();
+  const existing = await env.DB.prepare("SELECT id, enc, last4, created_at FROM provider_keys WHERE provider_id = ?1 ORDER BY id").bind(provider).all<any>();
+  for (const k of existing.results) {
+    let same = false;
+    try { same = (await decryptKey(env.KEY_ENCRYPTION_SECRET, provider, k.enc)) === key; }
+    catch { same = k.last4 === last4(key) && now - Number(k.created_at) < DUP_WINDOW_MS; }
+    if (same) return json({ ok: true, id: k.id, masked: masked(k.last4), duplicate: true });
+  }
   const enc = await encryptKey(env.KEY_ENCRYPTION_SECRET, provider, key).catch(e => { throw new HttpError(503, "no_secret", String((e as Error).message)); });
   const r = await env.DB.prepare("INSERT INTO provider_keys (provider_id, label, enc, last4, enabled, created_at) VALUES (?1, ?2, ?3, ?4, 1, ?5) RETURNING id")
-    .bind(provider, str(b.label, 60), enc, last4(key), Date.now()).first<{ id: number }>();
+    .bind(provider, str(b.label, 60), enc, last4(key), now).first<{ id: number }>();
   invalidateConfig();
-  return json({ ok: true, id: r?.id, masked: masked(last4(key)) });
+  // A new key: find the provider's models right away (failures are recorded, never fatal here).
+  let discovery: unknown = null;
+  try {
+    const cfg = await loadConfig(env.DB);
+    const prow = cfg.providers.get(provider);
+    if (prow && prow.type !== "workers-ai") discovery = await discoverProvider(env, prow, cfg.keys);
+  } catch { /* the daily run will retry */ }
+  return json({ ok: true, id: r?.id, masked: masked(last4(key)), discovery });
+}
+
+async function discoverOne(env: Env, id: string): Promise<Response> {
+  invalidateConfig();
+  const cfg = await loadConfig(env.DB);
+  const p = cfg.providers.get(id);
+  if (!p) throw new HttpError(404, "no_provider", "No such provider");
+  return json(await discoverProvider(env, p, cfg.keys));
+}
+
+async function discoverEvery(env: Env): Promise<Response> {
+  invalidateConfig();
+  const cfg = await loadConfig(env.DB);
+  return json({ results: await discoverAll(env, [...cfg.providers.values()], cfg.keys) });
+}
+
+async function listModels(env: Env): Promise<Response> {
+  const [models, disc] = await Promise.all([
+    loadModels(env.DB),
+    env.DB.prepare("SELECT provider_id, ran_at, ok, count, source, error FROM discovery").all<any>(),
+  ]);
+  return json({ models: models.filter(m => m.free), discovery: disc.results, task_info: TASK_INFO });
+}
+
+/** POST /admin/api/routes/suggest {apply?: boolean}: best free lineup per task from discovered models. */
+async function suggestRoutes(req: Request, env: Env): Promise<Response> {
+  const b = await readJSON(req, 16_384).catch(() => ({} as Record<string, unknown>));
+  invalidateConfig();
+  const cfg = await loadConfig(env.DB);
+  const models = await loadModels(env.DB);
+  const usable = (id: string) => {
+    const p = cfg.providers.get(id);
+    if (!p || !p.enabled) return false;
+    return p.type === "workers-ai" ? !!env.AI : cfg.keys.some(k => k.provider_id === id && k.enabled);
+  };
+  const routes = suggestLineup(models, usable);
+  const empty = TASKS.filter(t => !routes[t].length);
+  if (b.apply) {
+    const t = Date.now();
+    const stmts = TASKS.filter(task => routes[task].length).map(task => env.DB.prepare("INSERT INTO task_routes (task, models, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (task) DO UPDATE SET models = ?2, updated_at = ?3")
+      .bind(task, JSON.stringify(routes[task]), t));
+    if (stmts.length) await env.DB.batch(stmts);
+    invalidateConfig();
+  }
+  return json({ ok: true, routes, empty, applied: !!b.apply, models: models.length });
 }
 
 async function editKey(req: Request, env: Env, id: number): Promise<Response> {
@@ -246,6 +314,10 @@ async function putRoute(req: Request, env: Env, taskName: string): Promise<Respo
     models.push({ provider, model });
   }
   if (models.length > 40) throw new HttpError(400, "too_many", "At most 40 models per task");
+  const cfg = await loadConfig(env.DB);
+  for (const c of models) if (!isRoutable(c, cfg.paid)) {
+    throw new HttpError(400, "paid_model", c.provider === "openrouter" ? `OpenRouter: only :free models (${c.model})` : `${c.provider} ${c.model} is paid-only`);
+  }
   await env.DB.prepare("INSERT INTO task_routes (task, models, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (task) DO UPDATE SET models = ?2, updated_at = ?3")
     .bind(task, JSON.stringify(models), Date.now()).run();
   invalidateConfig();
@@ -305,6 +377,9 @@ export async function handleAdminApi(req: Request, env: Env, path: string): Prom
   if (path === "/admin/api/test-model" && m === "POST") return testModel(req, env);
   if (path === "/admin/api/cooldowns/clear" && m === "POST") return clearCooldown(req, env);
   if (path === "/admin/api/routes/reset" && m === "POST") return resetRoutes(env);
+  if (path === "/admin/api/routes/suggest" && m === "POST") return suggestRoutes(req, env);
+  if (path === "/admin/api/models" && m === "GET") return listModels(env);
+  if (path === "/admin/api/discover" && m === "POST") return discoverEvery(env);
   if (path === "/admin/api/assignments" && m === "PUT") return putAssignment(req, env);
   let x: RegExpExecArray | null;
   if ((x = /^\/admin\/api\/providers\/([a-z0-9_-]{1,32})$/.exec(path))) {
@@ -315,6 +390,7 @@ export async function handleAdminApi(req: Request, env: Env, path: string): Prom
     }
   }
   if ((x = /^\/admin\/api\/providers\/([a-z0-9_-]{1,32})\/keys$/.exec(path)) && m === "POST") return addKey(req, env, x[1]!);
+  if ((x = /^\/admin\/api\/providers\/([a-z0-9_-]{1,32})\/discover$/.exec(path)) && m === "POST") return discoverOne(env, x[1]!);
   if ((x = /^\/admin\/api\/keys\/(\d+)$/.exec(path))) {
     if (m === "PATCH") return editKey(req, env, Number(x[1]));
     if (m === "DELETE") return deleteKey(env, Number(x[1]));

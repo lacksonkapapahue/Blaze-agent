@@ -3,6 +3,8 @@
 /** The bit of the Workers AI binding the gateway uses. */
 export interface AiBinding {
   run(model: string, inputs: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
+  /** Cloudflare's model catalogue (used by model discovery; optional so test doubles can omit it). */
+  models?(params?: Record<string, unknown>): Promise<unknown[]>;
 }
 
 export interface Env {
@@ -26,4 +28,4 @@ export interface Env {
   ADMIN_TOKEN?: string;
 }
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";

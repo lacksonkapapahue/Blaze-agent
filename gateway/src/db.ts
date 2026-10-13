@@ -32,6 +32,8 @@ export interface Config {
   routes: Record<Task, Candidate[]>;
   plans: PlanLimits[];
   assignments: Map<string, string>;
+  /** "provider|model" of discovered models flagged paid-only: never routed to. */
+  paid: Set<string>;
 }
 
 const CONFIG_TTL_MS = 15_000;
@@ -102,7 +104,13 @@ export async function loadConfig(db: D1Database, now = Date.now()): Promise<Conf
   const plans = (pl!.results as any[]).map(x => ({ id: x.id, price_usd: Number(x.price_usd), daily_requests: Number(x.daily_requests), daily_tokens: Number(x.daily_tokens) }));
   const assignments = new Map<string, string>();
   for (const x of (a!.results as any[])) assignments.set(x.email, x.plan);
-  const cfg: Config = { providers, keys, routes, plans, assignments };
+  const paid = new Set<string>();
+  // Separate from the batch so a database without migration 0002 still routes.
+  try {
+    const pr = await db.prepare("SELECT provider_id, model_id FROM models WHERE free = 0").all<any>();
+    for (const x of pr.results) paid.add(`${x.provider_id}|${x.model_id}`);
+  } catch { /* no models table yet */ }
+  const cfg: Config = { providers, keys, routes, plans, assignments, paid };
   cached = { at: now, db, cfg };
   return cfg;
 }

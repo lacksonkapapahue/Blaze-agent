@@ -1,6 +1,7 @@
 // POST /v1/chat/completions: Blaze account → quota → task → ordered models → failover.
 
 import { requireUser } from "./auth";
+import { isRoutable } from "./catalog";
 import { decryptKey } from "./crypto";
 import { loadConfig, loadMarks, saveMarkStmt, statStmt, keyResultStmt, type Config, type KeyRow } from "./db";
 import type { Candidate } from "./defaults";
@@ -75,7 +76,7 @@ export async function route(
 ): Promise<RouteResult> {
   const now = deps.now ?? Date.now;
   const start = now();
-  const plan = planCandidates(cfg.routes[task] ?? [], p => isUsable(cfg, env, p, start), marks, start);
+  const plan = planCandidates((cfg.routes[task] ?? []).filter(c => isRoutable(c, cfg.paid ?? new Set())), p => isUsable(cfg, env, p, start), marks, start);
   const attempts: Attempt[] = [];
   let badRequests = 0;
   let lastBad: { status: number; message: string } | undefined;
