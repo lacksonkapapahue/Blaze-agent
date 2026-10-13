@@ -2,6 +2,8 @@ package com.blaze.assistant.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -27,6 +29,9 @@ import kotlin.math.sqrt
  * still preview. Painter's algorithm over small meshes per shape; no Android graphics beyond a Canvas.
  */
 object PartsSketch {
+
+    /** v0.23.5: shown when a design has no part that can be drawn. */
+    const val NO_PARTS = "No drawable parts in this design yet. Ask Blaze to add or fix its parts."
 
     data class Face(val pts: List<Pair<Float, Float>>, val depth: Double, val argb: Long)
 
@@ -58,6 +63,8 @@ object PartsSketch {
 
     private fun d(p: JSONObject, k: String, def: Double) = p.optDouble(k, def).let { if (it.isNaN()) def else it }
 
+    private val drawable = setOf("box", "cylinder", "capsule", "cone", "sphere", "torus", "plane")
+
     /** Local-space polygons for a part's shape. */
     private fun mesh(p: JSONObject): List<List<V>> {
         val n = 18
@@ -67,7 +74,9 @@ object PartsSketch {
             val sides = (0 until n).map { i -> listOf(b[i], b[(i + 1) % n], t[(i + 1) % n], t[i]) }
             return sides + listOf(b.reversed(), t)
         }
-        return when (p.optString("shape")) {
+        // v0.23.5: aliases ("Cylinder", "nosecone", "CylinderGeometry") resolve; anything unknown is drawn as a box.
+        val shape = com.blaze.assistant.agent.Designs.normShape(p).first.let { if (it in drawable || it == "group" || it == "custom") it else "box" }
+        return when (shape) {
             "box" -> { val (w, h, dd) = arr(p, "size", doubleArrayOf(100.0, 100.0, 100.0)).map { it / 2 }
                 val c = listOf(V(-w, -h, -dd), V(w, -h, -dd), V(w, h, -dd), V(-w, h, -dd), V(-w, -h, dd), V(w, -h, dd), V(w, h, dd), V(-w, h, dd))
                 listOf(listOf(0, 3, 2, 1), listOf(4, 5, 6, 7), listOf(0, 1, 5, 4), listOf(3, 7, 6, 2), listOf(0, 4, 7, 3), listOf(1, 2, 6, 5)).map { f -> f.map { c[it] } } }
@@ -121,6 +130,8 @@ object PartsSketch {
             for (poly in mesh(p)) {
                 val wp = poly.map(tf)
                 if (wp.size < 3) continue
+                // v0.23.5: a NaN / infinite number (bad size, position, scale) would break the fit; skip that face.
+                if (wp.any { !it.x.isFinite() || !it.y.isFinite() || !it.z.isFinite() }) continue
                 val nrm = (wp[1] - wp[0]).cross(wp[2] - wp[0]).norm()
                 val lit = 0.45 + 0.55 * kotlin.math.abs(nrm.dot(light))
                 val vp = wp.map(::view)
@@ -151,11 +162,17 @@ fun PartsSketchView(spec: JSONObject, modifier: Modifier = Modifier.fillMaxSize(
     val gestures = if (!interactive) Modifier else Modifier.pointerInput(spec.toString()) {
         detectTransformGestures { _, pan, zoom, _ -> view = view.drag(pan.x, pan.y).let { if (zoom != 1f) it.pinch(zoom) else it } }
     }
-    Canvas(modifier.then(gestures)) {
-        val fs = PartsSketch.faces(spec, size.width, size.height, view.yaw, view.pitch, view.zoom)
-        for (f in fs) {
-            val path = Path().apply { moveTo(f.pts[0].first, f.pts[0].second); for (k in 1 until f.pts.size) lineTo(f.pts[k].first, f.pts[k].second); close() }
-            drawPath(path, Color(f.argb.toInt()), style = Fill)
+    // v0.23.5: say so when nothing can be drawn, instead of an empty box.
+    val drawable = remember(spec.toString()) { PartsSketch.faces(spec, 100f, 100f).isNotEmpty() }
+    androidx.compose.foundation.layout.Box(modifier, contentAlignment = androidx.compose.ui.Alignment.Center) {
+        Canvas(Modifier.fillMaxSize().then(gestures)) {
+            val fs = PartsSketch.faces(spec, size.width, size.height, view.yaw, view.pitch, view.zoom)
+            for (f in fs) {
+                val path = Path().apply { moveTo(f.pts[0].first, f.pts[0].second); for (k in 1 until f.pts.size) lineTo(f.pts[k].first, f.pts[k].second); close() }
+                drawPath(path, Color(f.argb.toInt()), style = Fill)
+            }
         }
+        if (!drawable) androidx.compose.material3.Text(PartsSketch.NO_PARTS, color = Color(0xFF9E9E9E),
+            modifier = Modifier.padding(16.dp))
     }
 }

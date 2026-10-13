@@ -70,6 +70,10 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -trimpath -ldflags "-s -w -X main.version=$(grep -oP 'versionName = "\K[^"]+' ../app/build.gradle.kts)" -o ../app/src/main/jniLibs/armeabi-v7a/libblazerouter.so .
           ls -la ../app/src/main/jniLibs/*/libblazerouter.so
 
+      # v0.23.5: the three.js safety net and the 3D starter survive bad objects (node is preinstalled on ubuntu-latest).
+      - name: Design JS tests
+        run: node app/src/test/js/design-safe.test.mjs
+
       - name: Build release APK
         env:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
