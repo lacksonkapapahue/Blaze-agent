@@ -281,6 +281,11 @@
    "name": "blaze-workflow-builder",
    "version": 1,
    "sha256": "85c424f987fd2a5c9d8f8ff7e8a3cb3858331379df149d03f299e771f5c3fd55"
+  },
+  {
+   "name": "blaze-specialists",
+   "version": 1,
+   "sha256": "aa1fe1f4c39eac02602c8fa7dc202c0581d1f59ad7ad46fe7ac3b0889ef7bee5"
   }
  ]
 }

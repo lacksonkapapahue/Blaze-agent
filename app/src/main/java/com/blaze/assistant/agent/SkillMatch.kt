@@ -129,11 +129,12 @@ object SkillMatch {
 
     /** The cached candidate list (re-read at most every 20 s, files can change under us). */
     @Volatile private var cache: Pair<Long, List<Cand>>? = null
-    fun forTurn(query: String): Result = try {
+    fun cached(): List<Cand> = try {
         val now = System.currentTimeMillis()
-        val c = cache?.takeIf { now - it.first < 20_000 }?.second ?: candidates().also { cache = now to it }
-        match(query, c)
-    } catch (_: Throwable) { Result.NONE }
+        cache?.takeIf { now - it.first < 20_000 }?.second ?: candidates().also { cache = now to it }
+    } catch (_: Throwable) { emptyList() }
+
+    fun forTurn(query: String): Result = try { match(query, cached()) } catch (_: Throwable) { Result.NONE }
 
     fun invalidate() { cache = null }
 }

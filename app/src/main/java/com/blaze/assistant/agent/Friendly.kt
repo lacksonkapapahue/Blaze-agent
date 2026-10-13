@@ -91,6 +91,7 @@ object Friendly {
             "slack_channels", "slack_read", "slack_post" -> "Working in Slack"
             "use_skill", "run_skill", "skill_file" -> "Following a saved skill"
             "write_skill", "skill_manage", "install_skill" -> "Saving a skill"
+            "save_workflow" -> "Saving a workflow"
             "search_past_chats" -> "Looking through past chats"
             "search_chat", "read_turn" -> "Looking back through your conversations"
             "memory_search" -> "Checking memory"

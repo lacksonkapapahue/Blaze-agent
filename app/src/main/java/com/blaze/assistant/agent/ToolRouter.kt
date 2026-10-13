@@ -76,8 +76,8 @@ object ToolRouter {
         Group("more", "everything else: watchers, triggers, goals, standing permissions, skill packs and other rarely used tools",
             Regex("(?!)"), { false }),
         Group("extras", "learned skills, helpers working in parallel, screen memory",
-            r("""\b(skill|learn|delegate|parallel|at once|earlier on screen|saw)\b"""),
-            { it in setOf("skill_manage", "delegate", "search_screen_memory", "install_skill", "write_skill", "skill_file") }),
+            r("""\b(skill|learn|delegate|parallel|at once|earlier on screen|saw|workflow)\b"""),
+            { it in setOf("skill_manage", "delegate", "search_screen_memory", "install_skill", "write_skill", "save_workflow", "skill_file") }),
     )
 
     private fun nameOf(t: Any?): String = (t as? JSONObject)?.optJSONObject("function")?.optString("name").orEmpty()
