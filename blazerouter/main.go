@@ -5,16 +5,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"os"
-	"context"
 	"net"
+	"os"
 	"os/signal"
-	"time"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/lacksonkapapahue/blaze-desktop/internal/config"
 	"github.com/lacksonkapapahue/blaze-desktop/internal/router"

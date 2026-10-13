@@ -118,13 +118,13 @@ func PlainText(who string, code int, raw string) string {
 	if len(t) < 160 && !strings.Contains(t, "{") {
 		return who + ": " + t
 	}
-	return who + " couldn't finish that one. Try again, or switch model."
+	return who + " couldn't finish that one (" + short(t) + "). Try again, or switch model."
 }
 
 func short(s string) string {
 	s = strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
-	if len(s) > 80 {
-		s = s[:80] + "…"
+	if len(s) > 160 {
+		s = s[:160] + "…"
 	}
 	return s
 }
