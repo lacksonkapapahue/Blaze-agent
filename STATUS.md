@@ -103,9 +103,18 @@
 - **What:** spark-blob pointer (`phone/SparkBlob.kt` = icon geometry, `Pointer.Dot` redrawn: 48 dp blob, 64 dp window, tip marker, pulse while gliding, squish on click), always on until the task ends (no 3 s hide; `Pointer.enabled` is a constant, `show_pointer` ignored), pointer on every gesture path (`BlazeAccessibilityService.pointTo` in type / scroll / swipe / tapNode), manual double-tap check (`labelAt` + `Pointer.checkClick` / `clickLine` / `showCheck`, confirm card for unreadable / ambiguous / risky). Tests `PointerTest`; screenshots 34, 44.
 - **Left (needs the A12):** check the blob is visible over WhatsApp (light and dark), YouTube and a photo; that it stays on screen during a whole run_plan and leaves when the task ends; double-tap the pointer on a button and watch for the "Click '…'?" bubble, and on "Send" for the confirm card. Settings › Phone control: the "Show the pointer" switch is replaced by a one-line note (pref kept, ignored).
 
-## Magic Hand (PR #45, branch magic-hand) — updated 2026-10-14 00:52 CAT
-- Head 18e6ff2 (WIP). main v0.24.6 merged in. Version still 0.24.6/78 (bump to 0.24.7/79 when ready).
-- Done: MagicHandLogic/Menu(BrowserMenuMapper, MagicHandGuard)/Teach/Watch/Screen(OCR)/Watches(WorkManager), TaskDedupe fix, PointerTiles refactor, ML Kit dep.
-- Next, in order: 1) MagicHand controller + overlay (pointer, highlight, dock, close stops all) 2) hand button in AssistPanel 3) point-and-ask -> Agent.send with crop 4) grab actions 5) carry/drop w/ confirm 6) teach capture + review -> SkillPacks.saveWorkflow(tested=false) 7) watches settings page 8) ShotsTest previews + tests 9) bump, push, Build APK green, squash-merge, release.
-- Then PR #44 rounded-everything -> v0.24.8.
-- Next command: cd work/Blaze-agent && git checkout magic-hand && git pull
+## Magic Hand (v0.24.7, versionCode 79) — done
+- **Merged:** PR #45 (draft, so squashed locally): branch `magic-hand` head e29f819 (green, run 38482225722) → main e03f850; release https://github.com/lacksonkapapahue/Blaze-agent/releases/tag/v0.24.7 (Blaze-v0.24.7.apk, main run 38483149535). PR closed with a note. Screenshots 48–52 reviewed.
+- **What:** `phone/MagicHand.kt` (controller + 3 accessibility-overlay windows: highlight, hand, dock), `MagicHandState.kt` (pure dock state), `MagicHandUi.kt` (dock, menu via `PointerTiles`, grab, teach review, Settings › Advanced › Watches page), hand button `PanelButtons.B.HAND` in `ui/AssistPanel.kt`, `MagicHand.onEvent` from the accessibility service (click / text-changed events added to `accessibility_config.xml`), `MagicHandMenu.mapper` = `BrowserMenuMapper`. Tests `MagicHandTest`, `MagicHandStateTest`.
+- **Left (needs the A12):** summon from hold-Home, drag over WhatsApp / Chrome and check highlight + tip accuracy; double-tap → Ask (crop + answer in dock); circle → OCR; carry → drop into a WhatsApp box (confirm); Teach a 3-step task and check the saved workflow; hold on a price → Watch; check Private captures nothing.
+
+## rounded-everything (v0.24.8, versionCode 80) — done
+- **Merged:** PR #44 (draft, squashed locally): branch `rounded-everything` head bd29b38 (green, run 38484210819) → main 93ee9ad. Release v0.24.8 is created by the main build (https://github.com/lacksonkapapahue/Blaze-agent/releases/tag/v0.24.8). PR closed with a note.
+- **What:** `BlazeShapes` / `BlazeBrush` tokens, rounded kit, mascot brand mark, Projects restyle; audit rounded the remaining square surfaces (selected rows, detail panels, progress bars, dashes, edge / bin particles, tap highlight, memory accent bar); `ui/NoSquareTest` fails on RectangleShape / CutCornerShape / RoundedCornerShape(0…) in app sources.
+
+## rich-replies (v0.24.9, versionCode 81) — in progress
+- **Branch:** `rich-replies` from main 93ee9ad. `ui/RichReplies.kt` (pure: blocks, deck maths, diagram URLs, PROMPT), `ui/RichBlocks.kt` (RichSteps, RichPicture, RichImageText, RichImageGroup/RichDeck with card flip, RichDiagram, `animatorScale()`), wired into `AnswerBody` (`ui/AnswerCards.kt`), prompt line in `Agent.systemPrompt`. Tests `RichRepliesTest`; shots 53, 54.
+- **Next:** CI green on the PR → merge → confirm release v0.24.9.
+
+## Next release
+- **v0.25.0 = "VPN that just works"** (rollover after .9).
