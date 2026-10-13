@@ -67,7 +67,7 @@ internal fun RouterPage(onClassic: () -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         BlazeRouter.RUNNERS.forEach { r ->
             val on = runner == r
-            Box(Modifier.background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair).clickable { runner = r; BlazeRouter.runner = r }
+            Box(Modifier.background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(if (on) c.ink else c.hair).clickable { runner = r; BlazeRouter.runner = r }
                 .padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Label(when (r) { "auto" -> "Auto"; "alpine" -> "Alpine"; "termux" -> "Termux"; else -> "Direct" }, color = if (on) c.paper else c.ink, size = 10.sp)
             }
@@ -83,7 +83,7 @@ internal fun RouterPage(onClassic: () -> Unit) {
             contentAlignment = Alignment.Center) { Label("Open dashboard", color = c.ink, size = 11.sp) }
     }
     Spacer(Modifier.height(8.dp))
-    Box(Modifier.fillMaxWidth().height(46.dp).background(if (using) c.accent else c.paper).hairline(if (using) c.accent else c.hair)
+    Box(Modifier.fillMaxWidth().height(46.dp).background(if (using) c.accent else c.paper, BlazeShapes.medium).hairline(if (using) c.accent else c.hair)
         .clickable(enabled = !busy) { act { if (using) { Settings.providerId = com.blaze.assistant.agent.Providers.AUTO; "Back to Auto." } else BlazeRouter.run(ctx, org.json.JSONObject().put("action", "use")) } },
         contentAlignment = Alignment.Center) {
         Label(if (using) "Blaze answers through BlazeRouter · ${Settings.model}" else "Use as Blaze's brain (${BlazeRouter.DEFAULT_MODEL})", color = if (using) c.paper else c.ink, size = 10.sp)

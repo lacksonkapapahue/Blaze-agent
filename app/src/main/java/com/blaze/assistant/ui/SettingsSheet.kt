@@ -343,7 +343,7 @@ private fun CommandsSection() {
 private fun SquareToggle(on: Boolean) {
     val c = LocalBlaze.current
     val x by animateDpAsState(if (on) 22.dp else 2.dp, label = "knob")
-    Box(Modifier.width(46.dp).height(26.dp).background(if (on) c.ink else c.faint).hairline(if (on) c.ink else c.hair)) {
+    Box(Modifier.width(46.dp).height(26.dp).background(if (on) c.ink else c.faint, BlazeShapes.medium).hairline(if (on) c.ink else c.hair)) {
         Box(Modifier.offset(x = x, y = 2.dp).size(22.dp).background(if (on) c.paper else c.weak))
     }
 }

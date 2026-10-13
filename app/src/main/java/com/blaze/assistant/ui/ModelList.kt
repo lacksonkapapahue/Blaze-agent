@@ -26,7 +26,7 @@ import com.blaze.assistant.agent.ModelCatalog
 @Composable
 fun ModelField(selected: String, open: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(c.raised).hairline(if (open) c.accent else c.hair2).clickable(onClick = onClick)
+    Row(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(if (open) c.accent else c.hair2).clickable(onClick = onClick)
         .heightIn(min = 48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).background(if (selected.isBlank()) c.weak else c.accent)); Spacer(Modifier.width(10.dp))
         Text(selected.ifBlank { "Choose a model" }, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -43,7 +43,7 @@ fun ModelField(selected: String, open: Boolean, onClick: () -> Unit) {
 fun ModelList(models: List<ModelCatalog.Model>, selected: String, query: String, onQuery: (String) -> Unit, onPick: (String) -> Unit) {
     val c = LocalBlaze.current
     val shown = models.filter { query.isBlank() || it.id.contains(query, true) || it.name.contains(query, true) }
-    Column(Modifier.fillMaxWidth().padding(top = 6.dp).background(c.raised).hairline(c.hair2)) {
+    Column(Modifier.fillMaxWidth().padding(top = 6.dp).background(c.raised, BlazeShapes.medium).hairline(c.hair2)) {
         Box(Modifier.padding(8.dp)) { KitSearch(query, onQuery, "Search ${models.size} models") }
         if (shown.isEmpty()) EmptyState("No model matches \u201c$query\u201d", "Try part of the name, like \u201cllama\u201d or \u201cflash\u201d.", mark = false)
         shown.forEach { m ->

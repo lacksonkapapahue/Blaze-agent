@@ -14,6 +14,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -26,6 +27,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -44,7 +46,7 @@ import com.blaze.assistant.agent.Mood
 import kotlinx.coroutines.delay
 import kotlin.random.Random
 
-/** Design tokens lifted from blazeinchue.netlify.app (paper, ink, hairlines, blue accent, square edges). */
+/** Design tokens lifted from blazeinchue.netlify.app (paper, ink, hairlines, blue accent); v0.24.8: every edge rounded. */
 data class BlazeColors(
     val paper: Color,
     val ink: Color,
@@ -109,9 +111,34 @@ fun BlazeTheme(content: @Composable () -> Unit) {
     val dark = when (ThemeMode.mode.value) { "dark" -> true; "light" -> false; else -> sys }
     val c = if (dark) DarkColors else LightColors
     // v0.24.5: Material's own colours mapped to Blaze, so no default purple / lavender can leak into anything Material draws.
-    androidx.compose.material3.MaterialTheme(colorScheme = blazeScheme(dark)) {
+    androidx.compose.material3.MaterialTheme(colorScheme = blazeScheme(dark), shapes = BlazeShapes.material) {
         CompositionLocalProvider(LocalBlaze provides c, content = content)
     }
+}
+
+/**
+ * v0.24.8 "no square UI": the one set of corner radii every Blaze surface uses. Inputs and buttons are pills or [medium],
+ * cards [medium], sheets and dialogs [large], tiny marks (checkboxes, tags inside rows) [small]. Nothing is square:
+ * `ui/NoSquareTest` fails the build if RectangleShape or RoundedCornerShape(0 appears in ui/.
+ */
+object BlazeShapes {
+    val xs = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+    val small = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+    val medium = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+    val large = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+    val pill = androidx.compose.foundation.shape.CircleShape
+    /** Material's own shapes mapped to the same radii, so any Material piece that slips in is rounded too. */
+    val material = androidx.compose.material3.Shapes(
+        extraSmall = xs, small = small, medium = medium, large = large,
+        extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp))
+}
+
+/** Brand gradient for primary buttons: the mascot's warm orange into its blue (v0.24.8). */
+object BlazeBrush {
+    val orange = Color(0xFFFF9A3C)
+    val blue = Color(0xFF4C7DFF)
+    val primary: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(orange, blue))
+    val primarySoft: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(orange.copy(alpha = 0.18f), blue.copy(alpha = 0.18f)))
 }
 
 /** Material colour scheme from Blaze's tokens (v0.24.5): blue primary, orange secondary, Blaze surfaces; never purple. */
@@ -147,7 +174,7 @@ fun blazeScheme(dark: Boolean): androidx.compose.material3.ColorScheme {
 fun ThemeButton(modifier: Modifier = Modifier) {
     val c = LocalBlaze.current
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    Box(modifier.size(38.dp).hairline(c.hair).combinedClickable(
+    Box(modifier.size(38.dp).hairline(c.hair, BlazeShapes.pill).combinedClickable(
         onClick = { ThemeMode.set(if (c.dark) "light" else "dark") },
         onLongClick = { ThemeMode.set("system"); android.widget.Toast.makeText(ctx, "Following your phone's theme", android.widget.Toast.LENGTH_SHORT).show() }
     ), contentAlignment = Alignment.Center) {
@@ -191,7 +218,12 @@ fun Modifier.hairlineTop(color: Color) = drawBehind {
     drawLine(color, Offset(0f, 0.5f), Offset(size.width, 0.5f), 1f)
 }
 
-fun Modifier.hairline(color: Color) = border(1.dp, color)
+/**
+ * 1dp outline that follows a rounded [shape] (v0.24.8: [BlazeShapes.medium] by default, never square) and clips what comes
+ * after it (content, ripples) to the same shape. Give the background before it the same shape: `.background(x, shape)`.
+ */
+fun Modifier.hairline(color: Color, shape: androidx.compose.ui.graphics.Shape = BlazeShapes.medium) =
+    clip(shape).border(1.dp, color, shape)
 
 private data class Dot(val x: Float, val y: Float, val r: Float, val vx: Float, val vy: Float)
 
@@ -235,39 +267,16 @@ fun ParticleField(mood: Mood, modifier: Modifier = Modifier) {
     }
 }
 
-private val bMask = listOf(
-    "XXXX.", "X...X", "X...X", "XXXX.", "X...X", "X...X", "XXXX."
-)
-
 /**
- * Brand mark: an ink square with a pixel "B". While Blaze works the pixels scatter and
- * re-form like the site's pixel theme transition.
+ * Brand mark (v0.24.8): Blaze's mascot in a dark circle (it used to be a square with a pixel "B"). While Blaze works a
+ * thin orange-to-blue ring spins around it.
  */
 @Composable
 fun BrandMark(mood: Mood, size: Dp, modifier: Modifier = Modifier) {
-    val c = LocalBlaze.current
     val busy = mood != Mood.IDLE
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(busy) {
-        if (busy) while (true) { delay(110); tick++ } else tick = 0
-    }
-    Box(modifier.size(size).background(c.ink), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.size(size * 0.6f)) {
-            val px = this.size.width / 7f
-            val ox = (this.size.width - px * 5) / 2f
-            val oy = (this.size.height - px * 7) / 2f
-            val rnd = Random(tick)
-            for (r in 0 until 7) for (col in 0 until 5) {
-                val on = bMask[r][col] == 'X'
-                val show = if (busy) (if (on) rnd.nextFloat() > 0.25f else rnd.nextFloat() > 0.88f) else on
-                if (show) {
-                    val accentPx = busy && rnd.nextFloat() > 0.85f
-                    drawRect(
-                        if (accentPx) c.accent else c.paper,
-                        Offset(ox + col * px, oy + r * px), Size(px * 0.92f, px * 0.92f)
-                    )
-                }
-            }
-        }
+    Box(modifier.size(size).clip(BlazeShapes.pill).background(Color(com.blaze.assistant.phone.Mascot.ICON_BG), BlazeShapes.pill),
+        contentAlignment = Alignment.Center) {
+        if (busy) MascotMark(size, spin = true)
+        else MascotMark(size, modifier = Modifier.requiredSize(size * 1.2f))
     }
 }

@@ -123,7 +123,7 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
 @Composable
 private fun Choice(title: String, sub: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
+    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised, BlazeShapes.medium).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))
@@ -131,7 +131,7 @@ private fun Choice(title: String, sub: String, on: Boolean, onClick: () -> Unit)
             Text(sub, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
         }
         Spacer(Modifier.width(12.dp))
-        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(20.dp).background(if (on) c.accent else c.paper, BlazeShapes.medium).hairline(if (on) c.accent else c.hair2), contentAlignment = Alignment.Center) {
             if (on) Text("\u2713", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.onAccent))
         }
     }

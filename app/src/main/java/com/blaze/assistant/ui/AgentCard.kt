@@ -46,7 +46,7 @@ fun AgentCard(id: String) {
         else -> "Stopped"
     }
     val bad = bg.status == BgAgents.FAILED
-    Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().background(c.paper).hairline(if (bg.waiting || bad) c.accent else c.hair).padding(14.dp)) {
+    Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().background(c.paper, BlazeShapes.medium).hairline(if (bg.waiting || bad) c.accent else c.hair).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Label("${bg.id} · AGENT" + if (bg.plan) " · PLAN" else "", color = c.accent, size = 9.sp)
             Spacer(Modifier.weight(1f))
@@ -109,7 +109,7 @@ fun ModeBar() {
 @Composable
 private fun Chip(text: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.background(if (on) c.accent else c.paper).hairline(if (on) c.accent else c.hair).clickable(onClick = onClick)
+    Box(Modifier.background(if (on) c.accent else c.paper, BlazeShapes.medium).hairline(if (on) c.accent else c.hair).clickable(onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 5.dp)) {
         Label(text, color = if (on) c.paper else c.ink, size = 9.sp)
     }

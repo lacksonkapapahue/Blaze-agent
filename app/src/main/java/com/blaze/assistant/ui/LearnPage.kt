@@ -115,7 +115,7 @@ private fun Review(deck: String, card: Card?, left: Int, reveal0: Boolean, now: 
     } else Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(Flashcards.AGAIN to "Again", Flashcards.HARD to "Hard", Flashcards.GOOD to "Good", Flashcards.EASY to "Easy").forEach { (g, name) ->
             val main = g == Flashcards.GOOD
-            Column(Modifier.weight(1f).height(56.dp).background(if (main) c.ink else c.paper).hairline(if (main) c.ink else c.hair)
+            Column(Modifier.weight(1f).height(56.dp).background(if (main) c.ink else c.paper, BlazeShapes.medium).hairline(if (main) c.ink else c.hair)
                 .clickable { Flashcards.answer(card.id, g) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Label(name, color = if (main) c.paper else c.ink, size = 10.sp, maxLines = 1)
                 Text(Flashcards.label(card, g, now), maxLines = 1, style = TextStyle(fontFamily = Type.Mono, fontSize = 10.sp, color = if (main) c.paper.copy(alpha = 0.7f) else c.sub))

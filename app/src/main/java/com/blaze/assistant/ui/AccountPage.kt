@@ -154,6 +154,6 @@ private fun Note(text: String, top: Int = 0) {
 @Composable
 private fun AccountButton(text: String, primary: Boolean = true, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.fillMaxWidth().height(44.dp).background(if (primary) c.ink else c.paper).hairline(if (primary) c.ink else c.hair)
+    Box(Modifier.fillMaxWidth().height(44.dp).background(if (primary) c.ink else c.paper, BlazeShapes.medium).hairline(if (primary) c.ink else c.hair)
         .clickable(onClick = onClick), contentAlignment = Alignment.Center) { Label(text, color = if (primary) c.paper else c.ink, size = 11.sp) }
 }

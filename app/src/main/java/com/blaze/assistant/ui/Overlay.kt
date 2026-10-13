@@ -522,7 +522,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                 // shoved the panel under the status bar).
                 .statusBarsPadding().navigationBarsPadding()
                 .padding(10.dp)
-                .background(c.paper).hairline(c.hair)
+                .background(c.paper, BlazeShapes.medium).hairline(c.hair)
         ) {
             Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -585,7 +585,7 @@ fun AssistPanel(autoListen: Boolean, onClose: () -> Unit, onPin: () -> Unit, onE
                 }
                 Spacer(Modifier.width(8.dp))
                 val micOn = voice != Voice.State.IDLE
-                Box(Modifier.size(46.dp).background(if (micOn) c.accent else c.paper).hairline(if (micOn) c.accent else c.hair)
+                Box(Modifier.size(46.dp).background(if (micOn) c.accent else c.paper, BlazeShapes.medium).hairline(if (micOn) c.accent else c.hair)
                     .clickable {
                         note = ""; touched = true
                         when (voice) {

@@ -49,7 +49,7 @@ internal fun SellerPage(digest0: Boolean? = null) {
     if (swatches.isNotEmpty()) Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         swatches.take(6).forEach { h ->
             val col = runCatching { Color(android.graphics.Color.parseColor(h)) }.getOrNull()
-            if (col != null) Box(Modifier.size(28.dp).background(col).hairline(c.hair))
+            if (col != null) Box(Modifier.size(28.dp).background(col, BlazeShapes.medium).hairline(c.hair))
         }
     }
     Field("Store or brand name", name, { name = it; saved = "" }, "HomeGlow")

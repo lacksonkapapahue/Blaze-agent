@@ -172,7 +172,7 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
         Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf(false to "Phone", true to "Desktop").forEach { (w, label) ->
                 val on = wide == w
-                Box(Modifier.background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair).clickable { wide = w }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Box(Modifier.background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(if (on) c.ink else c.hair).clickable { wide = w }.padding(horizontal = 10.dp, vertical = 6.dp)) {
                     Label(label, color = if (on) c.paper else c.ink, size = 9.sp)
                 }
                 Spacer(Modifier.width(6.dp))

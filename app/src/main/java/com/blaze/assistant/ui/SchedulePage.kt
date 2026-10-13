@@ -50,7 +50,7 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
 
     PageHead("Schedule", "Routines", "Things Blaze does on a schedule, even when the app is closed. Or just ask: \u201cevery weekday at 7, brief me on my calendar\u201d.")
     if (adding) {
-        Column(Modifier.fillMaxWidth().background(c.raised).hairline(c.accent).padding(14.dp)) {
+        Column(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(c.accent).padding(14.dp)) {
             Label("New routine", size = 10.sp, color = c.accent, modifier = Modifier.padding(bottom = 12.dp))
             Field("Name", name, { name = it }, "Morning brief")
             Field("What should Blaze do?", prompt, { prompt = it }, "Summarise today's calendar and unread texts")
@@ -59,7 +59,7 @@ fun SchedulePage(list0: List<Routine>? = null, adding0: Boolean = false, now: Lo
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("M", "T", "W", "T", "F", "S", "S").forEachIndexed { i, d ->
                     val on = days and (1 shl i) != 0
-                    Box(Modifier.weight(1f).height(38.dp).background(if (on) c.ink else c.paper).hairline(if (on) c.ink else c.hair2)
+                    Box(Modifier.weight(1f).height(38.dp).background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(if (on) c.ink else c.hair2)
                         .clickable { days = days xor (1 shl i) }, contentAlignment = Alignment.Center) {
                         Text(d, style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, color = if (on) c.paper else c.sub))
                     }

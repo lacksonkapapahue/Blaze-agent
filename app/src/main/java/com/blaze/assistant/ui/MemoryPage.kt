@@ -198,7 +198,7 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
     val catStyle = TextStyle(fontFamily = Type.Mono, fontSize = 10.sp, letterSpacing = 0.14.em, fontWeight = FontWeight.Medium)
     fun layout(t: String, st: TextStyle): TextLayoutResult = layouts.getOrPut(t + "|" + st.fontSize) { measurer.measure(t, st, maxLines = 1) }
 
-    Box(Modifier.fillMaxWidth().height(height).background(c.paper).hairline(c.hair2).clipToBounds()
+    Box(Modifier.fillMaxWidth().height(height).background(c.paper, BlazeShapes.medium).hairline(c.hair2).clipToBounds()
         .onSizeChanged { if (it != size) { size = it; fit() } }) {
         Canvas(Modifier.fillMaxSize()
             .pointerInput(graph) {
@@ -343,7 +343,7 @@ fun MemoryGraphView(graph: MemGraph, selectedId: Long, matches: Set<Long>?, heig
         // Count (top left), tools (top right), hint (bottom left).
         Label("${graph.nodes.size} ${if (graph.nodes.size == 1) "memory" else "memories"} \u00b7 ${graph.edges.size} links", size = 9.sp, color = c.weak,
             maxLines = 1, modifier = Modifier.align(Alignment.TopStart).padding(12.dp))
-        Row(Modifier.align(Alignment.TopEnd).padding(10.dp).background(c.raised).hairline(c.hair2)) {
+        Row(Modifier.align(Alignment.TopEnd).padding(10.dp).background(c.raised, BlazeShapes.medium).hairline(c.hair2)) {
             GraphTool("+") { cam.z = (cam.z * 1.3f).coerceAtMost(6f); camTick++; touch() }
             Box(Modifier.width(1.dp).height(30.dp).background(c.hair))
             GraphTool("\u2212") { cam.z = (cam.z / 1.3f).coerceAtLeast(0.15f); camTick++; touch() }
@@ -431,7 +431,7 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
     val idx = graph.nodes.firstOrNull { it.mem.id == m.id }?.i ?: -1
     val links = if (idx >= 0) graph.neighbours(idx) else emptyList()
 
-    Row(Modifier.fillMaxWidth().background(c.raised).hairline(c.hair2)
+    Row(Modifier.fillMaxWidth().background(c.raised, BlazeShapes.medium).hairline(c.hair2)
         .drawBehind { drawRect(c.accent, size = Size(3.dp.toPx(), size.height)) }) {
         Column(Modifier.weight(1f).padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 14.dp)) {
             Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -444,7 +444,7 @@ fun MemoryDetail(m: Mind.Mem, graph: MemGraph, onSelect: (Long) -> Unit, onClose
             Text(m.subject.ifBlank { "Memory" }, modifier = Modifier.padding(end = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, lineHeight = 23.sp, letterSpacing = (-0.01).em, color = c.ink))
             Spacer(Modifier.height(10.dp))
-            Box(Modifier.fillMaxWidth().padding(end = 8.dp).background(c.paper).hairline(c.hair2).heightIn(min = 84.dp).padding(12.dp)) {
+            Box(Modifier.fillMaxWidth().padding(end = 8.dp).background(c.paper, BlazeShapes.medium).hairline(c.hair2).heightIn(min = 84.dp).padding(12.dp)) {
                 BasicTextField(text, { text = it; note = "" }, cursorBrush = SolidColor(c.accent),
                     textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 21.sp, color = c.ink), modifier = Modifier.fillMaxWidth())
             }

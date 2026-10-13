@@ -232,7 +232,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
 @Composable
 private fun SetupRow(title: String, sub: String, on: Boolean, working: Boolean = false, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
+    Row(Modifier.fillMaxWidth().background(if (on) c.accentSoft else c.raised, BlazeShapes.medium).hairline(if (on) c.accent else c.hair2).clickable(onClick = onClick).padding(16.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = if (on) c.accent else c.ink))

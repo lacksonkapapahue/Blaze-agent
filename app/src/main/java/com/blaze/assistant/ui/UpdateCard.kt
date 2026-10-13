@@ -42,7 +42,7 @@ fun UpdateCard() {
     }
     val busy = st is State.Checking || st is State.Downloading || st is State.Installing
     val bad = st is State.Failed
-    Column(Modifier.widthIn(max = 330.dp).fillMaxWidth().background(c.paper).hairline(if (bad) c.accent else c.hair).padding(14.dp)) {
+    Column(Modifier.widthIn(max = 330.dp).fillMaxWidth().background(c.paper, BlazeShapes.medium).hairline(if (bad) c.accent else c.hair).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (busy) Shimmer(title, Modifier.weight(1f)) else Label(title, color = if (bad) c.accent else c.ink, size = 10.sp, modifier = Modifier.weight(1f))
         }

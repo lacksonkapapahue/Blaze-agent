@@ -47,7 +47,7 @@ internal fun V18Note(text: String, top: Int = 0) {
 @Composable
 internal fun V18Button(text: String, primary: Boolean = true, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Box(modifier.height(44.dp).background(if (primary) c.ink else c.paper).hairline(if (primary) c.ink else c.hair)
+    Box(modifier.height(44.dp).background(if (primary) c.ink else c.paper, BlazeShapes.medium).hairline(if (primary) c.ink else c.hair)
         .clickable(onClick = onClick), contentAlignment = Alignment.Center) { Label(text, color = if (primary) c.paper else c.ink, size = 11.sp) }
 }
 
@@ -115,7 +115,7 @@ fun DevicePage() {
     Label("Chat text size", modifier = Modifier.padding(bottom = 8.dp))
     Row(Modifier.fillMaxWidth()) {
         listOf(0.9f to "S", 1f to "M", 1.15f to "L", 1.3f to "XL").forEach { (v, l) ->
-            Box(Modifier.weight(1f).height(40.dp).background(if (scale == v) c.ink else c.paper).hairline(c.hair).clickable { scale = v; Settings.textScale = v },
+            Box(Modifier.weight(1f).height(40.dp).background(if (scale == v) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair).clickable { scale = v; Settings.textScale = v },
                 contentAlignment = Alignment.Center) { Label(l, color = if (scale == v) c.paper else c.ink, size = 10.sp) }
         }
     }
@@ -168,7 +168,7 @@ fun TerminalPage() {
     Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         sessions.forEach { s ->
             val on = !showBlaze && s == sess
-            Row(Modifier.padding(end = 6.dp).height(34.dp).background(if (on) c.ink else c.paper).hairline(c.hair)
+            Row(Modifier.padding(end = 6.dp).height(34.dp).background(if (on) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair)
                 .clickable { showBlaze = false; T.select(s) }.padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Label(s.title, color = if (on) c.paper else c.ink, size = 10.sp)
                 if (sessions.size > 1) Label("  ×", color = if (on) c.paper else c.weak, size = 10.sp, modifier = Modifier.clickable { T.closeSession(s) })
@@ -176,12 +176,12 @@ fun TerminalPage() {
         }
         Box(Modifier.padding(end = 6.dp).height(34.dp).hairline(c.hair).clickable { showBlaze = false; T.newSession(mode) }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
             Label("+", color = c.accent, size = 12.sp) }
-        Box(Modifier.height(34.dp).background(if (showBlaze) c.accent else c.paper).hairline(c.accent).clickable { showBlaze = true }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.height(34.dp).background(if (showBlaze) c.accent else c.paper, BlazeShapes.medium).hairline(c.accent).clickable { showBlaze = true }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
             Label("Blaze", color = if (showBlaze) c.paper else c.accent, size = 10.sp) }
     }
     if (!showBlaze) Row(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
         listOf("phone" to "Phone shell", "linux" to "Linux (Alpine)").forEach { (id, label) ->
-            Box(Modifier.weight(1f).height(40.dp).background(if (mode == id) c.ink else c.paper).hairline(c.hair)
+            Box(Modifier.weight(1f).height(40.dp).background(if (mode == id) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair)
                 .clickable { if (id == "phone" || linuxReady) T.switchMode(id) }, contentAlignment = Alignment.Center) {
                 Label(label, color = if (mode == id) c.paper else if (id == "linux" && !linuxReady) c.weak else c.ink, size = 10.sp) }
         }
@@ -330,7 +330,7 @@ fun ProactivePage() {
     Label("Check every", modifier = Modifier.padding(bottom = 8.dp))
     Row(Modifier.fillMaxWidth()) {
         listOf(15, 30, 45, 90, 180).forEach { m ->
-            Box(Modifier.weight(1f).height(40.dp).background(if (every == m) c.ink else c.paper).hairline(c.hair).clickable { every = m; P.everyMin = m },
+            Box(Modifier.weight(1f).height(40.dp).background(if (every == m) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair).clickable { every = m; P.everyMin = m },
                 contentAlignment = Alignment.Center) { Label(if (m < 60) "${m}m" else "${m / 60}h", color = if (every == m) c.paper else c.ink, size = 10.sp) }
         }
     }
@@ -419,7 +419,7 @@ fun SpecialistsPage() {
         Row(Modifier.fillMaxWidth()) {
             row.forEach { g ->
                 val sel = g in groups
-                Box(Modifier.weight(1f).height(38.dp).background(if (sel) c.ink else c.paper).hairline(c.hair)
+                Box(Modifier.weight(1f).height(38.dp).background(if (sel) c.ink else c.paper, BlazeShapes.medium).hairline(c.hair)
                     .clickable { groups = if (sel) groups - g else groups + g }, contentAlignment = Alignment.Center) {
                     Label(g, color = if (sel) c.paper else c.ink, size = 10.sp) }
             }
@@ -454,7 +454,7 @@ fun VoiceExtras() {
     Label("\u201cHey Blaze\u201d sensitivity", modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
     Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         listOf("0.94" to "Strict", "0.88" to "Normal", "0.78" to "Easy").forEach { (v, l) ->
-            Box(Modifier.weight(1f).height(40.dp).background(if (conf == v) LocalBlaze.current.ink else LocalBlaze.current.paper).hairline(LocalBlaze.current.hair)
+            Box(Modifier.weight(1f).height(40.dp).background(if (conf == v) LocalBlaze.current.ink else LocalBlaze.current.paper, BlazeShapes.medium).hairline(LocalBlaze.current.hair)
                 .clickable { conf = v; Settings.setStr("wake_conf", v) }, contentAlignment = Alignment.Center) {
                 Label(l, color = if (conf == v) LocalBlaze.current.paper else LocalBlaze.current.ink, size = 10.sp) }
         }
