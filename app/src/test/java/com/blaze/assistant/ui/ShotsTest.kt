@@ -662,4 +662,77 @@ class ShotsTest {
             AutoPoolPanel(rows, refreshing = false, onRefresh = {}, models = { if (it == "nvidia") nim else emptyList() }, initiallyOpen = "nvidia")
         }
     }
+    // v0.24.7 Magic Hand: the dock over an app, the menu (shared pointer tiles), grab, teach review and the watches page.
+    private fun handState() = com.blaze.assistant.phone.MagicHandState.point(com.blaze.assistant.phone.MagicHandState.start(false),
+        "K1,299", com.blaze.assistant.phone.MagicHandLogic.Kind.VALUE, "Jumia")
+
+    @Composable private fun FakeApp(content: @Composable () -> Unit) {
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0xFFF4F4F4))) {
+            Column(Modifier.padding(start = 20.dp, top = 48.dp, end = 20.dp)) {
+                Text("Galaxy A15 128GB", style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = androidx.compose.ui.graphics.Color(0xFF222222)))
+                Spacer(Modifier.height(8.dp))
+                Text("K1,299", Modifier.background(androidx.compose.ui.graphics.Color(0x22FF9A3C)).padding(4.dp),
+                    style = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.Bold, color = androidx.compose.ui.graphics.Color(0xFFE05A00)))
+                Spacer(Modifier.height(6.dp))
+                Text("In stock · free delivery in Lusaka", style = TextStyle(fontSize = 14.sp, color = androidx.compose.ui.graphics.Color(0xFF555555)))
+            }
+            Box(Modifier.padding(start = 96.dp, top = 112.dp)) { com.blaze.assistant.phone.MagicHandGlyph(64, lit = true, carrying = false) }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                CompositionLocalProvider(LocalBlaze provides DarkColors) { content() }
+            }
+        }
+    }
+
+    @Test fun magicHandDock() = shot("48-magic-hand-dock") {
+        FakeApp {
+            Column {
+                com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.answered(
+                    com.blaze.assistant.phone.MagicHandState.asking(handState(), "K1,299"),
+                    "That's the **price** of the Galaxy A15: K1,299, about average for Lusaka right now."), com.blaze.assistant.phone.DockCalls())
+                com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.confirm(
+                    com.blaze.assistant.phone.MagicHandState.carry(handState(), "Meet at 6 by the gate"),
+                    com.blaze.assistant.phone.MagicHandLogic.Intent.DROP, "Message"), com.blaze.assistant.phone.DockCalls())
+            }
+        }
+    }
+
+    @Test fun magicHandMenu() = shot("49-magic-hand-menu") {
+        FakeApp {
+            com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.menu(handState(), "K1,299",
+                com.blaze.assistant.phone.MagicHandLogic.Kind.VALUE, "Jumia"), com.blaze.assistant.phone.DockCalls())
+        }
+    }
+
+    @Test fun magicHandGrab() = shot("50-magic-hand-grab") {
+        FakeApp {
+            com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.grabbed(handState(),
+                "Galaxy A15 128GB\nK1,299\nIn stock · free delivery in Lusaka", "Jumia"), com.blaze.assistant.phone.DockCalls())
+        }
+    }
+
+    @Test fun magicHandTeachReview() = shot("51-magic-hand-teach-review") {
+        FakeApp {
+            val steps = listOf(
+                com.blaze.assistant.phone.MagicHandTeach.Step(com.blaze.assistant.phone.MagicHandTeach.Kind.OPEN_APP, "com.whatsapp", app = "WhatsApp"),
+                com.blaze.assistant.phone.MagicHandTeach.Step(com.blaze.assistant.phone.MagicHandTeach.Kind.TAP, "com.whatsapp", app = "WhatsApp", label = "Mum", viewId = "com.whatsapp:id/conversations_row_contact_name"),
+                com.blaze.assistant.phone.MagicHandTeach.Step(com.blaze.assistant.phone.MagicHandTeach.Kind.TYPE, "com.whatsapp", app = "WhatsApp", label = "Message", text = "On my way"),
+                com.blaze.assistant.phone.MagicHandTeach.Step(com.blaze.assistant.phone.MagicHandTeach.Kind.TAP, "com.whatsapp", app = "WhatsApp", label = "Send"),
+            ).map(com.blaze.assistant.phone.MagicHandTeach::line)
+            com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.review(
+                com.blaze.assistant.phone.MagicHandState.teach(handState()), steps, "Tell Mum I'm on my way"), com.blaze.assistant.phone.DockCalls())
+        }
+    }
+
+    @Test fun magicHandWatches() = shot("52-magic-hand-watches", dark = true) {
+        val now = 1_760_000_000_000L
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
+            com.blaze.assistant.phone.MagicHandWatchesPage(listOf(
+                com.blaze.assistant.phone.MagicHandWatch.Watch("1", "com.jumia.android", "Jumia", "Price", listOf(0, 3, 1), "", "", "K1,099", now - 86_400_000, now - 20 * 60_000, now - 20 * 60_000, "K1,299"),
+                com.blaze.assistant.phone.MagicHandWatch.Watch("2", "com.fotmob", "FotMob", "Score", listOf(0, 1), "", "", "2 - 1", now - 3_600_000, now - 3 * 3_600_000),
+                com.blaze.assistant.phone.MagicHandWatch.Watch("3", "com.dhl", "DHL", "Status", listOf(2), "", "", "Out for delivery", now - 60_000),
+            ), now = now)
+            Spacer(Modifier.height(24.dp))
+            com.blaze.assistant.phone.MagicHandWatchesPage(emptyList(), now = now)
+        }
+    }
 }

@@ -23,7 +23,8 @@ object DefaultHandMapper : ElementActionMapper {
 }
 
 object MagicHandMenu {
-    @Volatile var mapper: ElementActionMapper = DefaultHandMapper
+    /** v0.24.7: the shared v0.24.6 browser pointer mapping, so both pointers offer the same menu. */
+    @Volatile var mapper: ElementActionMapper = BrowserMenuMapper
 
     /** The menu for [kind], from the current mapper, with the hand-only actions kept and the result capped. */
     fun actions(kind: Kind, carrying: Boolean): List<Action> = withHandActions(mapper.actionsFor(kind, carrying), kind, carrying)
@@ -81,8 +82,8 @@ object BrowserMenuMapper : ElementActionMapper {
     override fun actionsFor(kind: Kind, carrying: Boolean): List<Action> {
         if (kind == Kind.SECRET) return emptyList()
         val base = com.blaze.assistant.browser.PagePointer.actionsFor(pageKind(kind)).mapNotNull(::handAction).toMutableList()
-        // The browser's text menu has no Search / Remind; text on the phone gets them like the hand's own menu.
-        if (kind == Kind.TEXT && Action.SEARCH !in base) base += Action.SEARCH
+        // The browser's text menu has no Search / Share / Remind; text on the phone gets them like the hand's own menu.
+        if (kind == Kind.TEXT) listOf(Action.SEARCH, Action.SHARE, Action.REMIND).forEach { if (it !in base) base += it }
         if (kind == Kind.FIELD && carrying) base.add(0, Action.DROP)
         return base.distinct()
     }
