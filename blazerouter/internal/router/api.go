@@ -542,13 +542,15 @@ func (r *Router) addKey(cfg *config.Config, provider, key string) (string, strin
 		return r.opt.AddKey(provider, key)
 	}
 	res := r.test(context.Background(), cfg, provider, "", key)
-	if !res.OK {
-		return "", "", errors.New(res.Detail)
-	}
+	// Save the key even when the test call fails (a busy provider, a model the
+	// test picked badly, a slow phone network): losing a pasted key is worse.
 	if _, err := cfg.AddKey(provider, key); err != nil {
 		return "", "", err
 	}
 	llm.ClearHealth(provider)
+	if !res.OK {
+		return cfg.Model(provider), "Saved, but the test call failed: " + res.Detail, nil
+	}
 	return cfg.Model(provider), "", nil
 }
 

@@ -2,6 +2,10 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.23.6: BlazeRouter keeps your keys
+- **Keys always save.** Adding a key in the BlazeRouter dashboard used to throw it away whenever the one-word test call failed. Now it's saved first, and the test result shows as a note ("Saved, but the test call failed: …").
+- **Real reasons.** The catch-all "couldn't finish that one" message now includes the provider's actual reply (up to 160 characters), so a bad model, a plan limit or a region block is visible.
+
 ## v0.23.5: 3D designs survive bad objects
 On Luke's Galaxy A12 a 3D design stopped with "Cannot read properties of null (reading 'morphAttributes')". The model had named a part's shape something the starter didn't know ("Cylinder", "nosecone", "CylinderGeometry"…), the starter's `geometry(p)` returned null, and three.js r170's `Mesh` constructor read `geometry.morphAttributes` and threw, so nothing drew; the native fallback drawing also skipped unknown shapes and showed an empty box.
 - **Safety net for three.js** (`assets/design/three-safe.js`, new). Every served page's importmap now points `three` at `/three/three.safe.js` (or `/three/r162/three.safe.js`), which re-exports the bundled build and patches it: a Mesh / Line / Points made with a null geometry or material gets an empty one and is hidden instead of throwing, objects nulled later are fixed before each frame, `Box3` skips them, and a repeating render error is reported once. Files on disk are untouched.
