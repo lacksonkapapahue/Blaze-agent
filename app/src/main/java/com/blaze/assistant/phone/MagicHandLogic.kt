@@ -17,6 +17,10 @@ object MagicHandLogic {
     /** A touch sample in screen px, [t] in ms. */
     data class P(val x: Float, val y: Float, val t: Long = 0L)
 
+    /** v0.25.4: where the drawing line is for a hand window at (left, top) of [sizePx]: its centre, so the line comes
+     *  out of the middle of the mascot instead of above the flame tip (users found the offset line confusing). */
+    fun trailPoint(left: Int, top: Int, sizePx: Int, t: Long = 0L): P = P(left + sizePx / 2f, top + sizePx / 2f, t)
+
     /** A screen rectangle in px (left, top, right, bottom). */
     data class Box(val l: Int, val t: Int, val r: Int, val b: Int) {
         val w: Int get() = r - l

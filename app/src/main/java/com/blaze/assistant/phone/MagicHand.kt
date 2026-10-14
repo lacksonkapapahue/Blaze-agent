@@ -362,7 +362,8 @@ object MagicHand {
                 MotionEvent.ACTION_DOWN -> {
                     touchAt = SystemClock.uptimeMillis()
                     downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y
-                    points.clear(); points += MagicHandLogic.P(lp.x + tipX, lp.y + tipY, e.eventTime)
+                    // v0.25.4: the drawn line (and the circle it captures) follows the hand's centre, not the flame tip.
+                    points.clear(); points += MagicHandLogic.trailPoint(lp.x, lp.y, size, e.eventTime)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     touchAt = SystemClock.uptimeMillis()
@@ -370,13 +371,13 @@ object MagicHand {
                     val (cx, cy) = MagicHandSafety.clamp(startX + (e.rawX - downX).toInt(), startY + (e.rawY - downY).toInt(), size, sw2, sh2, bottomInset, topInset)
                     lp.x = cx; lp.y = cy
                     try { w.updateViewLayout(frame, lp) } catch (_: Exception) { }
-                    val p = MagicHandLogic.P(lp.x + tipX, lp.y + tipY, e.eventTime)
-                    points += p
+                    points += MagicHandLogic.trailPoint(lp.x, lp.y, size, e.eventTime)
                     hi?.trail(points)
-                    if (e.eventTime - lastProbe > 90) { lastProbe = e.eventTime; probe(p.x.toInt(), p.y.toInt()) }
+                    // Pointing still reads what's under the flame tip.
+                    if (e.eventTime - lastProbe > 90) { lastProbe = e.eventTime; val (tx, ty) = tip(); probe(tx, ty) }
                 }
                 MotionEvent.ACTION_UP -> {
-                    points += MagicHandLogic.P(lp.x + tipX, lp.y + tipY, e.eventTime)
+                    points += MagicHandLogic.trailPoint(lp.x, lp.y, size, e.eventTime)
                     val g = MagicHandLogic.classify(points, density, lastTapUp)
                     lastTapUp = if (g == Gesture.TAP) e.eventTime else 0L
                     val pts = points.toList()

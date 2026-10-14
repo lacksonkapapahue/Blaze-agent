@@ -2,6 +2,9 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.25.4: Magic Hand draws from its centre
+- When you draw with the Magic Hand (circle to grab text, or any drag), the line now comes out of the middle of the Blaze mascot instead of a point above the flame tip, which confused people. The circled area matches the line you see. Pointing still reads what's under the flame tip. `MagicHandLogic.trailPoint`, test in `MagicHandTest`.
+
 ## v0.25.3: VPN that just works
 - **Blaze Free (Cloudflare WARP)**, built in and free: the browser VPN works with one tap and no imported configs. On first use the phone generates a WireGuard key pair (pure-Kotlin X25519, RFC 7748 vectors in the tests; the private key never leaves the phone) and registers a free WARP device with Cloudflare's public client API (`POST https://api.cloudflareclient.com/v0a2158/reg`, falling back to `v0a5641`), reading the peer key, endpoint (`engage.cloudflareclient.com:2408`) and the interface IPv4/IPv6 addresses. The device is saved privately in `filesDir/blaze_free.json` (with its wg-quick text) and reused; if every route fails it signs up again once, in case Cloudflare dropped the device. It runs through the existing wgproxy path, and the exit is verified with the Cloudflare trace (`warp=on`).
 - **One tap**: the VPN switch in ⋯ › VPN & privacy is always enabled; with nothing imported it connects Blaze Free (otherwise the last pick, else the first imported country). Blaze Free is always listed at the top (solid Blaze blue shield). `browser_vpn` connect with no country (or "free" / "warp") uses Blaze Free when nothing is imported. Imported per-country configs work exactly as before.
