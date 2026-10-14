@@ -49,7 +49,8 @@ fun AgentCard(id: String) {
     val bad = bg.status == BgAgents.FAILED
     Column(Modifier.widthIn(max = 340.dp).fillMaxWidth().background(c.paper, BlazeShapes.medium).hairline(if (bg.waiting || bad) c.accent else c.hair).padding(14.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Label("${bg.id} · AGENT" + if (bg.plan) " · PLAN" else "", color = c.accent, size = 9.sp)
+            // v0.26.2: a specialist's card says which one ("B3 · SHOPPER").
+            Label("${bg.id} · " + BgAgents.cardRole(bg) + if (bg.plan) " · PLAN" else "", color = c.accent, size = 9.sp)
             Spacer(Modifier.weight(1f))
             Label("$time · ${bg.steps} steps", size = 9.sp)
         }

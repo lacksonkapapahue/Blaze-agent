@@ -74,6 +74,14 @@ enum class GroupPos {
 }
 
 object Bubbles {
+    /** v0.26.2: the most follow-up chips shown in the swipe row under a reply, and their longest label. */
+    const val CHIPS_MAX = 5
+    const val CHIP_CHARS = 42
+
+    /** The chips for the one-row strip: trimmed, blank and repeated ones dropped, long ones cut with an ellipsis. Pure. */
+    fun chipRow(list: List<String>): List<String> = list.map { it.trim().replace(Regex("\\s+"), " ") }.filter { it.isNotEmpty() }
+        .distinctBy { it.lowercase() }.take(CHIPS_MAX).map { if (it.length > CHIP_CHARS) it.take(CHIP_CHARS - 1).trimEnd() + "\u2026" else it }
+
     /** A pause this long between two messages from one side starts a new group (and a new timestamp). */
     const val GAP_MS = 10 * 60_000L
 
@@ -255,5 +263,31 @@ fun SendMark(color: Color, stop: Boolean, size: Dp = 16.dp) {
         drawLine(color, Offset(5 * u, 9 * u), Offset(5 * u, 1.5f * u), 1.8f * u, StrokeCap.Round)
         drawLine(color, Offset(1.6f * u, 4.8f * u), Offset(5 * u, 1.4f * u), 1.8f * u, StrokeCap.Round)
         drawLine(color, Offset(8.4f * u, 4.8f * u), Offset(5 * u, 1.4f * u), 1.8f * u, StrokeCap.Round)
+    }
+}
+
+/**
+ * v0.26.2: follow-up suggestions as one horizontal, swipeable row of compact chips under the reply
+ * (was a stack of full-width pills). Each chip is one line; the row scrolls sideways when they don't fit.
+ */
+@Composable
+fun FollowupRow(list: List<String>, modifier: Modifier = Modifier, onPick: (String) -> Unit) {
+    val c = LocalBlaze.current
+    val chips = Bubbles.chipRow(list)
+    if (chips.isEmpty()) return
+    androidx.compose.foundation.lazy.LazyRow(modifier.fillMaxWidth().padding(top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(end = 12.dp)) {
+        items(chips.size) { i ->
+            val s = chips[i]
+            Row(Modifier.clip(RoundedCornerShape(18.dp)).background(c.accentSoft).clickable { onPick(s) }
+                .semantics { contentDescription = "Suggestion: $s" }
+                .heightIn(min = 36.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("\u21b3", style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.accent))
+                Spacer(Modifier.width(6.dp))
+                Text(s, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 13.5.sp, lineHeight = 18.sp, color = c.accent))
+            }
+        }
     }
 }

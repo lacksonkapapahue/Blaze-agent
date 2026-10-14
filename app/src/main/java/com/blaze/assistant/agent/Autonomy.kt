@@ -43,16 +43,24 @@ object Autonomy {
     fun findTool(all: JSONArray, query: String): Pair<String, Set<String>> {
         val q = query.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 2 }.toSet()
         if (q.isEmpty()) return "Say what you need the tool to do." to emptySet()
-        val scored = (0 until all.length()).mapNotNull { i ->
+        // v0.26.2: ranked like Desktop's tools index (bm25 over name ×10, description ×3, group ×2); the old word score is the fallback.
+        val docs = (0 until all.length()).mapNotNull { i -> all.optJSONObject(i)?.optJSONObject("function")?.let { f ->
+            SkillIndex.Doc(f.optString("name"), listOf(f.optString("name"), f.optString("description"), ToolRouter.groupOf(f.optString("name")).orEmpty())) } }
+        val ranked = SkillIndex.tools(docs).search(query, 8).map { (d, _) -> Triple(d.key, d.fields[1], 1) }
+        val scored = ranked.ifEmpty { scoreTools(all, q) }
+        if (scored.isEmpty()) return "No tool matches \u201c$query\u201d. Consider run_shell (Linux), the browser tools, or run_plan on the screen." to emptySet()
+        val groups = scored.mapNotNull { ToolRouter.groupOf(it.first) }.toSet()
+        return ("Matching tools (now loaded): " + scored.joinToString("\n") { "${it.first}: ${it.second.take(110)}" }) to groups
+    }
+
+    private fun scoreTools(all: JSONArray, q: Set<String>): List<Triple<String, String, Int>> {
+        return (0 until all.length()).mapNotNull { i ->
             val f = all.optJSONObject(i)?.optJSONObject("function") ?: return@mapNotNull null
             val name = f.optString("name"); val desc = f.optString("description")
             val words = (name.replace('_', ' ') + " " + desc).lowercase().split(Regex("[^a-z0-9]+")).toSet()
             val sc = q.count { w -> words.any { it.startsWith(w) || w.startsWith(it) && it.length > 3 } } + if (q.any { name.contains(it) }) 2 else 0
             if (sc == 0) null else Triple(name, desc, sc)
         }.sortedByDescending { it.third }.take(8)
-        if (scored.isEmpty()) return "No tool matches \u201c$query\u201d. Consider run_shell (Linux), the browser tools, or run_plan on the screen." to emptySet()
-        val groups = scored.mapNotNull { ToolRouter.groupOf(it.first) }.toSet()
-        return ("Matching tools (now loaded): " + scored.joinToString("\n") { "${it.first}: ${it.second.take(110)}" }) to groups
     }
 
     fun findToolDef(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", "find_tool")

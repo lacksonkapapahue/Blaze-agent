@@ -620,7 +620,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
     val messages by Agent.messages.collectAsState()
     val state = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val items = remember(messages, mood) { buildItems(messages, mood != Mood.IDLE) }
+    // v0.26.2: the old "Fresh start" bubble stays hidden in saved chats too (compaction and /new are silent).
+    val items = remember(messages, mood) { buildItems(messages.filterNot { com.blaze.assistant.agent.ReplyChips.isFreshStart(it.text, it.meta) }, mood != Mood.IDLE) }
     val total = items.size + 1 // + working row
     val atBottom by remember { derivedStateOf { !state.canScrollForward } }
     var follow by remember { mutableStateOf(true) }
@@ -804,9 +805,8 @@ private fun splitQuote(t: String): Pair<String, String> {
 
 @Composable
 private fun Followups(list: List<String>, onPick: (String) -> Unit) {
-    Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        list.forEach { s -> SoftPill(s, lead = "↳") { onPick(s) } }
-    }
+    // v0.26.2: one horizontal swipe row of compact chips, not stacked full-width pills.
+    FollowupRow(list, onPick = onPick)
 }
 
 /** Time · Copy · Quote · Retry under the last message of a group, small and quiet. Long-press words to copy or quote just those. */

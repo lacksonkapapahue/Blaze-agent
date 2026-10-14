@@ -230,7 +230,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.xLabels(labels: Lis
     labels.forEachIndexed { i, l ->
         if (i % every != 0) return@forEachIndexed
         val cx = if (points) left + if (n <= 1) w / 2f else i * (w / (n - 1)) else left + (i + 0.5f) * (w / n)
-        val lay = measurer.measure(l.take(10), style)
+        val lay = measurer.measure(RichKit.axisLabel(l), style)
         drawText(lay, topLeft = Offset((cx - lay.size.width / 2f).coerceIn(0f, left + w - lay.size.width), y))
     }
 }

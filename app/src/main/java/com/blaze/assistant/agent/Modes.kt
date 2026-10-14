@@ -50,7 +50,7 @@ object Modes {
         "github_issues", "github_my_prs", "github_my_repos", "github_notifications", "github_search_repos", "github_ci",
         "notion_search", "slack_read", "slack_channels", "spotify_now_playing",
         "file_read", "file_list", "file_search", "terminal_status", "terminal_jobs",
-        "processes", "list_routines", "list_triggers", "use_skill", "skill_file",
+        "processes", "list_routines", "list_triggers", "use_skill", "find_skill", "skill_file",
         "find_tool", "load_tools", "ask_user", "get_location",
         "list_agents", "check_agent", "open_view", "about_blaze",
         // checked by action below

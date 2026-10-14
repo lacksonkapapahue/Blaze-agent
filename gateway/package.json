@@ -1,6 +1,6 @@
 {
   "name": "blaze-gateway",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Blaze Gateway: one OpenAI-compatible endpoint for every Blaze app. Picks the best free model per task and fails over across providers. Cloudflare Workers + D1 + Workers AI (free tier).",
   "type": "module",

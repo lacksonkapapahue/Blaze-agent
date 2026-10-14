@@ -49,6 +49,7 @@ object Learning {
 
     private fun saveSkills(l: List<Skill>) {
         _skills.value = l
+        try { SkillMatch.invalidate() } catch (_: Throwable) { }   // v0.26.2: learned skills are in the skills index
         try { skillFile().writeText(JSONArray(l.map { it.toJson() }).toString()) } catch (_: Exception) { }
     }
 

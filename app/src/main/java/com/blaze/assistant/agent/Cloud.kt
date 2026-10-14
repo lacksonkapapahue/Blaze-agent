@@ -91,4 +91,53 @@ object Cloud {
             else -> UNREACHABLE
         }
     }
+
+    // ---------------- v0.26.2: the retry loop, empty replies included ----------------
+
+    /** One try: stream it or not, with the "answer now" nudge or not, and the routes ("provider/model") to skip. */
+    data class Attempt(val n: Int, val stream: Boolean, val nudge: Boolean, val avoid: List<String>)
+
+    /**
+     * Every request's tries (LlmClient.completeRaw). Errors as before: a request too big is trimmed once
+     * ([trim] → true), 401/403 is the expired sign-in, other non-retryable errors surface, retryable ones back off
+     * up to [MAX_TRIES]; a stream that broke mid-reply (code 0) also skips the route that served it next time.
+     * New: an EMPTY reply (reasoning only, or nothing; [EmptyReply.isEmpty]) is a failed try too, never an answer.
+     * After the first, the same route is asked again without streaming and with the nudge; after the second,
+     * the routes that came back empty are skipped (the gateway's next model); the third fails with
+     * [EmptyReply.FAILED]. [served] = the route of the last call ("provider/model", "" if unknown).
+     */
+    suspend fun drive(streaming: Boolean, call: suspend (Attempt) -> JSONObject, served: () -> String,
+                      trim: (LlmClient.LlmException) -> Boolean = { false }, sleep: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+                      onEmpty: (Int) -> Unit = {}): JSONObject {
+        val avoid = LinkedHashSet<String>()
+        var stream = streaming; var nudge = false
+        var errors = 0; var empties = 0; var n = 0
+        var last: LlmClient.LlmException? = null
+        while (errors < MAX_TRIES && empties < EmptyReply.TRIES && n < MAX_TRIES + EmptyReply.TRIES + 1) {
+            val a = Attempt(n++, stream, nudge, avoid.toList())
+            try {
+                val m = call(a)
+                if (!EmptyReply.isEmpty(m)) return m
+                empties++
+                onEmpty(empties)
+                if (empties == 1) { stream = false; nudge = true }
+                else { served().takeIf { it.isNotBlank() }?.let { avoid += it }; stream = streaming; nudge = true }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: LlmClient.LlmException) {
+                if (trim(e)) continue
+                if (e.code == 401 || e.code == 403) throw LlmClient.LlmException(EXPIRED, e.code)
+                if (!retryable(e.code, e.message.orEmpty())) {
+                    if (ToolCalls.isShapeError(e)) throw e
+                    throw LlmClient.LlmException(friendly(e.code, e.message.orEmpty()), e.code, e.retryAfterSec)
+                }
+                last = e
+                errors++
+                // A stream that stalled or broke after it started (reasoning only, then a timeout): next model.
+                if (e.code == 0) served().takeIf { it.isNotBlank() }?.let { avoid += it }
+                if (errors < MAX_TRIES) sleep(backoffMs(errors - 1, e.retryAfterSec))
+            }
+        }
+        if (empties >= EmptyReply.TRIES || last == null) throw LlmClient.LlmException(EmptyReply.FAILED, EmptyReply.CODE)
+        throw LlmClient.LlmException(friendly(last.code, last.message.orEmpty()), last.code, last.retryAfterSec)
+    }
 }

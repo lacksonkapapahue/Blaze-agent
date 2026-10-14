@@ -347,6 +347,12 @@ object RichKit {
         return Triple(Math.floor(lo / step) * step, Math.ceil(hi / step) * step, step)
     }
 
+    /** v0.26.2: an x-axis category label at most [max] characters, cut with an ellipsis ("Livingstone" → "Livingst…"), never silently. */
+    fun axisLabel(l: String, max: Int = 10): String {
+        val t = l.trim()
+        return if (t.length <= max) t else t.take(max - 1).trimEnd() + "\u2026"
+    }
+
     /** Short axis labels: 1200 → 1.2K, 3500000 → 3.5M. */
     fun short(v: Double): String {
         val a = Math.abs(v)

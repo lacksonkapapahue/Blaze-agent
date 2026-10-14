@@ -84,6 +84,8 @@ object LlmClient {
 
     /** The model the gateway says answered last ("provider · model"), for the details sheet / diagnostics only. */
     @Volatile var lastServedBy: String = ""
+    /** v0.26.2: the gateway route of the last call as "provider/model" (what blaze_avoid names); "" when unknown. */
+    @Volatile var lastServedKey: String = ""
 
     /** The last gateway failure, raw (diagnostics only; people see [Cloud.friendly]). */
     @Volatile var lastCloudError: String = ""
@@ -102,28 +104,20 @@ object LlmClient {
         var msgs = messages
         val task = Cloud.task(msgs, tools, liteTurn || (quickTurn && (tools == null || tools.length() == 0)))
         var trimmed = false
-        var last: LlmException? = null
-        var i = 0
-        while (i < Cloud.MAX_TRIES) {
-            try {
-                return call(t, msgs, tools, onText, if (lane == Lane.MAIN) onThink else null, false, task = task)
+        // v0.26.2: Cloud.drive owns the tries; an empty (reasoning-only) reply is a failed try, never an answer.
+        return try {
+            Cloud.drive(onText != null, call = { a ->
+                call(t, if (a.nudge) EmptyReply.withNudge(msgs) else msgs, tools, if (a.stream) onText else null,
+                    if (lane == Lane.MAIN) onThink else null, false, task = task, avoid = a.avoid)
                     .also { lastRoute = "Blaze Cloud" + (if (lastServedBy.isNotBlank()) " · $lastServedBy" else "") + if (trimmed) " · trimmed" else "" }
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e
-            } catch (e: LlmException) {
-                lastCloudError = e.message.orEmpty().take(300)
-                if (!trimmed && tooLarge(e)) { trimmed = true; msgs = shrink(msgs); continue }
-                if (e.code == 401 || e.code == 403) throw LlmException(Cloud.EXPIRED, e.code)
-                if (!Cloud.retryable(e.code, e.message.orEmpty())) {
-                    if (ToolCalls.isShapeError(e)) throw e
-                    throw LlmException(Cloud.friendly(e.code, e.message.orEmpty()), e.code, e.retryAfterSec)
-                }
-                last = e
-                i++
-                if (i < Cloud.MAX_TRIES) kotlinx.coroutines.delay(Cloud.backoffMs(i - 1, e.retryAfterSec))
-            }
+            }, served = { lastServedKey },
+                trim = { e -> lastCloudError = e.message.orEmpty().take(300); if (!trimmed && tooLarge(e)) { trimmed = true; msgs = shrink(msgs); true } else false },
+                onEmpty = { n -> lastCloudError = "empty reply #$n from ${lastServedBy.ifBlank { "the gateway" }}"
+                    try { com.blaze.assistant.device.CrashLog.write("Blaze Cloud: $lastCloudError (reasoning only / no content)") } catch (_: Throwable) { } })
+        } catch (e: LlmException) {
+            if (e.code != 401 && e.code != 403) try { com.blaze.assistant.device.CrashLog.write("Blaze Cloud failed: ${lastCloudError}") } catch (_: Throwable) { }
+            throw e
         }
-        try { com.blaze.assistant.device.CrashLog.write("Blaze Cloud failed ${Cloud.MAX_TRIES}x: ${lastCloudError}") } catch (_: Throwable) { }
-        throw LlmException(Cloud.friendly(last?.code ?: 0, last?.message.orEmpty()), last?.code ?: 0, last?.retryAfterSec ?: 0)
     }
 
     /** Why the optional steps model last failed (shown in diagnostics); the main model took over. */
@@ -210,7 +204,8 @@ object LlmClient {
     @Volatile var quickTurn = false
 
     internal suspend fun call(t: Target, messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)?,
-                              onThink: ((String) -> Unit)?, thoughts: Boolean, timeoutMs: Int = 120_000, task: String? = null): JSONObject = withContext(Dispatchers.IO) {
+                              onThink: ((String) -> Unit)?, thoughts: Boolean, timeoutMs: Int = 120_000, task: String? = null,
+                              avoid: List<String> = emptyList()): JSONObject = withContext(Dispatchers.IO) {
         val key = t.key
         if (key.isBlank() && t.pid != Providers.keyless.id)
             throw LlmException("No API key for ${Providers.byId(t.pid).name} yet. Open Settings and paste your key.", 401)
@@ -230,6 +225,7 @@ object LlmClient {
         // Streaming: the read timeout is the longest wait for the next chunk, including the first.
         conn.readTimeout = if (chained && onText != null) minOf(timeoutMs, if (t.pid == "nvidia") 40_000 else 25_000) else timeoutMs
         callStart = System.currentTimeMillis(); gotFirst = false; lastFirstTokenMs = 0; lastFirstTokenAt = 0
+        if (t.pid == Providers.GATEWAY) { lastServedBy = ""; lastServedKey = "" }
         authHeaders(key, t.pid).forEach { (k, v) -> conn.setRequestProperty(k, v) }
 
         val body = JSONObject().apply {
@@ -247,6 +243,8 @@ object LlmClient {
                 if (alts.isNotEmpty()) put("models", JSONArray(listOf(t.model) + alts))
             }
             if (t.pid == Providers.GATEWAY) Cloud.tag(this, task ?: Cloud.task(messages, tools, liteTurn))
+            // v0.26.2: routes that just came back empty or broke mid-stream; the gateway tries its next model.
+            if (t.pid == Providers.GATEWAY && avoid.isNotEmpty()) put("blaze_avoid", JSONArray(avoid))
             if (tools != null && tools.length() > 0) {
                 put("tools", try { ToolCalls.adapt(tools, t.pid, t.model) } catch (_: Exception) { tools })
                 put("tool_choice", "auto")
@@ -267,6 +265,8 @@ object LlmClient {
         rh.takeIf { it.isNotEmpty() }?.let { lastRateHeaders = it }
         if (t.pid == Providers.GATEWAY) lastServedBy = listOfNotNull(conn.getHeaderField("X-Blaze-Provider"), conn.getHeaderField("X-Blaze-Model"))
             .filter { it.isNotBlank() }.joinToString(" · ")
+        if (t.pid == Providers.GATEWAY) lastServedKey = listOfNotNull(conn.getHeaderField("X-Blaze-Provider"), conn.getHeaderField("X-Blaze-Model"))
+            .filter { it.isNotBlank() }.takeIf { it.size == 2 }?.joinToString("/").orEmpty()
         lastUsage = null
         if (code in 200..299 && onText != null &&
             (conn.contentType ?: "").contains("event-stream", ignoreCase = true)) {

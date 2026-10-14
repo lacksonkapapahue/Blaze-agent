@@ -15,7 +15,7 @@ object ToolRouter {
     /** Always sent. */
     private val core = setOf(
         "remember", "forget", "memory_search", "memory_save", "memory_update", "open_view", "design", "about_blaze", "blazerouter", "processes", "process", "recall_memory", "device_status", "list_apps", "blaze_self", "ask_user", "self_test",
-        "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "search_past_chats", "run_skill",
+        "web_search", "fetch_page", "load_tools", "find_tool", "goal", "use_skill", "find_skill", "search_past_chats", "run_skill",
         // Long chats (v0.15.0): always on hand so nothing older is ever out of reach.
         "search_chat", "read_turn", "read_artifact", "update_brief",
         // Basic phone control stays in core: it's the most common thing people ask for.
@@ -77,7 +77,7 @@ object ToolRouter {
             Regex("(?!)"), { false }),
         Group("extras", "learned skills, helpers working in parallel, screen memory",
             r("""\b(skill|learn|delegate|parallel|at once|earlier on screen|saw|workflow)\b"""),
-            { it in setOf("skill_manage", "delegate", "search_screen_memory", "install_skill", "write_skill", "save_workflow", "skill_file") }),
+            { it in setOf("skill_manage", "delegate", "create_specialist", "search_screen_memory", "install_skill", "write_skill", "save_workflow", "skill_file") }),
     )
 
     private fun nameOf(t: Any?): String = (t as? JSONObject)?.optJSONObject("function")?.optString("name").orEmpty()
