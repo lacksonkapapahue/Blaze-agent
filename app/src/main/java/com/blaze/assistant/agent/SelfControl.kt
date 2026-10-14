@@ -113,7 +113,7 @@ object SelfControl {
 
     private val boolKeys = mapOf(
         "phone_control" to "phone control", "speak_replies" to "read replies aloud", "followups" to "follow-up chips",
-        "show_reasoning" to "show reasoning", "particles" to "background dots", "fast_lane" to "fast lane", "auto_learn" to "auto-learning",
+        "show_reasoning" to "show thinking", "particles" to "background dots", "fast_lane" to "fast lane", "auto_learn" to "auto-learning",
         "screen_memory" to "screen memory", "confirm_risky" to "confirm risky taps", "voice_loop" to "conversation mode",
         "show_taps" to "show where I tap", "sounds" to "sounds", "compact_panel" to "compact panel",
         "wake_gate" to "wake sound gate", "wake_screen_off" to "listen with screen off", "wake_charging" to "listen while charging", "wake_pocket" to "pause in pocket",

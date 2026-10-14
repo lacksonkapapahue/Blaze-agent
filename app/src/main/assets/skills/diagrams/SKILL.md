@@ -1,16 +1,23 @@
 ---
 name: diagrams
-description: Make clear diagrams - flowcharts, mind maps, org charts, sequence and architecture diagrams, timelines, ER and state diagrams, user journeys - as Mermaid or hand-placed SVG that previews with preview_server, with PNG, SVG or PDF export. Use for any "diagram", "flowchart", "mind map", "chart how X works" or "map out" request.
+description: Diagram FILES - flowcharts, mind maps, org charts, sequence and architecture diagrams, timelines, ER and state diagrams - as Mermaid or hand-placed SVG saved to a file, previewed and exported as PNG, SVG or PDF. Use only when the user asks to save, export, download, edit or make a diagram file. A diagram asked for in chat needs no skill - reply with a ```mermaid block.
 tags: [diagrams, flowchart, mermaid, svg, visual, design]
-version: 1
+version: 2
 ---
+
+> **In chat: just reply with a ```mermaid block.** When someone asks in chat for a diagram, flowchart, mind map or
+> "how X works" picture, don't use this skill, don't write a file and don't open a preview: put a ```mermaid block in the
+> reply with 2-3 sentences around it, and the chat draws it inline in seconds ("how do solar panels work" →
+> `flowchart LR` Sunlight → Solar cells → DC power → Inverter → AC power → Home). Numbers go in a ```chart block.
+> Everything below is only for when they ask to **save, export, download, edit or make a file** (a PNG for a report,
+> an SVG for slides, a README diagram).
 
 > **On the phone:** files go under `~` (/root/phone). Preview HTML/SVG with `preview_server` (there is no Design tab here); install missing tools in Blaze's Alpine Linux with run_shell (`apk add …`, `pip install …`).
 
 # Diagrams
 
-Finish line: a diagram a stranger understands in ten seconds, open in the preview, exported as the
-user needs (PNG for chat, SVG for docs, PDF for print).
+Finish line (file route only): a diagram a stranger understands in ten seconds, saved and exported as the
+user needs (PNG for sharing, SVG for docs, PDF for print).
 
 ## 1. Pick the kind and the engine
 

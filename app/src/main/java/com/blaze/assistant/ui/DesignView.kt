@@ -245,7 +245,10 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                                         "if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}m.content='width=1280';})()", null)
                                 }
                             }
-                            loadUrl(loadUrl)
+                            // v0.26.1: a Mermaid file (also outside Blaze's home, where requests aren't served by us) is drawn as a picture.
+                            val mmd = if (fileUrl.startsWith("file://")) mermaidFile(File(fileUrl.removePrefix("file://"))) else null
+                            if (mmd != null) loadDataWithBaseURL(DesignServe.ORIGIN + "/", DesignServe.mermaidHtml(mmd, File(fileUrl).nameWithoutExtension), "text/html", "utf-8", null)
+                            else loadUrl(loadUrl)
                         }
                     })
                 }
@@ -307,6 +310,9 @@ fun serveDesign(ctx: android.content.Context, url: String, home: File?, engine: 
                     val is3d = com.blaze.assistant.agent.Designs.specFrom(html) != null
                     ok("text/html", java.io.ByteArrayInputStream(DesignServe.prepareHtml(html, is3d).toByteArray(Charsets.UTF_8)), "no-store")
                 }
+                // v0.26.1: a Mermaid file is drawn as a picture, never shown as raw source.
+                mermaidFile(t.file) != null -> ok("text/html", java.io.ByteArrayInputStream(
+                    DesignServe.mermaidHtml(mermaidFile(t.file)!!, t.file.nameWithoutExtension).toByteArray(Charsets.UTF_8)), "no-store")
                 else -> ok(t.mime, java.io.FileInputStream(t.file), "no-store")
             }
             null -> {
@@ -319,3 +325,10 @@ fun serveDesign(ctx: android.content.Context, url: String, home: File?, engine: 
         }
     } catch (_: Exception) { null }
 }
+
+/** The Mermaid source of a previewed file (see [DesignServe.mermaidSource]), or null. Small text files only. */
+fun mermaidFile(f: File): String? = try {
+    val ext = f.extension.lowercase()
+    if (!f.isFile || f.length() > 200_000 || ext !in setOf("mmd", "mermaid", "md", "markdown", "txt", "")) null
+    else DesignServe.mermaidSource(f.name, f.readText())
+} catch (_: Exception) { null }

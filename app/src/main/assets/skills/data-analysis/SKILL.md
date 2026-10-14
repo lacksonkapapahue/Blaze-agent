@@ -2,7 +2,7 @@
 name: data-analysis
 description: Analyse data from CSV, Excel/Google Sheets exports, JSON or SQLite - clean it, answer questions with numbers, find trends and outliers, make charts and a short written summary. Use for "analyse this spreadsheet", sales/expense/traffic numbers, survey results, logs or any table of data.
 tags: [data, csv, excel, spreadsheet, python, pandas, charts]
-version: 1
+version: 2
 ---
 
 # Data analysis (CSV and spreadsheets)
@@ -39,6 +39,8 @@ No Python? DuckDB CLI (`duckdb -c "select … from 'file.csv'"`) or plain SQL on
 
 ## 4. Charts
 
+- **In chat: a chart is a ```chart block in the reply** (bar, line, pie or scatter JSON, drawn and tappable in the
+  chat). Use matplotlib and a PNG only when the user asks for a file, an export or a report.
 - One message per chart; title states it ("Sales doubled after the June campaign").
 - Line for time, bar for categories (sorted), histogram for distributions, scatter for relationships. No pies with > 4 slices, no 3D.
 - Label axes with units, start bars at zero, highlight the point in one accent colour, grey the rest.

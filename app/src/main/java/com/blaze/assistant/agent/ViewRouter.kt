@@ -40,7 +40,7 @@ object ViewRouter {
             listOf("create_routine", "schedule_command", "create_trigger", "set_alarm", "add_calendar_event", "open_view"), listOf("schedule", "device"),
             r("""\b(remind(?:er|ers)? ?(?:me)?|every (?:day|morning|evening|night|week|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|hour|\d+)|daily|weekly|routine|schedule (?:a|this|it|my)|wake me)\b""")),
         Spec("design", "Design", "anything visual or interactive, live preview: 3D scenes and models (three.js, orbit to look around), 2D art, websites and landing pages, " +
-            "UI mockups and app screens, diagrams, charts, posters, flyers, slides, floor plans, product mockups, simple games",
+            "UI mockups and app screens, diagrams and charts as files to save or export, posters, flyers, slides, floor plans, product mockups, simple games",
             listOf(Designs.TOOL, "file_write", "open_view"), listOf("terminal", "media"),
             r(DESIGN_STRONG + "|" + DESIGN_OBJECT)),
         Spec("gallery", "Gallery", "images, pictures, logos, wallpapers, beats, music and other media Blaze makes",
@@ -74,6 +74,9 @@ object ViewRouter {
         val t = text.trim()
         if (t.isEmpty() || t.startsWith("/") || t.startsWith("[Scheduled routine")) return null
         var first = specs.firstOrNull { it.cue.containsMatchIn(t) }
+        // v0.26.1: a diagram / chart asked for in chat is drawn inline in the reply (VisualRoute), not in Design,
+        // unless something else in the ask is clearly Design work (a page, a poster, 3D…) or it asks for a file.
+        if (first?.id == "design" && VisualRoute.inChat(t) && !designStrong.containsMatchIn(VisualRoute.withoutVisualWords(t))) first = null
         // "make a picture of a car": a thing to draw, with picture words, is Gallery unless it's clearly a design (3D, mockup, page…).
         if (first?.id == "design" && !designStrong.containsMatchIn(t) && byId("gallery")!!.cue.containsMatchIn(t)) first = byId("gallery")
         if (followOn && (first == null || first.id == "design") && isFollowOnEdit(t)) return byId("design")
@@ -113,6 +116,7 @@ object ViewRouter {
         append("- Flashcards, \"quiz me\", \"test me\", study or revision → Learn: flashcards action=add (deck, cards=[{front, back}]), then open_view view=learn. Never write Q: / A: lists in chat.\n")
         append("- Anything visual or interactive → Design (it is not only for art and sites): 3D models and scenes (design action=create kind=3d parts=[…], three.js with orbit controls), " +
             "2D art (svg), sites, UI mockups, diagrams, charts, posters, slides, floor plans, product mockups, games (html). The Design view opens by itself. " +
+            "EXCEPT a diagram, flowchart or chart asked for in chat: draw it inline in the reply (```mermaid / ```chart), no design tool, files or preview; Design only when they ask to save, export, edit or make a file. " +
             "Follow-ons (\"show the engine\", \"make it taller\", \"add fins\") change the CURRENT design with design action=update, never a new one or a text answer.\n")
         append("- Never say you created, updated or opened something in a view (\"I've updated the design\", \"view it in the design section\") unless that view's tool succeeded this turn; Blaze checks.\n")
         append("- \"Remind me\" or anything repeating → Schedule (create_routine / schedule_command / create_trigger). Pictures and beats → Gallery. A method or multi-step task to reuse → Skills (save_workflow with trigger, steps, checks).\n")

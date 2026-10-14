@@ -12,6 +12,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -649,6 +650,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
     val lastStepsKey = items.lastOrNull { it is Item.Steps }?.key
     Box(Modifier.fillMaxSize()) {
         // v0.24.0: a messaging thread. No uniform gaps: runs from one side sit 3dp apart, groups 16dp.
+        // v0.26.1: choice buttons and forms in replies send through the same path as the follow-up chips (only when idle).
+        CompositionLocalProvider(RichSend.Local provides (if (mood == Mood.IDLE) onFollowup else null)) {
         LazyColumn(state = state, modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp)) {
             itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
@@ -677,11 +680,13 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                         if (!hasLiveSteps) WorkCard(emptyList(), live = true,
                             startAt = messages.lastOrNull { it.role == Role.USER }?.at ?: 0L, endAt = 0L,
                             status = status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) })
-                        if (live.isNotBlank() && Settings.showReasoning) ReasoningBlock(live, liveNow = true)
+                        // v0.26.1: never the raw reasoning, only a calm "Thinking it through…" line.
+                        com.blaze.assistant.agent.ThinkingLabel.label(live = true, hasThought = live.isNotBlank(), show = Settings.showReasoning)?.let { ThinkingLine(it, live = true) }
                     }
                 }
                 // v0.26.0: no "this chat is getting long" banner; long chats compact themselves (AutoCompact).
             }
+        }
         }
         AnimatedVisibility(!atBottom, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut()) {
@@ -737,45 +742,20 @@ private fun Modifier.hairlineStart(color: Color) = this.drawBehind {
     drawRect(color, Offset.Zero, Size(1.dp.toPx(), size.height))
 }
 
-/** Little pixel brain + "Reasoning"; tap to read how the model thought. */
+/**
+ * v0.26.1: "Thinking it through…" (a softly pulsing blue dot) while the model reasons, then a small quiet
+ * "Thought it through · 4 s" above the reply. Not tappable: the reasoning text is never shown.
+ */
 @Composable
-private fun ReasoningBlock(text: String, liveNow: Boolean = false) {
+private fun ThinkingLine(text: String, live: Boolean) {
     val c = LocalBlaze.current
-    var open by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
-        Row(Modifier.clickable { open = !open }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            BrainGlyph(if (liveNow) c.accent else c.sub)
-            Spacer(Modifier.width(8.dp))
-            Label(if (liveNow) "Reasoning" else if (open) "Hide reasoning" else "Reasoning", color = if (liveNow) c.accent else c.sub, size = 10.sp)
-            Spacer(Modifier.width(6.dp))
-            Text(if (open) "⌃" else "⌄", style = TextStyle(fontSize = 12.sp, color = c.sub))
-        }
-        AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
-            Box(Modifier.widthIn(max = 330.dp).hairlineStart(c.accent).padding(start = 12.dp, top = 4.dp, bottom = 4.dp)
-                .heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-                SelectionContainer {
-                    Text(text, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.sub))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun BrainGlyph(color: Color) {
-    // 9x8 pixel brain, two lobes with folds.
-    val rows = listOf(
-        "..##.##..",
-        ".#..#..#.",
-        "#..#.#..#",
-        "#.#..#.##",
-        "#..#.#..#",
-        ".#..#.#.#",
-        "..##.##..",
-        "....#....")
-    Canvas(Modifier.size(15.dp, 13.dp)) {
-        val u = size.width / 9f
-        rows.forEachIndexed { y, r -> r.forEachIndexed { x, ch -> if (ch == '#') drawCircle(color, u * 0.5f, Offset(x * u + u / 2f, y * u + u / 2f)) } }
+    val tr = androidx.compose.animation.core.rememberInfiniteTransition(label = "think")
+    val a by tr.animateFloat(0.3f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900),
+        androidx.compose.animation.core.RepeatMode.Reverse), label = "thinkA")
+    Row(Modifier.padding(top = 6.dp, bottom = 4.dp).semantics { contentDescription = text }, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(if (live) BlazeBrush.blue.copy(alpha = a) else c.weak))
+        Spacer(Modifier.width(8.dp))
+        Text(text, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, color = if (live) c.body else c.sub))
     }
 }
 
@@ -797,7 +777,7 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
         else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
         else SwipeToQuote(true, onQuote = { onQuote(m.text) }) { Column(Modifier.fillMaxWidth()) {
-            if (m.thinking.isNotBlank() && Settings.showReasoning) ReasoningBlock(m.thinking)
+            com.blaze.assistant.agent.ThinkingLabel.label(live = false, hasThought = m.thinking.isNotBlank(), ms = m.thinkMs, show = Settings.showReasoning)?.let { ThinkingLine(it, live = false) }
             BlazeReply(m.id, m.text, pos)
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             if (pos.ends || followups.isNotEmpty()) Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = true)
@@ -840,7 +820,7 @@ private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, o
     if (chipOnly && chip.isBlank()) return
     if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }
     val acts = buildList<Pair<String, (() -> Unit)?>> {
-        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(m.text) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
+        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(RichKit.readable(m.text)) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
         if (allowQuote) add("Quote" to { onQuote(m.text) })
         add("Retry" to (if (canAct) ({ Agent.retry(m.id) }) else null))
     }

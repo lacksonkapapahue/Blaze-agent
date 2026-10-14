@@ -4,7 +4,8 @@ package com.blaze.assistant.ui
  * v0.24.9 rich replies (ChatGPT-style), pure part (RichRepliesTest): turns the Markdown of a Blaze reply into rich
  * blocks on top of [AnswerCards]: step-flow cards, a section image beside its text, image groups (up to 3 side by
  * side, 4 or more as a tilted deck you swipe through with a card flip) and inline diagrams drawn by free, keyless
- * renderers (mermaid.ink for Mermaid, kroki.io for Graphviz / PlantUML / D2).
+ * renderers (mermaid.ink for Mermaid, kroki.io for Graphviz / PlantUML / D2). v0.26.1 adds interactive blocks
+ * (```chart, ```choices, ```form, ```tool, ```compare; parsed in [RichKit]) and a prompt that picks formats on its own.
  */
 object RichReplies {
     data class Img(val url: String, val alt: String)
@@ -18,6 +19,17 @@ object RichReplies {
         data class ImageText(val img: Img, val md: String) : Block()
         data class Images(val imgs: List<Img>) : Block()
         data class Diagram(val kind: String, val code: String, val url: String) : Block()
+        // v0.26.1 visual answers (RichKit): interactive blocks drawn natively, offline (so they show in Private too).
+        data class Chart(val chart: RichKit.Chart) : Block()
+        data class Choices(val choices: RichKit.Choices) : Block()
+        data class Form(val form: RichKit.Form) : Block()
+        data class Tool(val tool: RichKit.Tool) : Block()
+        data class Compare(val compare: RichKit.Compare) : Block()
+        /**
+         * A visual still streaming in (its fence isn't closed and it can't be drawn yet). Shown as a quiet placeholder
+         * while the reply streams; [fallback] once the reply is done (a reply that never closed its fence).
+         */
+        data class Pending(val kind: String, val seg: AnswerCards.Seg.Code, val fallback: Block) : Block()
     }
 
     data class Step(val title: String, val body: String)
@@ -27,13 +39,34 @@ object RichReplies {
     const val ROW_MAX = 3
     fun layout(n: Int): Layout = if (n <= ROW_MAX) Layout.ROW else Layout.DECK
 
-    /** The static system-prompt lines that tell the model these formats exist (kept short; cached prefix). */
-    const val PROMPT = "\n\nRICH REPLIES: the chat draws some Markdown richly. Use it only when it really helps. " +
-        "A how-to with 2+ steps: a numbered list where each item starts with a **bold title** (\"1. **Open Settings** then ...\"); it becomes a step-flow card. " +
-        "A picture for a section: put ![alt](https url) on its own line right before that paragraph; it sits beside the text. " +
-        "Several pictures: put the image lines one after another (up to 3 sit side by side; 4 or more become a swipeable deck). " +
+    /**
+     * The static system-prompt lines that tell the model to pick the format itself (v0.26.1 visual answers). Kept
+     * constant so the provider's cached prefix holds; only added when the rich_replies pref is on.
+     */
+    const val PROMPT = "\n\nVISUAL ANSWERS: the chat draws some blocks as visuals and small interactive tools. Pick the best format for each answer " +
+        "yourself, without being asked, the way a great teacher would. Keep the text short when a visual carries the answer (2-4 sentences around it). " +
+        "Plain text is right for simple facts, quick answers, opinions, feelings and chit-chat: never force a visual there, and use at most two visual blocks per answer. " +
+        "Choose: how something works or a process -> a ```mermaid flowchart plus 2-3 sentences; a comparison of 2-3 things -> a ```compare block; " +
+        "numbers, shares or a trend -> a ```chart; anything with an amount the user could change (splitting, tips, loans, savings, unit or recipe scaling) -> a ```tool; " +
+        "a choice the user must make next -> a ```choices block; several details you need from the user at once -> a ```form; a how-to -> numbered steps with **bold titles**. " +
+        "IN CHAT, INLINE: a diagram, chart or visual the user asks for (\"draw\", \"flowchart\", \"diagram\", \"chart\", \"graph\", \"map out\", \"visualise\") goes straight in your reply as a ```mermaid or ```chart block, drawn in the chat. " +
+        "Don't write files, don't open a preview, Design view or preview_server, and don't call use_skill for it. Make a file (or preview / export it) only when the user asks to save, export, download, edit or make a file. " +
+        "Interactive blocks are fenced code blocks whose body is ONE valid JSON object (double quotes, no comments, no trailing commas): " +
+        "```chart {\"type\":\"bar|line|pie|scatter\",\"title\":\"..\",\"labels\":[\"Jan\",\"Feb\"],\"series\":[{\"name\":\"Sales\",\"values\":[12,19]}],\"unit\":\"K\"} " +
+        "(pie: one series; scatter: \"points\":[[x,y],..] with \"xLabel\"/\"yLabel\"). Use real numbers you know or found; if they're estimates, say so in the text. " +
+        "```compare {\"title\":\"..\",\"columns\":[\"iPhone 16\",\"Galaxy S25\"],\"rows\":[{\"label\":\"Screen\",\"values\":[\"6.1 in\",\"6.2 in\"]}],\"verdict\":\"one line\"} (2-3 columns, up to 10 rows). " +
+        "```tool {\"title\":\"Bill splitter\",\"inputs\":[{\"id\":\"bill\",\"label\":\"Bill\",\"type\":\"number\",\"default\":450,\"prefix\":\"K\"},{\"id\":\"people\",\"label\":\"People\",\"type\":\"slider\",\"min\":1,\"max\":12,\"step\":1,\"default\":3},{\"id\":\"tip\",\"label\":\"Tip\",\"type\":\"slider\",\"min\":0,\"max\":25,\"default\":10,\"suffix\":\"%\"}]," +
+        "\"outputs\":[{\"label\":\"Tip\",\"formula\":\"bill*tip/100\",\"prefix\":\"K\"},{\"label\":\"Each pays\",\"formula\":\"bill*(1+tip/100)/people\",\"prefix\":\"K\"}]} " +
+        "(input types number, slider, select with \"options\":[{\"label\":\"Monthly\",\"value\":12}]; formulas use input ids, numbers, + - * / ^ ( ), < > <= >= ==, min, max, round(x,2), ceil, floor, abs, sqrt, pow, if(cond,a,b); the last output is the headline; fill defaults from the user's numbers and also state the answer in the text). " +
+        "```choices {\"prompt\":\"..\",\"options\":[\"Option A\",\"Option B\"]} (2-5 short options; a tap sends that text as the user's reply). " +
+        "```form {\"title\":\"Trip plan\",\"fields\":[{\"id\":\"city\",\"label\":\"City\",\"type\":\"text\"},{\"id\":\"days\",\"label\":\"Days\",\"type\":\"number\",\"default\":3},{\"id\":\"budget\",\"label\":\"Budget\",\"type\":\"select\",\"options\":[\"Low\",\"Mid\",\"High\"]},{\"id\":\"kids\",\"label\":\"With kids\",\"type\":\"toggle\"}],\"submit\":\"Plan it\"} (up to 6 fields). " +
+        "Examples: \"how do solar panels work?\" -> 2-3 sentences plus ```mermaid flowchart LR: Sunlight --> Solar cells --> DC power --> Inverter --> AC power --> Home, with the grid / battery as a side branch. " +
+        "\"split a K450 bill between 3 with 10% tip\" -> the answer in one line (K165 each) plus a bill-splitter ```tool with those defaults. " +
+        "\"compare iPhone 16 vs Galaxy S25\" -> a ```compare block plus a one-line pick. \"Zambia's copper exports over 5 years\" -> a line ```chart. " +
+        "\"which laptop should I get?\" with no details -> a ```form or ```choices to narrow it down. \"what's the capital of Zambia?\" or \"thanks!\" -> plain text. " +
+        "Other formats the chat draws: a picture for a section: ![alt](https url) on its own line right before that paragraph; several picture lines in a row become a row (up to 3) or a swipeable deck. " +
         "Use only real image URLs you found (Wikimedia Commons, Openverse, the source page); never invent one. " +
-        "A diagram (flow, sequence, mind map, org chart): a ```mermaid code block (or ```graphviz / ```plantuml); it's drawn inline."
+        "Diagrams: ```mermaid (flowchart, sequenceDiagram, mindmap, timeline, pie), or ```graphviz / ```plantuml. Keep node labels 1-4 words, no more than ~12 nodes."
 
     private val imgLine = Regex("""^\s*!\[([^\]]*)]\(\s*<?((?:https?://|/)[^\s)>]+)>?(?:\s+"[^"]*")?\s*\)\s*$""")
     private val stepRe = Regex("""^\s*(\d+)[.)]\s+\*\*(.+?)\*\*\s*[:.\u2014\u2013-]?\s*(.*)$""")
@@ -48,12 +81,51 @@ object RichReplies {
             is AnswerCards.Seg.Text -> text(s.md)
             is AnswerCards.Seg.Lists -> text(s.md, list = s)
             is AnswerCards.Seg.Code -> {
-                val kind = diagramLangs[s.lang.trim().lowercase()]
-                if (kind != null && !private && s.code.isNotBlank()) listOf(Block.Diagram(kind, s.code, diagramUrl(kind, s.code)))
-                else listOf(Block.Plain(s))
+                val lang = s.lang.trim().lowercase()
+                val kind = diagramLangs[lang]
+                if (kind != null && !private && s.code.isNotBlank()) {
+                    // v0.26.1: a diagram is drawn once its fence closes (no broken half-diagram fetches mid-stream).
+                    val d = Block.Diagram(kind, s.code, diagramUrl(kind, s.code))
+                    listOf(if (open(s)) Block.Pending("diagram", s, d) else d)
+                }
+                else RichKit.LANGS[lang]?.let { listOf(interactive(it, s)) } ?: listOf(Block.Plain(s))
             }
             else -> listOf(Block.Plain(s))
         }
+    }
+
+    /** Is this code block still streaming in (no closing fence yet)? */
+    fun open(s: AnswerCards.Seg.Code): Boolean {
+        val lines = s.raw.trimEnd().lines()
+        return lines.size < 2 || !lines.last().trim().startsWith("```")
+    }
+
+    /**
+     * An interactive block, or the fallback: a block whose JSON can't be used shows as the plain code block once it's
+     * closed, and as a quiet "Drawing a chart…" placeholder while it's still streaming in.
+     */
+    fun interactive(kind: String, s: AnswerCards.Seg.Code): Block {
+        val b = try {
+            when (kind) {
+                "chart" -> RichKit.chart(s.code)?.let { Block.Chart(it) }
+                "choices" -> (if (open(s) && RichKit.json(s.code) == null) null else RichKit.choices(s.code))?.let { Block.Choices(it) }
+                "form" -> RichKit.form(s.code)?.let { Block.Form(it) }
+                "tool" -> RichKit.tool(s.code)?.let { Block.Tool(it) }
+                "compare" -> RichKit.compare(s.code)?.let { Block.Compare(it) }
+                else -> null
+            }
+        } catch (_: Exception) { null } catch (_: StackOverflowError) { null }
+        return b ?: if (open(s)) Block.Pending(kind, s, Block.Plain(s)) else Block.Plain(s)
+    }
+
+    /** The placeholder line for a block still streaming in. */
+    fun pendingLabel(kind: String): String = when (kind) {
+        "chart" -> "Drawing a chart\u2026"
+        "compare" -> "Lining up the comparison\u2026"
+        "tool" -> "Building a calculator\u2026"
+        "form" -> "Making a quick form\u2026"
+        "diagram" -> "Drawing a diagram\u2026"
+        else -> "Adding options\u2026"
     }
 
     /** Paragraph-level pass over a text segment: image runs, image + paragraph, step lists, the rest as text. */

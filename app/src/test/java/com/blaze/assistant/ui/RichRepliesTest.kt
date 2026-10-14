@@ -96,7 +96,7 @@ class RichRepliesTest {
 
     @Test fun promptMentionsTheFormats() {
         assertTrue(RichReplies.PROMPT.contains("```mermaid"))
-        assertTrue(RichReplies.PROMPT.contains("**bold title**"))
-        assertTrue(RichReplies.PROMPT.length < 1200)
+        assertTrue(RichReplies.PROMPT.contains("**bold titles**"))
+        assertTrue(RichReplies.PROMPT.length < 6000)   // v0.26.1: the visual-answers prompt, still static (cached prefix)
     }
 }

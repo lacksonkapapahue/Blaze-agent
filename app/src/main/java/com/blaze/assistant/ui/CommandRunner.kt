@@ -79,7 +79,7 @@ object CommandRunner {
                 fun f(x: Usage.Totals) = "${x.input + x.output} tokens, ${x.calls} calls" + if (x.priced) ", about $%.3f".format(x.cost) else ""
                 Agent.note("Today: ${f(t)}\nThis month: ${f(m)}", asReply = true)
             }
-            "think", "reasoning" -> { Settings.showReasoning = !Settings.showReasoning; toast("Reasoning " + if (Settings.showReasoning) "shown" else "hidden") }
+            "think", "reasoning" -> { Settings.showReasoning = !Settings.showReasoning; toast("Thinking line " + if (Settings.showReasoning) "shown" else "hidden") }
             "voice", "listen" -> listen()
             "orb" -> if (!Overlay.showOrb(ctx)) Overlay.requestOverlayPermission(ctx)
             "logs", "livelogs", "lifelogs" -> com.blaze.assistant.life.LifeLogs.toggleFromCommand(ctx, arg)

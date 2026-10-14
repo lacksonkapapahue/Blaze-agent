@@ -1,7 +1,12 @@
 # Blaze Android status
 
 - **Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release.**
-- **Rollover rule (Luke 2026-10-14): after a patch of .9 the next release rolls over: patch back to 0, minor +1 (0.24.9 → 0.25.0).** Shipped: v0.24.7 Magic Hand (#45), v0.24.8 rounded-everything (#44), v0.24.9 rich replies. **v0.25.0 = bug-fix release; v0.25.1 = Linux desktop; v0.25.2 = classic colours; v0.25.3 = "VPN that just works".**
+- **Rollover rule (Luke 2026-10-14): after a patch of .9 the next release rolls over: patch back to 0, minor +1 (0.24.9 → 0.25.0).** Shipped: v0.24.7 Magic Hand (#45), v0.24.8 rounded-everything (#44), v0.24.9 rich replies. **v0.25.0 = bug-fix release; v0.25.1 = Linux desktop; v0.25.2 = classic colours; v0.25.3 = "VPN that just works"; v0.26.0 = Magic Hand box + silent long chats; v0.26.1 = visual answers + "Thinking it through".**
+
+## visual-answers (v0.26.1, versionCode 89)
+- **Branch:** `visual-answers` (off main at v0.26.0). Jack's ask "I want it automatically": the model now picks diagrams, charts, compare cards, mini tools, tappable choices and forms by itself (`RichReplies.PROMPT`), with new native blocks ```chart / ```choices (```buttons) / ```form / ```tool / ```compare (`ui/RichKit.kt`, `ui/RichInteractive.kt`, safe evaluator `ui/Expr.kt`). The "REASONING ⌄" pane is gone: "Thinking it through…" while thinking, "Thought it through · 4 s" after (`agent/ThinkingLabel.kt`). Same release, Jack's bug: in-chat diagram asks no longer go to the diagrams skill / Design preview (`agent/VisualRoute.kt`, ViewRouter, SkillMatch, skills diagrams/data-analysis/blaze-views v2), and Design draws `.mmd` files as pictures. Settings › Brain › Visual answers (`rich_replies`) and Show thinking (`show_reasoning`). See CHANGELOG v0.26.1.
+- **Left (needs the A12):** that real models (Blaze Cloud's default and the free ones) emit valid JSON for the blocks often enough and don't over-use them; that the charts and sliders feel smooth on the A12; that a choice tap / form submit sends once; that "draw a flowchart of how solar panels work" answers inline in seconds; that an old `.mmd` design opens as a picture.
+- **Next step:** if a model keeps breaking the JSON, add a one-shot repair (ask the model to re-emit the block) or loosen `RichKit.json`; bump to v0.26.2.
 
 ## linux-desktop-live-download (v0.25.5, versionCode 87)
 - **Branch:** `linux-desktop-live-download` (off main at v0.25.3; v0.25.4 is the open Magic Hand trail PR #53). Live desktop card (mini VNC view, plain status pill, X to stop, tap for full view) and a desktop download that retries, switches mirrors, resumes and keeps the phone awake. See CHANGELOG v0.25.5.
