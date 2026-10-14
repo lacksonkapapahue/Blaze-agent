@@ -26,13 +26,16 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.24.4 (versionCode 76) is the current build on `main`. Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
+v0.25.3 (versionCode 85) is the current build on `main`. Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
 before it were numbered 1.0–1.17.0 (CHANGELOG.md keeps those numbers); `versionCode` keeps counting up, so phones
 update normally. Because the name went down, CI also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
 1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
+
+## Browser VPN that just works (v0.25.3)
+The browser's VPN (⋯ › VPN & privacy, or the `browser_vpn` tool) works with one tap and nothing to import: **Blaze Free (Cloudflare WARP)**. The first time, the phone makes its own WireGuard keys and registers a free WARP device with Cloudflare (the way wgcf does), saves it privately and reuses it. Only the browser goes through it (wgproxy), it exits near you (hides your IP; can't pick a country), reconnects by itself when the tunnel drops, checks its health every 45 s, and tries WARP's other ports (2408, 500, 1701, 4500) when a network blocks one. The kill switch is unchanged. Imported per-country WireGuard configs work exactly as before. Logic and tests: `browser/WarpFree.kt`, `WarpFreeTest`.
 
 ## Linux desktop (v0.25.1)
 Settings › Advanced › Desktop (Linux) installs and runs a real XFCE desktop inside Blaze's Alpine Linux, shown full screen with touch-mouse and keyboard. Blaze can use it too (`desktop` tool). See CHANGELOG.md.
