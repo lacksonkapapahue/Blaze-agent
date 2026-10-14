@@ -85,22 +85,22 @@ fun DesktopLiveCard(onOpen: () -> Unit, preview: DesktopNarration.Live? = null) 
         exit = fadeOut(tween(220)) + slideOutVertically(tween(220)) { it / 3 }) {
         val pill = if (preview != null) st.status else st.pill(now)
         val shape = Glass.card
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)
             .shadow(14.dp, shape, ambientColor = Color.Black, spotColor = Color.Black)
             .clip(shape).background(Glass.surface).border(1.dp, Glass.border, shape)
             .clickable(onClickLabel = "Open the Linux desktop", onClick = onOpen)
             .semantics { contentDescription = "Blaze is using the Linux desktop: $pill. Tap to open it." }
             .padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            MiniDesktop(st, preview != null, Modifier.width(128.dp).height(72.dp))
-            Spacer(Modifier.width(10.dp))
+            MiniDesktop(st, preview != null, Modifier.width(104.dp).height(59.dp))
+            Spacer(Modifier.width(9.dp))
             Column(Modifier.weight(1f)) {
-                Text("Blaze is using the desktop", maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text("Blaze \u00b7 Linux desktop", maxLines = 1, overflow = TextOverflow.Ellipsis,
                     style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = Glass.blue))
                 Spacer(Modifier.height(5.dp))
                 StatusPill(pill, working = st.acting || preview != null)
             }
-            Spacer(Modifier.width(6.dp))
-            GlassIconButton(Icons.Rounded.Close, "Stop Blaze's desktop work", size = 32.dp, onClick = { DesktopLive.stop() })
+            Spacer(Modifier.width(4.dp))
+            GlassIconButton(Icons.Rounded.Close, "Stop Blaze's desktop work", size = 30.dp, onClick = { DesktopLive.stop() })
         }
     }
 }
@@ -110,12 +110,12 @@ fun DesktopLiveCard(onOpen: () -> Unit, preview: DesktopNarration.Live? = null) 
 fun StatusPill(text: String, working: Boolean, modifier: Modifier = Modifier) {
     val pulse = rememberInfiniteTransition(label = "pill")
     val a by pulse.animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "dot")
-    Row(modifier.clip(Glass.pill).background(Glass.blue).padding(start = 9.dp, end = 11.dp, top = 4.dp, bottom = 4.dp),
+    Row(modifier.clip(Glass.pill).background(Glass.blue).padding(start = 8.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(6.dp).alpha(if (working) a else 0.6f).clip(CircleShape).background(Color.White))
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(5.dp))
         Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 12.5.sp, color = Color.White))
+            style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = Color.White))
     }
 }
 
@@ -162,11 +162,11 @@ private fun MiniDesktop(st: DesktopNarration.Live, preview: Boolean, modifier: M
             if (pic != null) drawImage(pic.asImageBitmap(), dstOffset = IntOffset(ox.toInt(), oy.toInt()),
                 dstSize = IntSize((pw * s).toInt().coerceAtLeast(1), (ph * s).toInt().coerceAtLeast(1)))
             // Where Blaze last clicked (desktop pixels; screenshots are the same size as the desktop).
-            if (st.x >= 0 && st.y >= 0) {
+            if (pic != null && st.x >= 0 && st.y >= 0) {
                 val sx = DesktopPlan.WIDTH.toFloat().let { if (pic != null) pw / it else 1f }
                 val c = Offset(ox + st.x * sx * s, oy + st.y * sx * s)
-                drawCircle(Glass.blue.copy(alpha = 0.25f), radius = 9.dp.toPx(), center = c)
-                drawCircle(Glass.blue, radius = 9.dp.toPx(), center = c, style = Stroke(width = 2.dp.toPx()))
+                drawCircle(Glass.blue.copy(alpha = 0.25f), radius = 7.dp.toPx(), center = c)
+                drawCircle(Glass.blue, radius = 7.dp.toPx(), center = c, style = Stroke(width = 2.dp.toPx()))
             }
         }
         if (bmp.value == null && shot == null) Text("Connecting\u2026", Modifier.align(Alignment.Center),
