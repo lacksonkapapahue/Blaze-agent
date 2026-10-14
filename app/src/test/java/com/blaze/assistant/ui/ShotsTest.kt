@@ -795,4 +795,20 @@ class ShotsTest {
         RichFrame(true, "Five spots worth a stop:\n\n" + (1..5).joinToString("\n") { "![Spot $it](https://example.org/d$it.jpg)" } +
             "\n\nAnd the plan as a diagram:\n\n```mermaid\ngraph LR\nA[Lusaka] --> B[Livingstone] --> C[Falls]\n```")
     }
+
+    // v0.26.1 visual answers: a flow diagram's text, a tappable chart, a compare card, a live bill splitter, choices and a form.
+    @Test fun visualAnswers() = shot("58-visual-answers") {
+        RichFrame(false, "Solar panels turn sunlight into electricity your home can use.\n\n" +
+            "```chart\n{\"type\":\"bar\",\"title\":\"Average sun hours per day\",\"labels\":[\"Lusaka\",\"Ndola\",\"Livingstone\",\"Kasama\"],\"series\":[{\"name\":\"Hours\",\"values\":[8.2,7.6,8.5,7.1]}],\"unit\":\"h\"}\n```\n\n" +
+            "```compare\n{\"title\":\"iPhone 16 vs Galaxy S25\",\"columns\":[\"iPhone 16\",\"Galaxy S25\"],\"rows\":[{\"label\":\"Screen\",\"values\":[\"6.1 in OLED\",\"6.2 in AMOLED\"]},{\"label\":\"Battery\",\"values\":[\"3,561 mAh\",\"4,000 mAh\"]},{\"label\":\"Storage\",\"values\":[\"128 GB\",\"128 GB\"]}],\"verdict\":\"Galaxy S25 for battery; iPhone 16 if you live in Apple's world.\",\"pick\":1}\n```")
+    }
+
+    @Test fun visualTools() = shot("59-visual-tools", dark = true) {
+        CompositionLocalProvider(RichSend.Local provides { _: String -> }) {
+            RichFrame(true, "Each of you pays **K165**.\n\n" +
+                "```tool\n{\"title\":\"Bill splitter\",\"inputs\":[{\"id\":\"bill\",\"label\":\"Bill\",\"type\":\"number\",\"default\":450,\"prefix\":\"K\"},{\"id\":\"people\",\"label\":\"People\",\"type\":\"slider\",\"min\":1,\"max\":12,\"default\":3},{\"id\":\"tip\",\"label\":\"Tip\",\"type\":\"slider\",\"min\":0,\"max\":25,\"default\":10,\"suffix\":\"%\"}],\"outputs\":[{\"label\":\"Tip\",\"formula\":\"bill*tip/100\",\"prefix\":\"K\"},{\"label\":\"Each pays\",\"formula\":\"bill*(1+tip/100)/people\",\"prefix\":\"K\"}]}\n```\n\n" +
+                "```choices\n{\"prompt\":\"Want me to save this?\",\"options\":[\"Save as a note\",\"Remind us on Friday\",\"No thanks\"]}\n```\n\n" +
+                "```chart\n{\"type\":\"pie\",\"title\":\"Where the K495 goes\",\"labels\":[\"Food\",\"Drinks\",\"Tip\"],\"series\":[{\"values\":[300,150,45]}],\"unit\":\"K\"}\n```")
+        }
+    }
 }

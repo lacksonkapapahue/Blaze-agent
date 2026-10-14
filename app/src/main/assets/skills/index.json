@@ -28,8 +28,8 @@
   },
   {
    "name": "data-analysis",
-   "version": 1,
-   "sha256": "082e1f3699a53a7c4bfa80895e23916fd8e53a17766051b9a2b9f9e520894112"
+   "version": 2,
+   "sha256": "a1c07694d98a2332d6317ce32569b7ac6618eb408cdaae93ff4a7efa719d253c"
   },
   {
    "name": "api-integration",
@@ -124,8 +124,8 @@
   },
   {
    "name": "diagrams",
-   "version": 1,
-   "sha256": "1802d9b100eb3fa26583598e222b3f677b90613685d463421d957494cbc22a21"
+   "version": 2,
+   "sha256": "76731602b7beb5675486672412c0c0415f82e2b0ea9f4b0917f719d449813c9a"
   },
   {
    "name": "floor-plan",
@@ -274,8 +274,8 @@
   },
   {
    "name": "blaze-views",
-   "version": 1,
-   "sha256": "bdd3fae21423900c4a38276dc756ee55ec9ab29f7071113df7e3be5a7c0d21c1"
+   "version": 2,
+   "sha256": "a1b3351c8050e7100b9526c39d350fe58dc6a817ab013cbdbbec430e572aaa8d"
   },
   {
    "name": "blaze-workflow-builder",

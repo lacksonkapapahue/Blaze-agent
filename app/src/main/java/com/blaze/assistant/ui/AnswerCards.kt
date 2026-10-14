@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -129,11 +130,14 @@ fun AnswerBody(key: Long, src: String) {
     val fold = Settings.foldAnswers
     val segs = remember(src) { AnswerCards.parse(src) }
     val report = fold && AnswerCards.isReport(src)
-    // v0.24.9 rich replies: steps, section pictures, image rows / decks and diagrams on top of the cards (pref rich_replies, default on).
+    // v0.24.9 rich replies: steps, section pictures, image rows / decks and diagrams on top of the cards (pref rich_replies, default on;
+    // "Visual answers" in Settings since v0.26.1, which also covers charts, choices, forms, tools and compare cards).
     val priv = com.blaze.assistant.agent.Agent.privateChat.value
     val rich = Settings.bool("rich_replies", true)
     val blocks = remember(src, priv, rich) { if (rich) RichReplies.expand(segs, priv) else segs.map { RichReplies.Block.Plain(it) } }
     val scale = animatorScale()
+    // v0.26.1: a visual still streaming in shows a quiet placeholder only while Blaze is replying.
+    val streaming = com.blaze.assistant.agent.Agent.mood.collectAsState().value != com.blaze.assistant.agent.Mood.IDLE
     val body: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             blocks.forEachIndexed { i, b ->
@@ -144,6 +148,16 @@ fun AnswerBody(key: Long, src: String) {
                     is RichReplies.Block.ImageText -> RichImageText(b.img, b.md) { MdText(it) }
                     is RichReplies.Block.Images -> RichImageGroup(b.imgs, scale)
                     is RichReplies.Block.Diagram -> RichDiagram(b)
+                    // v0.26.1 visual answers: interactive blocks.
+                    is RichReplies.Block.Chart -> RichChart(b.chart)
+                    is RichReplies.Block.Choices -> RichChoices(b.choices)
+                    is RichReplies.Block.Form -> RichForm(b.form)
+                    is RichReplies.Block.Tool -> RichTool(b.tool)
+                    is RichReplies.Block.Compare -> RichCompare(b.compare)
+                    is RichReplies.Block.Pending -> if (streaming) RichPending(b.kind) else when (val f = b.fallback) {
+                        is RichReplies.Block.Diagram -> RichDiagram(f)
+                        else -> { val n = b.seg.code.lines().size; PlainCard((b.seg.lang.ifBlank { "Code" }) + " · $n lines", b.seg.raw) { CodeText(b.seg.code) } }
+                    }
                     is RichReplies.Block.Plain -> when (val s = b.seg) {
                     is AnswerCards.Seg.Text -> MdText(s.md)
                     is AnswerCards.Seg.Lists ->

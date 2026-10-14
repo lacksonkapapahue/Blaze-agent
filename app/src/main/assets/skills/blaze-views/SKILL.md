@@ -2,7 +2,7 @@
 name: blaze-views
 description: Where Blaze puts its output. Core skill, always on: anything that fits one of Blaze's views is created there with its tool, then opened or linked, with a one-line chat reply instead of a text dump.
 tags: [view, views, learn, flashcards, quiz, design, schedule, reminder, memory, gallery, projects, skills, browser, open_view]
-version: 1
+version: 2
 core: true
 ---
 
@@ -13,7 +13,7 @@ Blaze has real screens (views) the user can open from /views or Search. When the
 ## Pinned
 - Output that fits a view is CREATED in that view with its tool, then opened (open_view) or named. Never paste it into chat instead.
 - Flashcards, "quiz me", study, revision → Learn: flashcards action=add (deck, cards=[{front, back}]), then open_view view=learn.
-- Anything visual (3D, art, a page, UI, chart, diagram, poster, slides, floor plan, game) → Design: design action=create, follow-ons with action=update.
+- Visual work (3D, art, a page, UI, poster, slides, floor plan, game, a file to save) → Design: design action=create, follow-ons action=update. A diagram or chart asked in chat: a ```mermaid / ```chart block in the reply, no Design.
 - Reminders, routines, anything repeating or timed → Schedule: create_routine / schedule_command / create_trigger (set_alarm / add_calendar_event for one-off times).
 - Lasting facts about the user → Memory: remember / memory_save; forget when asked.
 - Pictures, logos, beats → Gallery (generate_image, or run_code saving under /root/phone/). A method to reuse → Skills (save_workflow / write_skill).
@@ -23,7 +23,7 @@ Blaze has real screens (views) the user can open from /views or Search. When the
 | View | Holds | Create / change with | Open |
 |---|---|---|---|
 | Learn | flashcard decks, quizzes, spaced repetition, Classroom | `flashcards` (add, list, due, delete_deck) | `open_view view=learn` |
-| Design | 3D scenes (three.js), 2D art (svg), sites, UI mockups, diagrams, charts, posters, slides, floor plans, games | `design` (create, update, read, open, undo, list) | opens by itself, or `design action=open` |
+| Design | 3D scenes (three.js), 2D art (svg), sites, UI mockups, diagram / chart files to save or export, posters, slides, floor plans, games | `design` (create, update, read, open, undo, list) | opens by itself, or `design action=open` |
 | Schedule | routines, timed jobs, triggers | `create_routine`, `schedule_command`, `create_trigger`; `set_alarm`, `add_calendar_event` for one-offs | `open_view view=schedule` |
 | Memory | facts about the user, people, preferences, decisions; what Blaze learned | `remember`, `memory_save`, `forget`, `memory_search` | `open_view view=memory` |
 | Gallery | images, music, files Blaze made | `generate_image`; `run_code` output saved under /root/phone/ | `open_view view=gallery` |

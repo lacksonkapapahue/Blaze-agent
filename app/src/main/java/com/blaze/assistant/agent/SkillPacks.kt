@@ -52,7 +52,8 @@ object SkillPacks {
      * Skills switched off in Settings are left out.
      */
     fun promptBlock(query: String = ""): String {
-        val l = all().filter { SkillLibrary.isOn(it.dir.name) }; if (l.isEmpty()) return ""
+        // v0.26.1: an in-chat diagram / chart leaves out the file-route skills (VisualRoute).
+        val l = all().filter { SkillLibrary.isOn(it.dir.name) && !VisualRoute.skipSkill(query, it.dir.name) }; if (l.isEmpty()) return ""
         fun words(s: String) = s.lowercase().split(Regex("[^a-z0-9]+")).filter { it.length > 3 }.toSet()
         val head = "\nSKILLS (call use_skill to read one before doing a matching task): "
         if (l.size <= 12 || query.isBlank()) return head + l.take(40).joinToString("; ") { "${it.name}: ${it.description.take(120)}" }

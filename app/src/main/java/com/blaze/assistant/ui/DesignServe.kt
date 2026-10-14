@@ -119,6 +119,7 @@ object DesignServe {
         "gltf" -> "model/gltf+json"
         "wasm" -> "application/wasm"
         "txt", "md" -> "text/plain"
+        "mmd", "mermaid" -> "text/plain"
         "mp3" -> "audio/mpeg"
         "mp4" -> "video/mp4"
         else -> "application/octet-stream"
@@ -277,5 +278,61 @@ var poll=setInterval(function(){var s=window.__blazeScene;if(!s)return;clearInte
             "design: $design\n" +
             "engine: ${engine?.ifBlank { null } ?: "none"} (WebGL ${if (glLevel <= 0) "unavailable" else glLevel.toString()})\n" +
             errors.takeLast(10).joinToString("\n") { "- " + it.replace('\n', ' ').take(500) } + "\n"
+    }
+
+    // ---------------- Mermaid files (v0.26.1) ----------------
+    // Jack's A12: a .mmd file opened in Design showed its raw "flowchart TD / Sun[Sunlight] -->…" source as text on a
+    // white page. A Mermaid file (by extension, or text that starts like Mermaid) is now drawn as a picture instead.
+
+    val MERMAID_EXT = setOf("mmd", "mermaid")
+    private val mermaidStart = Regex("""^\s*(?:%%[^\n]*\n\s*)*(?:---\n[\s\S]*?\n---\s*\n\s*)?""" +
+        """(?:flowchart\b|graph\s+(?:TB|TD|BT|RL|LR)\b|sequenceDiagram\b|classDiagram(?:-v2)?\b|stateDiagram(?:-v2)?\b|erDiagram\b|journey\b|gantt\b|""" +
+        """pie(?:\s+(?:title|showData)\b|\s*\n)|mindmap\b|timeline\b|gitGraph\b|quadrantChart\b|requirementDiagram\b|C4(?:Context|Container|Component)\b|""" +
+        """sankey-beta\b|xychart-beta\b|block-beta\b)""")
+    private val mdFence = Regex("""^\s*```\s*mermaid\s*\n([\s\S]*?)\n\s*```\s*$""")
+
+    /** Does [text] read as Mermaid source (it starts with a diagram keyword such as flowchart, graph TD, sequenceDiagram, mindmap…)? */
+    fun looksMermaid(text: String): Boolean = mermaidStart.containsMatchIn(text.take(4000))
+
+    /**
+     * The Mermaid source to draw for a previewed file, or null when it isn't Mermaid: a .mmd / .mermaid file; a .md
+     * that is just one ```mermaid block; or a .txt / extension-less file whose text starts like Mermaid. HTML, SVG,
+     * pictures and the rest are never touched.
+     */
+    fun mermaidSource(name: String, text: String): String? {
+        val ext = name.substringAfterLast('/').let { if (it.contains('.')) it.substringAfterLast('.').lowercase() else "" }
+        val t = text.replace("\r\n", "\n").trim()
+        if (t.isEmpty()) return null
+        return when (ext) {
+            in MERMAID_EXT -> mdFence.matchEntire(t)?.groupValues?.get(1)?.trim() ?: t
+            "md", "markdown" -> mdFence.matchEntire(t)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() } ?: t.takeIf { looksMermaid(it) }
+            "txt", "" -> t.takeIf { looksMermaid(it) }
+            else -> null
+        }
+    }
+
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+
+    /**
+     * A page that draws [code] as a picture: the mermaid.ink image (as the chat's diagrams), and if that can't load,
+     * mermaid.js from jsDelivr. The source sits in a hidden element for mermaid.js and is never shown as text; if
+     * neither renderer can be reached the page says so in one plain line.
+     */
+    fun mermaidHtml(code: String, title: String = "Diagram"): String {
+        val img = RichReplies.diagramUrl("mermaid", code)
+        return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<title>" + esc(title) + "</title><style>html,body{margin:0;background:#fff;font-family:sans-serif}" +
+            "#wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box}" +
+            "#d{max-width:100%;height:auto;border-radius:12px}#src{display:none}#msg{display:none;color:#5a5a5e;font-size:15px;text-align:center}" +
+            ".mermaid svg{max-width:100%;height:auto}</style></head><body><div id=\"wrap\">" +
+            "<img id=\"d\" alt=\"" + esc(title) + "\" src=\"" + esc(img) + "\" onerror=\"blazeMermaidFallback()\">" +
+            "<div id=\"out\" class=\"mermaid\"></div><p id=\"msg\">Couldn\u2019t draw this diagram without a connection. Tap Reload to try again.</p></div>" +
+            "<script type=\"text/plain\" id=\"src\">" + esc(code) + "</script>" +
+            "<script>function blazeMermaidFallback(){document.getElementById('d').style.display='none';" +
+            "var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';" +
+            "s.onload=function(){try{var t=document.createElement('textarea');t.innerHTML=document.getElementById('src').textContent;" +
+            "mermaid.initialize({startOnLoad:false,theme:'default'});mermaid.render('blazeM',t.value).then(function(r){document.getElementById('out').innerHTML=r.svg;})" +
+            ".catch(function(){document.getElementById('msg').style.display='block';});}catch(e){document.getElementById('msg').style.display='block';}};" +
+            "s.onerror=function(){document.getElementById('msg').style.display='block';};document.head.appendChild(s);}</script></body></html>"
     }
 }

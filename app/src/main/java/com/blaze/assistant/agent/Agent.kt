@@ -30,7 +30,9 @@ data class ChatMessage(val id: Long, val role: Role, val text: String, val files
                        /** Pictures, beats and other media Blaze made for this reply (absolute paths). */
                        val media: List<String> = emptyList(),
                        /** When it was added (ms); 0 for chats saved before v1.13. */
-                       val at: Long = System.currentTimeMillis())
+                       val at: Long = System.currentTimeMillis(),
+                       /** v0.26.1: how long the model's reasoning streamed (ms), for "Thought it through · 4 s"; 0 = not measured. */
+                       val thinkMs: Long = 0L)
 
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
 object ReplyParts {
@@ -398,7 +400,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             val files = m.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { java.io.File(it).exists() } ?: emptyList()
-            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"))
+            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"), thinkMs = m.optLong("think_ms"))
             if (m.has("mark")) s.historyMark[mid] = m.getInt("mark")
         }
         ids.set(maxOf(ids.get(), maxId + 1))
@@ -654,8 +656,9 @@ When you finish, say what you did in one short sentence.
             append(CoreSkills.promptBlock())
             // v0.23.0: the always-present VIEWS block (static, so it stays in the cached prefix).
             append(ViewRouter.PROMPT)
-            // v0.24.9: rich replies (steps, section pictures, image groups, diagrams); static, so it stays cached.
-            append(com.blaze.assistant.ui.RichReplies.PROMPT)
+            // v0.24.9 rich replies / v0.26.1 visual answers (diagrams, charts, compare, tools, choices, forms; picked
+            // automatically). Static text, so it stays in the cached prefix; left out only when Visual answers is off.
+            if (Settings.bool("rich_replies", true)) append(com.blaze.assistant.ui.RichReplies.PROMPT)
             // Speed plan step 2: everything above stays identical turn after turn, so providers can
             // reuse their cached prefix. Everything that changes (clock, memory, device) goes last.
             append("\n\n")
@@ -857,10 +860,12 @@ When you finish, say what you did in one short sentence.
         var status: String
             get() = _status
             set(v) { _status = v; if (this === cur) Agent._status.value = v }
+        /** v0.26.1: times the reasoning for the "Thought it through · 4 s" line. */
+        val thinkClock = ThinkingLabel.Clock()
         private var _thinking = ""
         var thinking: String
             get() = _thinking
-            set(v) { _thinking = v; if (this === cur) Agent._thinking.value = v }
+            set(v) { if (v != _thinking) thinkClock.update(v); _thinking = v; if (this === cur) Agent._thinking.value = v }
 
         val busy get() = job?.isActive == true
 
@@ -912,11 +917,12 @@ When you finish, say what you did in one short sentence.
             val p = ReplyParts.split(raw, final = true).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
             val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
             val text = p.text.ifEmpty { "Done." }
+            val tms = if (think.isNotBlank()) thinkClock.ms() else 0L
             if (liveId >= 0) msgs = msgs.map {
-                if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta, media = media) else it }
+                if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta, media = media, thinkMs = tms) else it }
             else {
                 val id = ids.getAndIncrement()
-                msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta, media = media)
+                msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta, media = media, thinkMs = tms)
             }
         }
 
@@ -952,6 +958,7 @@ When you finish, say what you did in one short sentence.
                         if (m.meta.isNotEmpty()) put("meta", m.meta)
                         if (m.at > 0) put("at", m.at)
                         if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
+                        if (m.thinkMs > 0) put("think_ms", m.thinkMs)
                     })
             }
             val hist = JSONArray()
@@ -1147,7 +1154,9 @@ When you finish, say what you did in one short sentence.
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
-                (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs)
+                (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs) +
+                // v0.26.1: an in-chat diagram / chart is drawn in the reply itself (no files, preview or use_skill).
+                (if (turnView == null && turnDesignNote.isEmpty() && Settings.bool("rich_replies", true) && VisualRoute.inChat(lastUserText())) VisualRoute.HINT else "")
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
             var lastShot = -1
             for (i in 0 until history.length()) if (isShot(history.getJSONObject(i))) lastShot = i

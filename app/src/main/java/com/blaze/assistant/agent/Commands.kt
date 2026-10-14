@@ -30,7 +30,7 @@ object Commands {
         Command("memory", "", "See what Blaze remembers"),
         Command("routines", "", "See and edit routines"),
         Command("usage", "", "Tokens and cost so far"),
-        Command("think", "", "Turn reasoning display on/off"),
+        Command("think", "", "Turn the \u201cThinking it through\u201d line on/off"),
         Command("voice", "", "Start listening"),
         Command("orb", "", "Pin the floating orb"),
         Command("copy", "", "Copy this whole chat"),

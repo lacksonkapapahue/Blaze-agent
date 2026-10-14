@@ -32,7 +32,8 @@ class DesignEverythingTest {
 
     @Test fun threeDAndVisualRequestsGoToDesign() {
         for (t in listOf("make me a tall modern 3D rocket", "can you build a 3d model of a house", "render a car", "design a mobile app UI for a bakery",
-            "make a diagram of the water cycle", "draw a flowchart of the login process", "make a chart of my spending by category", "show me a 3D scene of a room",
+            // v0.26.1: plain diagram / chart asks are drawn inline in chat (VisualRouteTest); file asks still go to Design.
+            "make a diagram of the water cycle and save it as a PNG", "draw a flowchart of the login process on a poster", "export a chart of my spending by category", "show me a 3D scene of a room",
             "build a rocket", "create a floor plan for a 2 bedroom house", "mockup of a product box", "make a prototype of a todo app", "make a poster for the show"))
             assertEquals(t, "design", ViewRouter.route(t)?.id)
     }

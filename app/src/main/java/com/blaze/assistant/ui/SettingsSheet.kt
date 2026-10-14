@@ -233,7 +233,10 @@ private fun AiPage() {
     Spacer(Modifier.height(12.dp))
     Field("Your name", name, { name = it; Settings.userName = it }, "What should Blaze call you?")
     Spacer(Modifier.height(10.dp))
-    ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
+    ToggleRow("Show thinking", "A quiet \u201cThinking it through\u2026\u201d line while the model thinks (its reasoning itself isn't shown)", think) { think = !think; Settings.showReasoning = think }
+    // v0.26.1: the rich_replies pref (default on) now covers diagrams, charts, buttons, forms and mini tools.
+    var visual by remember { mutableStateOf(Settings.bool("rich_replies", true)) }
+    ToggleRow("Visual answers", "Blaze picks diagrams, charts, compare cards, buttons, forms and little calculators when they explain better than text", visual) { visual = !visual; Settings.setBool("rich_replies", visual) }
     var tech by remember { mutableStateOf(com.blaze.assistant.agent.ReplyChips.showTech()) }
     ToggleRow("Show technical details", "Timings, data used, model names and the token meter under replies (hidden by default)", tech) { tech = !tech; Settings.setBool(com.blaze.assistant.agent.ReplyChips.PREF, tech) }
     ToggleRow("Show every step", "List each tool call as it happens, instead of one plain line and \"Worked for 12s\"", showSteps) { showSteps = !showSteps; Settings.showSteps = showSteps }

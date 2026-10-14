@@ -134,7 +134,8 @@ object SkillMatch {
         cache?.takeIf { now - it.first < 20_000 }?.second ?: candidates().also { cache = now to it }
     } catch (_: Throwable) { emptyList() }
 
-    fun forTurn(query: String): Result = try { match(query, cached()) } catch (_: Throwable) { Result.NONE }
+    // v0.26.1: an in-chat diagram / chart doesn't pull in the file-route skills (VisualRoute); it's drawn in the reply.
+    fun forTurn(query: String): Result = try { match(query, VisualRoute.filter(query, cached())) } catch (_: Throwable) { Result.NONE }
 
     fun invalidate() { cache = null }
 }
