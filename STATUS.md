@@ -122,3 +122,8 @@
 
 ## Next releases (re-planned 2026-10-14)
 - **v0.25.0** = bug fixes (above). **v0.25.1 = "Linux desktop"** (XFCE + VNC inside Alpine, in-app viewer, `desktop` tool). **v0.25.2 = "VPN that just works"** (moved twice: was v0.25.0, then v0.25.1).
+
+## linux-desktop (v0.25.1, versionCode 83)
+- **Branch:** `linux-desktop`, PR opened Oct 14 2026; merge on green CI and release v0.25.1.
+- **Left (needs the A12):** Start the desktop on Wi-Fi, check install time, RAM headroom, touch-mouse and keyboard; ask Blaze to open the terminal on the desktop.
+- **Next:** v0.25.2 VPN that just works.
