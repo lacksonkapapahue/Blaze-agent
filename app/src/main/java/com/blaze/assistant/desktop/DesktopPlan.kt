@@ -40,11 +40,45 @@ object DesktopPlan {
         return (1..8).map { abc[rnd.nextInt(abc.length)] }.joinToString("")
     }
 
-    /** One-time install inside Alpine (idempotent: `apk add` skips what's there). */
+    /**
+     * v0.25.5: the packages in small batches, each its own `apk add`, so a dropped connection only costs the batch it
+     * hit (what's installed stays installed; `apk add` skips it next time). Same set as [PACKAGES].
+     */
+    val BATCHES: List<List<String>> = listOf(
+        listOf("dbus", "dbus-x11", "font-dejavu"),
+        listOf("tigervnc", "xdotool"),
+        listOf("xfce4-session", "xfwm4", "xfce4-panel", "xfdesktop"),
+        listOf("xfce4", "adwaita-icon-theme"),
+        listOf("xfce4-terminal", "thunar", "mousepad"),
+        listOf("imagemagick"),
+        listOf("netsurf"),
+    )
+
+    /** apk waits this long with no progress before giving up on a connection (its default is 60 s). */
+    const val APK_TIMEOUT = 120
+
+    /** Sets `$T` to `--timeout 120` when this apk understands it (apk-tools 2.14+, Alpine 3.20 has 2.14.4), else nothing. */
+    const val APK_TIMEOUT_PROBE = "T=''; if apk --timeout 1 --version >/dev/null 2>&1; then T='--timeout $APK_TIMEOUT'; fi"
+
+    /** Points apk at [mirror] (`/etc/apk/repositories`). */
+    fun reposLine(mirror: String): String = "mkdir -p /etc/apk && printf '%s' '" + com.blaze.assistant.terminal.AlpineNet.repositories(mirror).replace("'", "") + "' > /etc/apk/repositories"
+
+    /** One install step: refresh the package list from [mirror] when [update], then add [pkgs] (none for the update-only step). */
+    fun stepScript(mirror: String, pkgs: List<String>, update: Boolean): String = buildString {
+        append("set -e\n").append(reposLine(mirror)).append('\n').append(APK_TIMEOUT_PROBE).append('\n')
+        if (update) append("apk \$T update\n")
+        if (pkgs.isNotEmpty()) append("apk \$T add ").append(pkgs.joinToString(" ")).append('\n')
+        append("echo BLAZE_STEP_OK")
+    }
+
+    /** The last step: folders the session needs, and the "installed" mark. */
+    const val FINISH_SCRIPT = "set -e\nmkdir -p /root/.vnc /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix\n" +
+        "touch /root/.blaze_desktop_ok\necho BLAZE_DESKTOP_INSTALLED"
+
+    /** The whole install as one script (first mirror, no retries), for reference and the agent; the app runs it step by step ([DesktopInstall]). */
     fun installScript(): String =
-        "set -e\napk update\napk add --no-cache " + PACKAGES.joinToString(" ") + "\n" +
-            "mkdir -p /root/.vnc /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix\n" +
-            "touch /root/.blaze_desktop_ok\necho BLAZE_DESKTOP_INSTALLED"
+        stepScript(com.blaze.assistant.terminal.AlpineNet.MIRRORS[0], emptyList(), update = true) + "\n" +
+            BATCHES.joinToString("\n") { "apk \$T add " + it.joinToString(" ") } + "\n" + FINISH_SCRIPT
 
     const val INSTALLED_MARK = "/root/.blaze_desktop_ok"
 

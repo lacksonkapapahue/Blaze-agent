@@ -7,8 +7,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
  * A real Linux (Alpine) inside Blaze, run with PRoot like UserLAnd/Termux do: no root needed.
@@ -16,7 +14,7 @@ import java.net.URL
  * into filesDir/linux/alpine; PRoot and its loader ship in the APK as native libs.
  */
 object Linux {
-    private const val VER = "3.20.3"
+    private const val VER = AlpineNet.VER
     private lateinit var app: Context
     val status = MutableStateFlow("")          // install progress text
     val installing = MutableStateFlow(false)
@@ -28,30 +26,34 @@ object Linux {
     fun installed() = ::app.isInitialized && File(rootfs(), "bin/busybox").exists() && File(rootfs(), ".blaze_ok").exists()
     fun supported() = ::app.isInitialized && nat("libproot.so").exists() && nat("libproot_loader.so").exists()
 
-    private fun arch() = if (Build.SUPPORTED_ABIS.firstOrNull()?.contains("arm64") == true) "aarch64" else "armv7"
+    private fun arch() = AlpineNet.arch(Build.SUPPORTED_ABIS.firstOrNull())
 
     suspend fun install(): String = withContext(Dispatchers.IO) {
         if (!supported()) return@withContext "This phone's CPU isn't supported for Linux."
         if (installing.value) {   // another caller (e.g. the setup prefetch) is on it: wait for it instead of skipping
             var waited = 0
-            while (installing.value && waited < 600) { kotlinx.coroutines.delay(1000); waited++ }
+            while (installing.value && waited < 900) { kotlinx.coroutines.delay(1000); waited++ }
             return@withContext if (installed()) "Alpine Linux $VER installed." else "Install didn't finish: ${status.value}"
         }
         if (installed()) return@withContext "Alpine Linux $VER is already installed."
         installing.value = true
         try {
             Terminal.setup()
-            val url = "https://dl-cdn.alpinelinux.org/alpine/v${VER.substringBeforeLast('.')}/releases/${arch()}/alpine-minirootfs-$VER-${arch()}.tar.gz"
-            val tgz = File(app.cacheDir, "alpine.tar.gz")
+            // v0.25.5: resumable (HTTP Range), retried with backoff across several mirrors, SHA-256 checked. v0.25.1 used one
+            // plain HttpURLConnection to one mirror: a dropped connection failed the install, and a cut-short file went
+            // straight to the unpacker.
+            val a = arch()
+            val tgz = File(app.cacheDir, "alpine-$VER-$a.tar.gz")
             status.value = "Downloading Alpine Linux…"
-            val c = URL(url).openConnection() as HttpURLConnection
-            c.connectTimeout = 20_000; c.readTimeout = 60_000
-            val total = c.contentLengthLong
-            c.inputStream.use { inp -> tgz.outputStream().use { out ->
-                val buf = ByteArray(64 * 1024); var n: Int; var got = 0L
-                while (inp.read(buf).also { n = it } > 0) { out.write(buf, 0, n); got += n
-                    if (total > 0) status.value = "Downloading Alpine Linux… ${got * 100 / total}%" }
-            } }
+            try {
+                Fetch.download(AlpineNet.rootfsUrls(a), tgz, AlpineNet.ROOTFS_SHA256[a].orEmpty(), progress = { got, total, retry ->
+                    status.value = retry ?: if (total > 0) "Downloading Alpine Linux… ${got * 100 / total}%" else "Downloading Alpine Linux…"
+                })
+            } catch (e: Exception) {
+                val m = "${Fetch.reason(e)}, so Linux didn't finish downloading. What's downloaded is kept: tap Install to carry on."
+                status.value = m
+                return@withContext m
+            }
             status.value = "Unpacking…"
             rootfs().deleteRecursively(); rootfs().mkdirs()
             val n = try { untar(tgz, rootfs()) } catch (e: Exception) {
@@ -132,7 +134,8 @@ object Linux {
     /** DNS, hosts, a profile, and stand-ins for /proc files Android hides from apps. */
     private fun prepare() {
         val r = rootfs()
-        File(r, "etc/resolv.conf").apply { delete(); writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n") }
+        // v0.25.5: the phone's own DNS first (some Wi-Fi networks block 8.8.8.8 / 1.1.1.1), refreshed on every command.
+        File(r, "etc/resolv.conf").apply { delete(); writeText(AlpineNet.resolvConf(phoneDns())) }
         File(r, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost\n")
         File(r, "etc/profile.d").mkdirs()
         File(r, "etc/profile.d/blaze.sh").writeText("export PS1='alpine:\\w\\$ '\nexport LANG=C.UTF-8\n")
@@ -156,6 +159,11 @@ object Linux {
             }
         }
     }
+
+    private fun phoneDns(): List<String> = try {
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+        cm.getLinkProperties(cm.activeNetwork)?.dnsServers?.mapNotNull { it.hostAddress } ?: emptyList()
+    } catch (_: Throwable) { emptyList() }
 
     /** The command line that runs [cmd] (or a login shell) inside Alpine. */
     fun command(cmd: String?): List<String> {

@@ -62,6 +62,7 @@ import com.blaze.assistant.desktop.DesktopPlan
 import com.blaze.assistant.desktop.DesktopPlan.Phase
 import com.blaze.assistant.desktop.LinuxDesktop
 import com.blaze.assistant.desktop.Rfb
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -81,6 +82,11 @@ fun LinuxDesktopPage(preview: LinuxDesktop.State? = null) {
     var viewing by remember { mutableStateOf(false) }
     val supported = preview != null || remember { LinuxDesktop.cpuOk() }
     val killed = preview == null && remember(st.phase) { LinuxDesktop.wasKilled() } || st.phase == Phase.KILLED
+    // v0.25.5: the live desktop card asked for the full-screen view.
+    val wantViewer by LinuxDesktop.viewerRequest.collectAsState()
+    LaunchedEffect(wantViewer, st.phase) {
+        if (preview == null && wantViewer) { if (st.phase == Phase.RUNNING) viewing = true; LinuxDesktop.viewerRequest.value = false }
+    }
 
     PageHead("Desktop", "Linux desktop", "A real Linux desktop (XFCE) running inside Blaze's own Linux on this phone. Nothing leaves the phone; Blaze can work in it too, always after asking.")
     Spacer(Modifier.height(14.dp))
@@ -118,7 +124,9 @@ fun LinuxDesktopPage(preview: LinuxDesktop.State? = null) {
             BlazeButton("Open full screen", Modifier.weight(1f)) { viewing = true }
             BlazeButton("Stop", kind = BtnKind.SECONDARY) { scope.launch { LinuxDesktop.stop() } }
         } else BlazeButton(if (killed) "Resume" else if (busy) "Working\u2026" else "Start", Modifier.weight(1f), enabled = !busy) {
-            scope.launch { if (LinuxDesktop.start(ctx).startsWith("The desktop is running")) viewing = true }
+            // v0.25.5: runs in Blaze's own scope, so leaving this page doesn't cancel a download.
+            val job = LinuxDesktop.startAsync(ctx)
+            scope.launch { if (job.await().startsWith("The desktop is running")) viewing = true }
         }
     }
     Spacer(Modifier.height(18.dp))
@@ -241,6 +249,12 @@ fun DesktopViewer(onClose: () -> Unit) {
                 ViewerChip("\u25a0", "Stop the desktop and free memory") { scope.launch { LinuxDesktop.stop() }; onClose() }
             }
             if (keyboard) KeyInput(client, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
+            // v0.25.5: what Blaze is doing, when it's working in the desktop you're watching.
+            val live by com.blaze.assistant.desktop.DesktopLive.state.collectAsState()
+            var tick by remember { mutableIntStateOf(0) }
+            LaunchedEffect(live.active) { while (live.active) { delay(400); tick++ } }
+            val t = remember(tick) { System.currentTimeMillis() }
+            if (live.show(t)) StatusPill(live.pill(t), working = live.acting, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(14.dp))
         }
     }
 }
