@@ -1,6 +1,5 @@
 package com.blaze.assistant.terminal
 
-import com.sun.net.httpserver.HttpServer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -11,43 +10,62 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import java.io.File
-import java.net.InetSocketAddress
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.nio.file.Files
 import java.security.MessageDigest
+import kotlin.concurrent.thread
 import kotlin.random.Random
 
 /** v0.25.5: the Linux download resumes after a dropped connection, checks its SHA-256 and moves on to other mirrors. */
 class FetchTest {
     private val body = Random(7).nextBytes(300_000)
     private val sha = MessageDigest.getInstance("SHA-256").digest(body).joinToString("") { "%02x".format(it) }
-    private lateinit var server: HttpServer
+    private lateinit var server: ServerSocket
     private lateinit var dir: File
-    private val ranges = mutableListOf<String?>()
-    private var cutFirst = 0          // how many requests to cut off half-way
-    private var honourRange = true
+    private val ranges = java.util.Collections.synchronizedList(mutableListOf<String?>())
+    @Volatile private var cutFirst = 0          // how many requests to cut off half-way
+    @Volatile private var honourRange = true
     private var port = 0
 
+    /** A tiny HTTP/1.1 server on a plain socket (the Android test classpath has no com.sun.net.httpserver). */
     @Before fun up() {
         dir = Files.createTempDirectory("fetch").toFile()
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/good") { ex ->
-            val range = ex.requestHeaders.getFirst("Range"); synchronized(ranges) { ranges += range }
-            val from = if (honourRange) range?.removePrefix("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0 else 0
-            val rest = body.copyOfRange(from, body.size)
-            if (from > 0) ex.responseHeaders.add("Content-Range", "bytes $from-${body.size - 1}/${body.size}")
-            ex.sendResponseHeaders(if (from > 0) 206 else 200, rest.size.toLong())
-            try {
-                if (cutFirst > 0) { cutFirst--; ex.responseBody.write(rest, 0, rest.size / 2); ex.responseBody.flush(); throw java.io.IOException("cut") }
-                ex.responseBody.write(rest)
-            } catch (_: Exception) { } finally { ex.close() }
+        server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        port = server.localPort
+        thread(isDaemon = true) {
+            while (!server.isClosed) {
+                val sock = try { server.accept() } catch (_: Exception) { break }
+                thread(isDaemon = true) { try { sock.use { serve(it) } } catch (_: Exception) { } }
+            }
         }
-        server.createContext("/bad") { ex -> val junk = ByteArray(1000); ex.sendResponseHeaders(200, junk.size.toLong()); ex.responseBody.write(junk); ex.close() }
-        server.createContext("/gone") { ex -> ex.sendResponseHeaders(404, -1); ex.close() }
-        server.start()
-        port = server.address.port
     }
 
-    @After fun down() { server.stop(0); dir.deleteRecursively() }
+    private fun serve(sock: Socket) {
+        val inp = sock.getInputStream().bufferedReader(Charsets.ISO_8859_1)
+        val path = inp.readLine()?.split(' ')?.getOrNull(1) ?: return
+        var range: String? = null
+        while (true) { val l = inp.readLine() ?: break; if (l.isEmpty()) break; if (l.startsWith("Range:", true)) range = l.substringAfter(':').trim() }
+        val out = sock.getOutputStream()
+        fun head(code: Int, len: Int, extra: String = "") =
+            out.write("HTTP/1.1 $code X\r\nContent-Length: $len\r\nConnection: close\r\n$extra\r\n".toByteArray(Charsets.ISO_8859_1))
+        when (path) {
+            "/good" -> {
+                ranges += range
+                val from = if (honourRange) range?.removePrefix("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0 else 0
+                val rest = body.copyOfRange(from, body.size)
+                head(if (from > 0) 206 else 200, rest.size, if (from > 0) "Content-Range: bytes $from-${body.size - 1}/${body.size}\r\n" else "")
+                if (cutFirst > 0) { cutFirst--; out.write(rest, 0, rest.size / 2); out.flush(); return }   // drop the connection half-way
+                out.write(rest)
+            }
+            "/bad" -> { head(200, 1000); out.write(ByteArray(1000)) }
+            else -> head(404, 0)
+        }
+        out.flush()
+    }
+
+    @After fun down() { server.close(); dir.deleteRecursively() }
 
     private fun url(p: String) = "http://127.0.0.1:$port$p"
 
