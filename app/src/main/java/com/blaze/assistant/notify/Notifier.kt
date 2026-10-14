@@ -290,6 +290,8 @@ class ActionReceiver : BroadcastReceiver() {
         const val ALLOW = "com.blaze.assistant.ALLOW"
         const val DENY = "com.blaze.assistant.DENY"
         const val DO = "com.blaze.assistant.DO"
+        /** v0.25.0: the ongoing Magic Hand notification's "Stop Magic Hand" button. */
+        const val STOP_HAND = "com.blaze.assistant.STOP_HAND"
         const val EXTRA_CHAT = "reply_chat"
         const val EXTRA_CONTEXT = "reply_context"
     }
@@ -297,6 +299,7 @@ class ActionReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             STOP -> Notifier.stopEverything()
+            STOP_HAND -> com.blaze.assistant.phone.MagicHand.stop()
             DO -> intent.getStringExtra("prompt")?.let { p ->
                 androidx.core.app.NotificationManagerCompat.from(ctx).cancel(8)
                 Agent.doFromHeadsUp(intent.getStringExtra(EXTRA_CHAT), intent.getStringExtra(EXTRA_CONTEXT), p)

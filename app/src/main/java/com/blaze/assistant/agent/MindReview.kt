@@ -52,12 +52,9 @@ object MindReview {
 
     /** One memory call on the cheapest free model; null when nothing answered. */
     suspend fun cheap(req: JSONArray): String? {
-        val r = try { FreeRouter.complete(req, null, null, null, LlmClient.Lane.BACKGROUND) }
-            catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (_: Exception) {
-                try { LlmClient.complete(req, null, null, null, LlmClient.Lane.BACKGROUND) }
-                catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
-            }
+        // v0.25.0: through Blaze Cloud like everything else (quick task).
+        val r = try { LlmClient.complete(req, null, null, null, LlmClient.Lane.BACKGROUND) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
         return r?.optString("content")?.takeIf { it.isNotBlank() }
     }
 

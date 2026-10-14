@@ -64,11 +64,11 @@ fun AccountPage() {
                 if (how.isNotEmpty()) Label("Signs in with " + how.joinToString(", "), color = c.weak, size = 9.sp, modifier = Modifier.padding(top = 4.dp))
             }
         }
-        Note("The same account works in Blaze Desktop and Blaze CLI. Your model API keys and your own skills follow it, encrypted, so a key or skill added on your PC works here and the other way round. Connected accounts stay on this phone.", top = 12)
+        Note("The same account works in Blaze Desktop and Blaze CLI, and it is how Blaze Cloud answers you. Your own skills and MCP servers follow it, so one added on your PC works here and the other way round. Connected accounts stay on this phone.", top = 12)
         if (v.message.isNotEmpty()) Note(v.message)
         val keyStatus by KeySync.status.collectAsState()
         var syncing by remember { mutableStateOf(false) }
-        AccountButton(if (syncing) "Syncing keys…" else "Sync keys now", primary = false) {
+        AccountButton(if (syncing) "Syncing…" else "Sync MCP servers now", primary = false) {
             if (syncing) return@AccountButton
             syncing = true
             scope.launch { KeySync.sync(); syncing = false }
@@ -110,7 +110,7 @@ fun AccountPage() {
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
-    Note("One Blaze account for your phone and Blaze Desktop. Optional: everything works without it.")
+    Note("Sign in once and Blaze Cloud answers you: it picks the best free model for every message. The same account works in Blaze Desktop.")
     if (!v.online) Note("Can't reach Blaze's sign-in service right now. Check your connection.")
 
     if (v.pending.isNotEmpty()) {

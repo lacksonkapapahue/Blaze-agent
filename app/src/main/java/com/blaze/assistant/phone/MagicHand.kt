@@ -89,6 +89,19 @@ object MagicHand {
     private var askedAgent = false
     private var ignoreClicksUntil = 0L
     private var density = 2f
+    // v0.25.0 safety: watchdog beats, last touch, Back-twice, teach filter lists, label cache, off-main workers.
+    @Volatile private var beatAt = 0L
+    @Volatile private var touchAt = 0L
+    private var watchdog: Thread? = null
+    private val backTwice = MagicHandSafety.BackTwice()
+    private var launchers: Set<String> = emptySet()
+    private var imes: Set<String> = emptySet()
+    private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "magic-hand").apply { isDaemon = true } }
+    private var probeJob: Job? = null
+    private var bottomInset = 0
+    private var topInset = 0
+    private const val NOTE_ID = 14
 
     const val HAND_DP = 64
 
@@ -122,14 +135,108 @@ object MagicHand {
         density = s.resources.displayMetrics.density
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         _ui.value = MagicHandState.start(isPrivate())
+        insets(s, w)
         addHighlight(s, w)
         addDock(s, w)
         addHand(s, w)
+        touchAt = SystemClock.uptimeMillis(); beatAt = touchAt
+        startWatchdog()
+        keyFilter(s, true)
+        showNote(s)
+    }
+
+    /** The navigation bar / gesture area and status bar heights, so nothing of ours covers them. */
+    private fun insets(s: Context, w: WindowManager) {
+        val res = s.resources
+        fun dimen(name: String) = res.getIdentifier(name, "dimen", "android").takeIf { it != 0 }?.let { res.getDimensionPixelSize(it) } ?: 0
+        bottomInset = dimen("navigation_bar_height"); topInset = dimen("status_bar_height")
+        if (android.os.Build.VERSION.SDK_INT >= 30) try {
+            val ins = w.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+                android.view.WindowInsets.Type.navigationBars() or android.view.WindowInsets.Type.systemGestures() or android.view.WindowInsets.Type.statusBars())
+            bottomInset = maxOf(ins.bottom, if (bottomInset > 0 && ins.bottom == 0) bottomInset else 0)
+            topInset = maxOf(ins.top, topInset)
+        } catch (_: Throwable) { }
+    }
+
+    /** Main-thread heartbeat + a background watchdog: a stall over 3 s or 10 idle minutes ends Magic Hand. */
+    private fun startWatchdog() {
+        val beat = object : Runnable { override fun run() { beatAt = SystemClock.uptimeMillis(); if (on) main.postDelayed(this, 500) } }
+        main.post(beat)
+        watchdog?.interrupt()
+        watchdog = Thread({
+            try {
+                while (on) {
+                    Thread.sleep(1_000)
+                    if (!on) break
+                    when (MagicHandSafety.watchdog(SystemClock.uptimeMillis(), beatAt, touchAt)) {
+                        MagicHandSafety.Verdict.OK -> Unit
+                        MagicHandSafety.Verdict.IDLE -> { com.blaze.assistant.device.CrashLog.write(MagicHandSafety.IDLE_NOTE); stop(); break }
+                        MagicHandSafety.Verdict.STALLED -> {
+                            com.blaze.assistant.device.CrashLog.write(MagicHandSafety.STALLED_NOTE)
+                            main.postAtFrontOfQueue { stopNow() }
+                            Thread.sleep(1_500)
+                            // Still stuck: the windows belong to the frozen UI thread, so the only sure way to give the
+                            // phone back is to end Blaze's process (Android restarts the accessibility service by itself).
+                            if (on && SystemClock.uptimeMillis() - beatAt > MagicHandSafety.STALL_MS) android.os.Process.killProcess(android.os.Process.myPid())
+                            break
+                        }
+                    }
+                }
+            } catch (_: InterruptedException) { }
+        }, "magic-hand-watchdog").apply { isDaemon = true; start() }
+    }
+
+    /** Observe (never consume) key presses while Magic Hand is on, so Back twice can close it. */
+    private fun keyFilter(s: BlazeAccessibilityService, on: Boolean) {
+        try {
+            val info = s.serviceInfo ?: return
+            val f = android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+            info.flags = if (on) info.flags or f else info.flags and f.inv()
+            s.serviceInfo = info
+        } catch (_: Throwable) { }
+    }
+
+    /** From BlazeAccessibilityService.onKeyEvent. Always returns false: Back, Home and Recents always reach Android. */
+    fun onKey(e: android.view.KeyEvent): Boolean {
+        if (!on) return false
+        if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK && e.action == android.view.KeyEvent.ACTION_UP) {
+            touchAt = SystemClock.uptimeMillis()
+            if (backTwice.press(e.eventTime)) stop()
+            else if (dockFocusable) main.post { updateDockFocus(false) }
+        }
+        return false
+    }
+
+    private fun showNote(s: Context) {
+        try {
+            val nm = s.getSystemService(android.app.NotificationManager::class.java) ?: return
+            val stopPi = android.app.PendingIntent.getBroadcast(s, 41,
+                Intent(s, com.blaze.assistant.notify.ActionReceiver::class.java).setAction(com.blaze.assistant.notify.ActionReceiver.STOP_HAND),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+            val n = androidx.core.app.NotificationCompat.Builder(s, "blaze_work")
+                .setSmallIcon(com.blaze.assistant.R.drawable.ic_stat_blaze)
+                .setContentTitle("Magic Hand is on")
+                .setContentText("Back twice, hold the dock, or tap Stop to close it.")
+                .setOngoing(true).setOnlyAlertOnce(true).setSilent(true)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+                .addAction(0, "Stop Magic Hand", stopPi)
+                .setContentIntent(stopPi)
+                .build()
+            nm.notify(NOTE_ID, n)
+        } catch (_: Throwable) { }
     }
 
     /** Closing the dock: everything stops and every window goes. */
-    fun stop() {
-        main.post {
+    fun stop() { main.post { stopNow() } }
+
+    private fun stopNow() {
+        run {
+            if (!on && hand == null && dock == null && hi == null) { _ui.value = MagicHandState.close(); return@run }
+            watchdog?.interrupt(); watchdog = null
+            probeJob?.cancel(); probeJob = null
+            svc?.let { keyFilter(it, false) }
+            try { (svc ?: BlazeAccessibilityService.instance)?.getSystemService(android.app.NotificationManager::class.java)?.cancel(NOTE_ID) } catch (_: Throwable) { }
+            dockFocusable = false
             if (askedAgent && askJob?.isActive == true && Agent.mood.value != Mood.IDLE) try { Agent.stop() } catch (_: Throwable) { }
             askJob?.cancel(); askJob = null; askedAgent = false
             scope?.cancel(); scope = null
@@ -157,11 +264,10 @@ object MagicHand {
 
     private fun addHighlight(s: Context, w: WindowManager) {
         val v = HighlightView(s, density)
+        // Never touchable, never focusable: every touch goes straight through to the app and the system bars.
         val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, type(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
-        try { w.addView(v, lp); hi = v } catch (_: Exception) { }
+            MagicHandSafety.flags(MagicHandSafety.Win.HIGHLIGHT), PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START }
+        try { w.addView(v, lp); hi = v } catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("Magic Hand highlight", e) }
     }
 
     private fun addDock(s: Context, w: WindowManager) {
@@ -173,22 +279,61 @@ object MagicHand {
             onTeachUndo = { recorder?.undo(); set { MagicHandState.teachSteps(it, teachLines()) } },
             onTeachSave = ::saveTeach,
             onTeachDiscard = { recorder?.clear(); recorder = null; set { MagicHandState.endTeach(it, "Discarded. Nothing was saved.") } },
+            onTeachStart = { startTeach() },
         )
-        val v = composeView(s, owner) {
+        val inner = composeView(s, owner) {
             val u by ui.collectAsState()
             CompositionLocalProvider(LocalBlaze provides DarkColors) { MagicHandDock(u, calls) }
         }
+        // The dock's own frame: a long-press anywhere on it closes Magic Hand (not while typing a name), Back while it
+        // has the keyboard gives the keyboard back, and a touch outside it never gets swallowed (NOT_TOUCH_MODAL).
+        val v = DockFrame(s).apply {
+            owner.attach(this)
+            addView(inner, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+            onLongPress = { if (_ui.value.panel != Panel.TEACH_REVIEW) stop() }
+            onBack = { touchAt = SystemClock.uptimeMillis(); if (backTwice.press(SystemClock.uptimeMillis())) stop() else updateDockFocus(false) }
+            onOutside = { if (dockFocusable) updateDockFocus(false) }
+            onAnyTouch = { touchAt = SystemClock.uptimeMillis() }
+        }
         val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT, type(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.BOTTOM }
-        try { w.addView(v, lp); dock = v; dockLp = lp; dockOwner = owner } catch (_: Exception) { owner.destroy() }
+            MagicHandSafety.flags(MagicHandSafety.Win.DOCK), PixelFormat.TRANSLUCENT).apply {
+            gravity = Gravity.BOTTOM
+            y = bottomInset   // sits above the navigation bar / gesture area, never on it
+        }
+        try { w.addView(v, lp); dock = v; dockLp = lp; dockOwner = owner }
+        catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("Magic Hand dock", e); owner.destroy() }
+    }
+
+    @Volatile private var dockFocusable = false
+
+    private fun startTeach() {
+        val s = svc ?: return
+        if (!MagicHandGuard.canTeach(isPrivate())) { set { MagicHandState.back(it.copy(private = true), MagicHandGuard.PRIVATE_NOTE) }; return }
+        com.blaze.assistant.agent.Settings.setBool("mh_teach_intro_seen", true)
+        recorder = MagicHandTeach.Recorder(s.packageName)
+        // The phone's own home apps and keyboards are never part of a routine.
+        worker.execute {
+            launchers = try {
+                s.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
+                    .mapNotNull { it.activityInfo?.packageName?.lowercase() }.toSet()
+            } catch (_: Throwable) { emptySet() }
+            imes = try {
+                s.getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.enabledInputMethodList
+                    ?.map { it.packageName.lowercase() }?.toSet() ?: emptySet()
+            } catch (_: Throwable) { emptySet() }
+        }
+        set { MagicHandState.teachSteps(MagicHandState.teach(it), teachLines()) }
     }
 
     /** The teach review has a name field, so only then may the dock take the keyboard. */
     private fun updateDockFocus(focusable: Boolean) {
         val v = dock ?: return; val lp = dockLp ?: return
-        val want = if (focusable) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        if ((lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == want) return
-        lp.flags = (lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()) or want
+        dockFocusable = focusable
+        // v0.25.0: always NOT_TOUCH_MODAL. (v0.24.7 dropped NOT_FOCUSABLE here without adding NOT_TOUCH_MODAL, so on the
+        // teach review the dock took every touch on the screen, the navigation bar's included.)
+        val want = MagicHandSafety.flags(MagicHandSafety.Win.DOCK, typing = focusable)
+        if (lp.flags == want) return
+        lp.flags = want
         try { wm?.updateViewLayout(v, lp) } catch (_: Exception) { }
     }
 
@@ -199,24 +344,31 @@ object MagicHand {
     private fun addHand(s: Context, w: WindowManager) {
         val size = (HAND_DP * density).toInt()
         val owner = OverlayOwner().also { it.start() }
-        val frame = HandFrame(s)
+        val frame = HandFrame(s, density)
+        // v0.25.0: the window's root (this frame) carries the lifecycle owner too. In v0.24.7 only the inner ComposeView
+        // had it, and Compose looks the owner up from the window's root view, so the mascot never got a composition.
+        owner.attach(frame)
         val inner = composeView(s, owner) { MagicHandGlyph(HAND_DP, lit.value, carryingState.value) }
         frame.addView(inner, FrameLayout.LayoutParams(size, size))
         frame.contentDescription = "Magic Hand. Drag to point, double-tap for a menu."
         val (sw, sh) = screen()
-        val lp = WindowManager.LayoutParams(size, size, type(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = sw / 2 - size / 2; y = sh / 3 }
+        val (x0, y0) = MagicHandSafety.startSpot(size, sw, sh, bottomInset + (120 * density).toInt(), topInset)
+        val lp = WindowManager.LayoutParams(size, size, type(), MagicHandSafety.flags(MagicHandSafety.Win.HAND),
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = x0; y = y0 }
         val points = ArrayList<MagicHandLogic.P>()
         var downX = 0f; var downY = 0f; var startX = 0; var startY = 0; var lastTapUp = 0L; var lastProbe = 0L
         frame.onTouch = { e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    touchAt = SystemClock.uptimeMillis()
                     downX = e.rawX; downY = e.rawY; startX = lp.x; startY = lp.y
                     points.clear(); points += MagicHandLogic.P(lp.x + tipX, lp.y + tipY, e.eventTime)
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    lp.x = startX + (e.rawX - downX).toInt(); lp.y = startY + (e.rawY - downY).toInt()
+                    touchAt = SystemClock.uptimeMillis()
+                    val (sw2, sh2) = screen()
+                    val (cx, cy) = MagicHandSafety.clamp(startX + (e.rawX - downX).toInt(), startY + (e.rawY - downY).toInt(), size, sw2, sh2, bottomInset, topInset)
+                    lp.x = cx; lp.y = cy
                     try { w.updateViewLayout(frame, lp) } catch (_: Exception) { }
                     val p = MagicHandLogic.P(lp.x + tipX, lp.y + tipY, e.eventTime)
                     points += p
@@ -235,30 +387,43 @@ object MagicHand {
             }
             true
         }
-        try { w.addView(frame, lp); hand = frame; handLp = lp; handOwner = owner } catch (_: Exception) { owner.destroy() }
+        try { w.addView(frame, lp); hand = frame; handLp = lp; handOwner = owner }
+        catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("Magic Hand pointer", e); owner.destroy() }
     }
 
     private fun tip(): Pair<Int, Int> { val lp = handLp ?: return 0 to 0; return (lp.x + tipX).toInt() to (lp.y + tipY).toInt() }
 
-    private fun appLabel(pkg: String): String = try {
-        val pm = svc!!.packageManager; pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-    } catch (_: Throwable) { pkg.substringAfterLast('.') }
+    private fun appLabel(pkg: String): String = labels.getOrPut(pkg) {
+        try { val pm = (svc ?: BlazeAccessibilityService.instance)!!.packageManager; pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }
+        catch (_: Throwable) { pkg.substringAfterLast('.') }
+    }
 
     /** What's under the tip: highlight it and say what it is. */
-    private fun probe(x: Int, y: Int) {
+    /** What's under the tip, read off the UI thread (the accessibility tree is many binder calls), newest only, ≤ 800 ms. */
+    private fun probe(x: Int, y: Int, then: (() -> Unit)? = null) {
         val s = svc ?: return
-        val h = try { MagicHandScreen.at(s, x, y) } catch (_: Exception) { null }
-        lastHit = h
-        lit.value = h != null
-        hi?.box(h?.box)
-        if (h != null) set { MagicHandState.point(it, if (h.kind == MagicHandLogic.Kind.SECRET) "Password field" else h.element.label, h.kind, appLabel(h.pkg)) }
+        probeJob?.cancel()
+        probeJob = scope?.launch {
+            val h = withContext(Dispatchers.Default) {
+                kotlinx.coroutines.withTimeoutOrNull(800) { try { MagicHandScreen.at(s, x, y) } catch (_: Exception) { null } }
+            }
+            val app = if (h != null) withContext(Dispatchers.Default) { appLabel(h.pkg) } else ""
+            lastHit = h
+            lit.value = h != null
+            hi?.box(h?.box)
+            if (h != null) set { MagicHandState.point(it, if (h.kind == MagicHandLogic.Kind.SECRET) "Password field" else h.element.label, h.kind, app) }
+            then?.invoke()
+        }
     }
 
     // ---------- gestures ----------
     private fun onGesture(g: Gesture, pts: List<MagicHandLogic.P>) {
         if (g == Gesture.NONE || g == Gesture.TAP) return
         val (x, y) = tip()
-        probe(x, y)
+        probe(x, y) { act(g, pts) }
+    }
+
+    private fun act(g: Gesture, pts: List<MagicHandLogic.P>) {
         val h = lastHit
         val u0 = _ui.value
         set { it.copy(private = isPrivate()) }
@@ -289,9 +454,8 @@ object MagicHand {
             DockButton.CLOSE -> stop()
             DockButton.TEACH -> {
                 if (!MagicHandGuard.canTeach(isPrivate())) { set { MagicHandState.back(it.copy(private = true), MagicHandGuard.PRIVATE_NOTE) }; return }
-                recorder = MagicHandTeach.Recorder(svc?.packageName.orEmpty())
-                svc?.currentPkg()?.takeIf { it.isNotBlank() }?.let { p -> recorder?.window(p, appLabel(p), "", SystemClock.uptimeMillis()) }
-                set { MagicHandState.teachSteps(MagicHandState.teach(it), teachLines()) }
+                // v0.25.0: explain first; recording starts on Start.
+                set { MagicHandState.intro(it, !com.blaze.assistant.agent.Settings.bool("mh_teach_intro_seen", false)) }
             }
             DockButton.DONE -> {
                 val steps = recorder?.steps.orEmpty()
@@ -360,10 +524,10 @@ object MagicHand {
     private suspend fun crop(b: MagicHandLogic.Box, around: Boolean): android.graphics.Bitmap? {
         val s = svc ?: return null
         if (!MagicHandGuard.canScreenshot(isPrivate())) return null
-        val full = hidden { MagicHandScreen.screenshot(s) } ?: return null
+        val full = hidden { kotlinx.coroutines.withTimeoutOrNull(3_000) { MagicHandScreen.screenshot(s) } } ?: return null
         val (sw, sh) = full.width to full.height
         val box = if (around) MagicHandLogic.cropAround(b, sw, sh, (24 * density).toInt(), 1200) else b
-        return MagicHandScreen.crop(full, box)
+        return withContext(Dispatchers.Default) { MagicHandScreen.crop(full, box) }
     }
 
     /** Point & ask: the element's words and a crop of the screen around it go to Blaze; the answer shows in the dock. */
@@ -438,8 +602,8 @@ object MagicHand {
         set { it.copy(note = "Reading what you circled\u2026") }
         scope?.launch {
             val bmp = crop(b, around = false)
-            val ocr = if (bmp != null) MagicHandScreen.ocr(bmp) else ""
-            val text = ocr.ifBlank { try { MagicHandScreen.textIn(s, b) } catch (_: Exception) { "" } }
+            val ocr = if (bmp != null) kotlinx.coroutines.withTimeoutOrNull(8_000) { MagicHandScreen.ocr(bmp) }.orEmpty() else ""
+            val text = ocr.ifBlank { withContext(Dispatchers.Default) { kotlinx.coroutines.withTimeoutOrNull(2_000) { try { MagicHandScreen.textIn(s, b) } catch (_: Exception) { "" } }.orEmpty() } }
             val src = lastHit?.pkg?.let(::appLabel) ?: s.currentPkg().let(::appLabel)
             set { MagicHandState.grabbed(it.copy(note = ""), text, src) }
         }
@@ -520,30 +684,46 @@ object MagicHand {
         }
         val rec = recorder ?: return
         if (!on || _ui.value.mode != MagicHandLogic.Mode.TEACH || _ui.value.panel == Panel.TEACH_REVIEW) return
+        val type = e.eventType
+        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && type != AccessibilityEvent.TYPE_VIEW_CLICKED && type != AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) return
+        // v0.25.0: System UI, Android, launchers, screenshot tools, keyboards and Blaze are never part of a routine.
+        if (MagicHandSafety.ignoreForTeach(pkg, s.packageName, launchers, imes)) return
         if (isPrivate()) { recorder = null; set { MagicHandState.endTeach(it, MagicHandGuard.PRIVATE_NOTE) }; return }
         val now = SystemClock.uptimeMillis()
-        val app = appLabel(pkg)
-        val src = try { e.source } catch (_: Exception) { null }
-        when (e.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val screen = e.text?.firstOrNull()?.toString()?.trim().orEmpty().ifBlank { e.className?.toString()?.substringAfterLast('.').orEmpty() }
-                rec.window(pkg, app, screen.take(60), now)
-            }
-            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                if (now < ignoreClicksUntil) return
-                val label = e.text?.joinToString(" ")?.trim().orEmpty().ifBlank { e.contentDescription?.toString().orEmpty() }
-                    .ifBlank { src?.let { MagicHandScreen.elementOf(it).label }.orEmpty() }
-                rec.click(pkg, app, label, src?.viewIdResourceName.orEmpty(), e.className?.toString().orEmpty(), now)
-            }
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
-                val field = (if (android.os.Build.VERSION.SDK_INT >= 26) src?.hintText?.toString() else null).orEmpty()
-                    .ifBlank { src?.contentDescription?.toString().orEmpty() }
-                rec.typed(pkg, app, field, src?.viewIdResourceName.orEmpty(), e.text?.joinToString("")?.toString().orEmpty(), e.isPassword || src?.isPassword == true, now)
-            }
-            else -> return
+        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED && now < ignoreClicksUntil) return
+        // Copy what's cheap now (the event is recycled after this call); anything that needs binder calls runs on the worker.
+        val text = e.text?.joinToString(" ")?.trim().orEmpty()
+        val desc = e.contentDescription?.toString().orEmpty()
+        val cls = e.className?.toString().orEmpty()
+        val pw = e.isPassword
+        @Suppress("DEPRECATION")
+        val copy = if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) null else try { AccessibilityEvent.obtain(e) } catch (_: Throwable) { null }
+        worker.execute {
+            try {
+                val app = appLabel(pkg)
+                val src = try { copy?.source } catch (_: Exception) { null }
+                when (type) {
+                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> rec.window(pkg, app, text.take(60), now)
+                    AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                        val label = MagicHandSafety.humanLabel(text).ifBlank { MagicHandSafety.humanLabel(desc) }
+                            .ifBlank { src?.let { MagicHandSafety.humanLabel(MagicHandScreen.elementOf(it).label) }.orEmpty() }
+                        rec.click(pkg, app, label, src?.viewIdResourceName.orEmpty(), cls, now)
+                    }
+                    AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+                        val field = (if (android.os.Build.VERSION.SDK_INT >= 26) src?.hintText?.toString() else null).orEmpty()
+                            .ifBlank { src?.contentDescription?.toString().orEmpty() }
+                        rec.typed(pkg, app, MagicHandSafety.humanLabel(field), src?.viewIdResourceName.orEmpty(), text, pw || src?.isPassword == true, now)
+                    }
+                }
+                val lines = rec.steps.map(MagicHandTeach::line)
+                main.post { if (recorder === rec) set { MagicHandState.teachSteps(it, lines) } }
+            } catch (_: Throwable) {
+            } finally { recycle(copy) }
         }
-        set { MagicHandState.teachSteps(it, teachLines()) }
     }
+
+    @Suppress("DEPRECATION")
+    private fun recycle(e: AccessibilityEvent?) { try { e?.recycle() } catch (_: Throwable) { } }
 
     private var watchPkg = ""
     private val watchCheck = Runnable {
@@ -553,9 +733,47 @@ object MagicHand {
 
     // ---------- views ----------
     /** The hand's window: every touch goes to [onTouch] (the Compose glyph inside only draws). */
-    private class HandFrame(ctx: Context) : FrameLayout(ctx) {
+    private class HandFrame(ctx: Context, private val d: Float) : FrameLayout(ctx) {
         var onTouch: (MotionEvent) -> Boolean = { false }
         override fun dispatchTouchEvent(ev: MotionEvent): Boolean = onTouch(ev)
+        // v0.25.0: a dark halo and a light rim drawn natively behind the mascot, so the pointer stands out on any
+        // wallpaper (dark ones included) and is visible even before Compose draws its first frame.
+        private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f * d; color = 0xE6FFFFFF.toInt() }
+        private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * d; color = 0x99FF9A3C.toInt() }
+        init { setWillNotDraw(false) }
+        override fun dispatchDraw(c: Canvas) {
+            val cx = width / 2f; val cy = height / 2f; val r = minOf(width, height) / 2f - 3f * d
+            halo.shader = android.graphics.RadialGradient(cx, cy, r, intArrayOf(0xCC14161C.toInt(), 0x9914161C.toInt(), 0x0014161C), floatArrayOf(0f, 0.75f, 1f), android.graphics.Shader.TileMode.CLAMP)
+            c.drawCircle(cx, cy, r, halo)
+            c.drawCircle(cx, cy, r - 2f * d, glow)
+            c.drawCircle(cx, cy, r - 4.5f * d, rim)
+            super.dispatchDraw(c)
+        }
+    }
+
+    /** The dock's window root: long-press closes Magic Hand, Back gives the keyboard back, outside touches pass through. */
+    private class DockFrame(ctx: Context) : FrameLayout(ctx) {
+        var onLongPress: () -> Unit = {}
+        var onBack: () -> Unit = {}
+        var onOutside: () -> Unit = {}
+        var onAnyTouch: () -> Unit = {}
+        private val longPress = Runnable { onLongPress() }
+        private var downX = 0f; private var downY = 0f
+        private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_OUTSIDE -> { onOutside(); return false }
+                MotionEvent.ACTION_DOWN -> { onAnyTouch(); downX = ev.x; downY = ev.y; postDelayed(longPress, 650) }
+                MotionEvent.ACTION_MOVE -> if (kotlin.math.abs(ev.x - downX) > slop || kotlin.math.abs(ev.y - downY) > slop) removeCallbacks(longPress)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> removeCallbacks(longPress)
+            }
+            return super.dispatchTouchEvent(ev)
+        }
+        override fun dispatchKeyEvent(e: android.view.KeyEvent): Boolean {
+            if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK) { if (e.action == android.view.KeyEvent.ACTION_UP) onBack(); return true }
+            return super.dispatchKeyEvent(e)
+        }
     }
 
     /** Full-screen, not touchable: a rounded outline around what's under the tip and the trail of a circle being drawn. */

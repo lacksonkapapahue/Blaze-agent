@@ -45,7 +45,12 @@ object KeySync {
     val SYNCED = listOf("gemini", "groq", "cerebras", "openrouter", "mistral", "nvidia", "deepseek", "moonshot", "openai", "anthropic", "xai")
     /** Pseudo-provider for the MCP server list (see the header). */
     const val MCP = "mcp"
-    private fun applies(p: String) = p in SYNCED || p == MCP
+    /**
+     * v0.25.0: Blaze Cloud holds the model keys, so the phone no longer uploads or downloads provider keys: only the
+     * MCP server list syncs. Provider entries already on the account pass through untouched (Desktop still reads them),
+     * and the old key prefs on this phone stay as they were, unused.
+     */
+    private fun applies(p: String) = p == MCP
     private const val AAD = "blaze-keys-v1"
     private const val LAST = "keysync_last"   // unix ms of the last good sync
     private const val DEBOUNCE_MS = 8_000L    // the key field saves on every keystroke
@@ -90,10 +95,6 @@ object KeySync {
 
     private fun local(): Map<String, Entry> {
         val out = HashMap<String, Entry>()
-        for (p in SYNCED) {
-            val k = KeyRing.all(p); val t = stamp(p)
-            if (k.isNotEmpty() || t > 0) out[p] = Entry(k, t)
-        }
         if (Mcp.hasConfig() || stamp(MCP) > 0) {
             // A list from before syncing existed gets an age now, so it is never merged line by line.
             if (stamp(MCP) == 0L) Settings.setStr(stampKey(MCP), System.currentTimeMillis().toString())
@@ -205,7 +206,7 @@ object KeySync {
 
     private fun syncLocked(): String {
         val token = BlazeAccount.sessionToken()
-        if (token.isBlank()) return "Sign in to your Blaze account to use your keys on all your devices."
+        if (token.isBlank()) return "Sign in to your Blaze account to sync your MCP servers."
         repeat(3) {
             val (code, st) = http("GET", token)
             when {
@@ -228,7 +229,7 @@ object KeySync {
             for ((pid, e) in toApply) applyEntry(pid, e)
             if (!push) {
                 Settings.setStr(LAST, System.currentTimeMillis().toString())
-                return if (pulled.isNotEmpty()) "Got ${names(pulled)} from your Blaze account." else "Keys are up to date."
+                return if (pulled.isNotEmpty()) "Got ${names(pulled)} from your Blaze account." else "Up to date."
             }
             val keys = JSONObject()
             for ((pid, e) in merged) keys.put(pid, JSONObject().put("k", JSONArray(e.k)).put("t", e.t))
@@ -240,7 +241,7 @@ object KeySync {
                 pc >= 400 -> throw Exception("http $pc")
             }
             Settings.setStr(LAST, System.currentTimeMillis().toString())
-            return if (pulled.isNotEmpty()) "Got ${names(pulled)} from your Blaze account." else "Your keys are on your Blaze account."
+            return if (pulled.isNotEmpty()) "Got ${names(pulled)} from your Blaze account." else "Your MCP servers are on your Blaze account."
         }
         return "Other devices kept changing keys; try again."
     }

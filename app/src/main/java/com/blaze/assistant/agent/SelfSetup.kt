@@ -33,7 +33,7 @@ object SelfSetup {
         val skills = com.blaze.assistant.phone.Skills.groups.filter { !com.blaze.assistant.phone.Skills.granted(ctx, it.value) }.keys
         val conns = try { com.blaze.assistant.connect.Connectors.connectedCount() } catch (_: Exception) { 0 }
         return listOf(
-            Item("brain", "AI brain", Settings.ready, "Needed to think and chat. Now: ${Settings.provider.name}.", "open settings ai, or choose the free Auto provider", true),
+            Item("brain", "Blaze account", Settings.ready, "Needed to think and chat: Blaze Cloud answers once you're signed in.", "open settings account and sign in", true),
             Item("accessibility", "Phone control", a11y && Settings.phoneControl, "Lets Blaze see and tap the screen.", "open accessibility", true),
             Item("overlay", "Draw over apps", overlay, "Needed for the floating orb and the panel over other apps.", "open overlay", true),
             Item("microphone", "Microphone", mic, "Needed for voice and \u201cHey Blaze\u201d.", "open app_permissions (or tap the mic in Blaze once)", true),

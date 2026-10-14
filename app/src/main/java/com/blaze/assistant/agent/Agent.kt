@@ -1525,7 +1525,7 @@ When you finish, say what you did in one short sentence.
                         SpeedLog.add(SpeedLog.Entry(turnStart, firstMs.coerceAtLeast(0), System.currentTimeMillis() - turnStart, step + 1,
                             tools.length(), req.toString().length + tools.toString().length, LlmClient.lastRoute))
                         addReply(liveId, textOut, turnThink.toString(), pendingFollowups,
-                            if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { Settings.model },
+                            if (Settings.showRoute) "☁ " + listOf(LlmClient.lastRoute.ifBlank { "Blaze Cloud" }.replace(" · ", " / "),
                                 if (firstMs > 0) "first word %.1f s".format(firstMs / 1000.0) else "",
                                 "%.1f s".format(secs),
                                 if (step > 0) "${step + 1} steps" else "").filter { it.isNotBlank() }.joinToString(" · ") else "")

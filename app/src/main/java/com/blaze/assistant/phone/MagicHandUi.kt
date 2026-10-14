@@ -91,6 +91,7 @@ class DockCalls(
     val onTeachUndo: () -> Unit = {},
     val onTeachSave: () -> Unit = {},
     val onTeachDiscard: () -> Unit = {},
+    val onTeachStart: () -> Unit = {},
 )
 
 object MagicHandIcons {
@@ -176,10 +177,21 @@ fun MagicHandDock(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float = 340f)
                 Buttons(listOf(c.no to false, c.yes to true)) { calls.onConfirm(it == 1) }
             }
             Panel.GRAB -> GrabCard(u, calls)
+            Panel.TEACH_INTRO -> {
+                Text(u.intro, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp))
+                Buttons(listOf("Cancel" to false, "Start" to true)) { if (it == 1) calls.onTeachStart() else calls.onBack() }
+            }
             Panel.TEACH -> {
                 if (u.teachSteps.isEmpty()) Line("No steps yet.")
                 else Column(Modifier.fillMaxWidth().heightIn(max = 140.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
                     u.teachSteps.takeLast(6).forEachIndexed { i, s -> StepLine(u.teachSteps.size - minOf(6, u.teachSteps.size) + i + 1, s) }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.End) {
+                    Pill("Undo last step", false, enabled = u.teachSteps.isNotEmpty()) { calls.onTeachUndo() }
+                    Spacer(Modifier.width(8.dp))
+                    Pill("Cancel", false) { calls.onTeachDiscard() }
+                    Spacer(Modifier.width(8.dp))
+                    Pill("Done", true) { calls.onButton(DockButton.DONE) }
                 }
             }
             Panel.TEACH_REVIEW -> TeachReviewCard(u, calls)

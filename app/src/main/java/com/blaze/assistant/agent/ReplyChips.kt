@@ -15,7 +15,18 @@ object ReplyChips {
         Regex("\\b(instant|on-device|new context|fresh start|via |model|provider|fallback|retry \\d|lane)\\b", RegexOption.IGNORE_CASE),
         Regex("[\\w.-]+/[\\w.:-]+"),                                          // provider/model ids
         Regex("^usedup:"),
+        // v0.25.0: the route line ("\u2601 Free (Google Gemini \u00b7 gemini-3\u2026) \u00b7 2 steps") never shows by default.
+        Regex("^[\u2601]"),
+        Regex("\\b(blaze cloud|free \\(|gemini|gemma|gpt|llama|qwen|mistral|deepseek|kimi|glm|claude|grok|nemotron|groq|cerebras|openrouter|nvidia|pollinations|keyless|workers-ai|healed|trimmed|tier)", RegexOption.IGNORE_CASE),
+        Regex("^\\d+ steps$"),
+        Regex("^[^(]*\\)$"),                                                // the tail of a "(provider \u00b7 model)" pair
     )
+
+    /** A reply's model / route line (starts with the cloud mark, or names a provider in brackets). */
+    fun isRoute(meta: String): Boolean {
+        val t = meta.trim()
+        return t.startsWith("\u2601") || t.startsWith("Free (") || t.startsWith("Blaze Cloud") || t.contains("Free (daily cap)")
+    }
 
     fun isTechnical(part: String): Boolean = tech.any { it.containsMatchIn(part.trim()) }
 
