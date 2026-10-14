@@ -242,15 +242,15 @@ object BrowserVpn {
 
     /** Blaze Free: register once (or reuse), then try each WARP endpoint/port until the trace says warp=on. */
     private suspend fun connectFree(g: Int): WarpFree.Trace {
-        var acct = loadFree()
         var fresh = false
-        if (acct == null) {
+        var acct: WarpFree.Account = loadFree() ?: run {
             withContext(Dispatchers.Main) { detail = "Setting up Blaze Free (first time only)…" }
-            acct = registerFree(); fresh = true
+            fresh = true
+            registerFree()
         }
         var last: Exception? = null
         for (round in 0..1) {
-            val cands = WarpFree.candidates(acct!!, freePeerIp).let { if (round == 0) it else it.take(4) }
+            val cands = WarpFree.candidates(acct, freePeerIp).let { if (round == 0) it else it.take(4) }
             for ((i, ep) in cands.withIndex()) {
                 if (gen != g) throw CancellationException("superseded")
                 withContext(Dispatchers.Main) { detail = WarpFree.tryingLine(i, ep) }
