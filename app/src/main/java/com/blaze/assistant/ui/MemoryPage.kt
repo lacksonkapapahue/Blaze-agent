@@ -84,9 +84,12 @@ fun MemoryPage(mems0: List<Mind.Mem>? = null, mode0: String = "", select0: Long 
     var query by remember { mutableStateOf(query0) }
     var sel by remember { mutableLongStateOf(select0) }
     if (sel != 0L && mems.none { it.id == sel }) sel = 0L
+    // v0.26.3: one plain line when blaze.db couldn't be used (Blaze is on the copy it kept in mind.db).
+    val notice = if (mems0 == null) Mind.notice else null
 
     if (mems.isEmpty()) {
         PageHead("Memory", "What Blaze remembers")
+        if (notice != null) Text(notice, modifier = Modifier.padding(bottom = 8.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 17.sp, color = c.sub))
         Rows { EmptyState("Nothing remembered yet",
             "Tell Blaze things like \u201cremember my sister is Mary\u201d, or just talk: it saves lasting facts as you go. Each one appears here as a dot, linked to the people and projects it's about.") }
         return
@@ -99,6 +102,7 @@ fun MemoryPage(mems0: List<Mind.Mem>? = null, mode0: String = "", select0: Long 
     val kinds = graph.cats.size
     PageHead("Memory", "What Blaze remembers",
         "${mems.size} ${if (mems.size == 1) "memory" else "memories"} \u00b7 $kinds ${if (kinds == 1) "kind" else "kinds"} \u00b7 ${graph.edges.size} ${if (graph.edges.size == 1) "link" else "links"}")
+    if (notice != null) Text(notice, modifier = Modifier.padding(bottom = 8.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 17.sp, color = c.sub))
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         KitSearch(query, { query = it }, "Search memories", Modifier.weight(1f))
         Spacer(Modifier.width(8.dp))

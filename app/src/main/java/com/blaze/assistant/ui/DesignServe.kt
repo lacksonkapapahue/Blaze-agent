@@ -69,6 +69,8 @@ object DesignServe {
         val path = clean.substring(ORIGIN.length)
         return when {
             path.startsWith("/three/") -> threeAsset(path.removePrefix("/three/"))?.let { Target.Asset(it, "text/javascript") }
+            // v0.26.3: the bundled mermaid.js (offline diagrams).
+            path == "/diagram/mermaid.min.js" -> Target.Asset("diagram/mermaid.min.js", "text/javascript")
             path.startsWith("/designs/") -> home?.let { disk(File(home, "designs"), path.removePrefix("/designs/")) }
             path.startsWith("/home/") -> home?.let { disk(home, path.removePrefix("/home/")) }
             else -> null
@@ -314,25 +316,28 @@ var poll=setInterval(function(){var s=window.__blazeScene;if(!s)return;clearInte
     private fun esc(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 
     /**
-     * A page that draws [code] as a picture: the mermaid.ink image (as the chat's diagrams), and if that can't load,
-     * mermaid.js from jsDelivr. The source sits in a hidden element for mermaid.js and is never shown as text; if
-     * neither renderer can be reached the page says so in one plain line.
+     * A page that draws [code] as a picture. v0.26.3: with the bundled mermaid.js (same origin, /diagram/mermaid.min.js),
+     * so it works offline and the text stays on the phone; only if that can't draw it (not a mistake in the code) does
+     * it fall back to the mermaid.ink image. The source is an escaped JS string ([DiagramRender.jsString]), never shown
+     * as text; when nothing can draw it the page says so in one plain line.
      */
     fun mermaidHtml(code: String, title: String = "Diagram"): String {
         val img = RichReplies.diagramUrl("mermaid", code)
+        val l = DiagramRender.look(false)
         return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
             "<title>" + esc(title) + "</title><style>html,body{margin:0;background:#fff;font-family:sans-serif}" +
             "#wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:16px;box-sizing:border-box}" +
-            "#d{max-width:100%;height:auto;border-radius:12px}#src{display:none}#msg{display:none;color:#5a5a5e;font-size:15px;text-align:center}" +
-            ".mermaid svg{max-width:100%;height:auto}</style></head><body><div id=\"wrap\">" +
-            "<img id=\"d\" alt=\"" + esc(title) + "\" src=\"" + esc(img) + "\" onerror=\"blazeMermaidFallback()\">" +
-            "<div id=\"out\" class=\"mermaid\"></div><p id=\"msg\">Couldn\u2019t draw this diagram without a connection. Tap Reload to try again.</p></div>" +
-            "<script type=\"text/plain\" id=\"src\">" + esc(code) + "</script>" +
-            "<script>function blazeMermaidFallback(){document.getElementById('d').style.display='none';" +
-            "var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';" +
-            "s.onload=function(){try{var t=document.createElement('textarea');t.innerHTML=document.getElementById('src').textContent;" +
-            "mermaid.initialize({startOnLoad:false,theme:'default'});mermaid.render('blazeM',t.value).then(function(r){document.getElementById('out').innerHTML=r.svg;})" +
-            ".catch(function(){document.getElementById('msg').style.display='block';});}catch(e){document.getElementById('msg').style.display='block';}};" +
-            "s.onerror=function(){document.getElementById('msg').style.display='block';};document.head.appendChild(s);}</script></body></html>"
+            "#d{display:none;max-width:100%;height:auto;border-radius:12px}#msg{display:none;color:#5a5a5e;font-size:15px;text-align:center}" +
+            "#out svg{max-width:100%;height:auto}</style>" +
+            "<script src=\"" + ORIGIN + "/diagram/mermaid.min.js\"></script></head><body><div id=\"wrap\">" +
+            "<div id=\"out\"></div><img id=\"d\" alt=\"" + esc(title) + "\" data-src=\"" + esc(img) + "\" onerror=\"blazeMsg('Couldn\u2019t draw this diagram without a connection.')\">" +
+            "<p id=\"msg\"></p></div>" +
+            "<script>function blazeMsg(t){var m=document.getElementById('msg');m.textContent=t;m.style.display='block';document.getElementById('d').style.display='none';}" +
+            "function blazeWeb(){var d=document.getElementById('d');d.src=d.getAttribute('data-src');d.style.display='block';}" +
+            "(function(){var code=" + DiagramRender.jsString(code) + ";" +
+            "if(typeof mermaid==='undefined'){blazeWeb();return;}" +
+            "try{mermaid.initialize(" + DiagramRender.config(l) + ");" +
+            "mermaid.parse(code).then(function(){return mermaid.render('blazeM',code).then(function(r){document.getElementById('out').innerHTML=r.svg;},function(){blazeWeb();});}," +
+            "function(){blazeMsg('Couldn\u2019t draw this diagram: its code has a mistake.');});}catch(e){blazeWeb();}})();</script></body></html>"
     }
 }

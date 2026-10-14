@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -247,14 +248,64 @@ fun RichSteps(steps: List<RichReplies.Step>, text: @Composable (String) -> Unit)
     }
 }
 
-/** An inline diagram, drawn by a free renderer from its source; Copy keeps the source, the picture fits the width. */
+/**
+ * An inline diagram. v0.26.3: Mermaid is drawn on the phone ([DiagramRenderer], bundled mermaid.js, Blaze's colours in
+ * light and dark, cached), so it works offline and in private chats; the web renderers are only the fallback. While it
+ * draws, a quiet placeholder; if nothing can draw it, one plain line with "Show code" (the source is never the picture).
+ * Copy keeps the source.
+ */
 @Composable
 fun RichDiagram(d: RichReplies.Block.Diagram) {
     val c = LocalBlaze.current
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White)) {
-        RichPicture(RichReplies.Img(d.url, "${d.kind.replaceFirstChar { it.uppercase() }} diagram"), Modifier.fillMaxWidth().heightIn(max = 420.dp), ratio = 4f / 3f, crop = false)
-        Text("${d.kind.replaceFirstChar { it.uppercase() }} diagram", modifier = Modifier.fillMaxWidth().background(Color(0xFFF1F1EF)).padding(horizontal = 12.dp, vertical = 6.dp),
-            style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = Color(0xFF5A5A5E)))   // on the white diagram card in light and dark
+    val ctx = LocalContext.current
+    val override = RichImages.Local.current   // screenshots and tests bring their own pictures
+    val look = DiagramRender.look(c.dark)
+    val state by produceState<DiagramRenderer.Outcome?>(
+        override?.invoke(d.url)?.let { DiagramRenderer.Outcome.Picture(it, remote = false) } ?: DiagramRenderer.cached(d.kind, d.code, d.private, c.dark),
+        d.kind, d.code, d.private, c.dark) {
+        if (value == null && override == null) value = DiagramRenderer.draw(ctx, d.kind, d.code, d.private, c.dark, d.url)
+    }
+    var showCode by remember(d.code) { mutableStateOf(false) }
+    val s = state
+    val cardBg = when {
+        s is DiagramRenderer.Outcome.Picture && s.remote -> Color.White
+        s is DiagramRenderer.Outcome.Picture -> Color(android.graphics.Color.parseColor(look.bg))
+        else -> c.faint
+    }
+    val label = "${DiagramRender.label(d.kind)} diagram"
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cardBg).semantics { contentDescription = label }) {
+        when (s) {
+            null -> Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
+                Text("Drawing the diagram\u2026", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
+            }
+            is DiagramRenderer.Outcome.Picture -> {
+                val ratio = (s.bmp.width.toFloat() / s.bmp.height.coerceAtLeast(1)).coerceIn(0.4f, 4f)
+                Image(s.bmp, contentDescription = null, contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).aspectRatio(ratio, matchHeightConstraintsFirst = true))
+            }
+            is DiagramRenderer.Outcome.Failed -> Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(s.line, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.body))
+                    Spacer(Modifier.width(10.dp))
+                    Text(if (showCode) "Hide code" else "Show code", modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showCode = !showCode }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                        style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = c.accent))
+                }
+                if (showCode) {
+                    Spacer(Modifier.height(8.dp))
+                    SelectionContainer {
+                        Text(d.code, modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            style = TextStyle(fontFamily = Type.Mono, fontSize = 12.sp, lineHeight = 17.sp, color = c.ink))
+                    }
+                }
+            }
+        }
+        val onCard = if (s is DiagramRenderer.Outcome.Picture && s.remote) Color(0xFF5A5A5E) else c.sub
+        Text(label + if (s is DiagramRenderer.Outcome.Picture && !s.remote) " \u00b7 drawn on your phone" else "",
+            modifier = Modifier.fillMaxWidth().background(if (s is DiagramRenderer.Outcome.Picture && s.remote) Color(0xFFF1F1EF) else c.faint)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = onCard))
     }
 }
 

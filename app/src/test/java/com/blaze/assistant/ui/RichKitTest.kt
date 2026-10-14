@@ -157,9 +157,13 @@ class RichKitTest {
     }
 
     @Test fun privateChatStillDrawsOfflineBlocks() {
-        // Charts and tools are drawn on the phone (nothing leaves it), so Private keeps them; diagrams still don't go out.
+        // Charts and tools are drawn on the phone (nothing leaves it), so Private keeps them; since v0.26.3 Mermaid too
+        // (bundled mermaid.js), while Graphviz & co. never go to a web renderer from a private chat.
         assertTrue(blocks(fence("chart", """{"values":[1,2]}"""), private = true).any { it is Block.Chart })
-        assertTrue(blocks("```mermaid\ngraph TD\nA-->B\n```", private = true).single() is Block.Plain)
+        val m = blocks("```mermaid\ngraph TD\nA-->B\n```", private = true).single() as Block.Diagram
+        assertEquals(listOf(DiagramRender.Source.LOCAL), DiagramRender.plan(m.kind, m.private))
+        val g = blocks("```dot\ndigraph { a -> b }\n```", private = true).single() as Block.Diagram
+        assertTrue(DiagramRender.plan(g.kind, g.private).isEmpty())
     }
 
     @Test fun copyAsReadableText() {

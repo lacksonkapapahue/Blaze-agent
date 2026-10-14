@@ -79,3 +79,45 @@ shipped inside the APK. Each keeps its own licence (as packaged by Alpine; `apk 
 | adwaita-icon-theme | GNOME | LGPL-3.0-or-later OR CC-BY-SA-3.0 |
 
 Blaze's VNC viewer (`desktop/Rfb.kt`) is Blaze's own code, written from the public RFB protocol specification (RFC 6143).
+
+## Mermaid (v0.26.3, bundled for offline diagrams)
+
+Chat replies draw Mermaid diagrams on the phone, with no network, from the bundled mermaid 11.17.2
+(`app/src/main/assets/diagram/mermaid.min.js`, the npm package's IIFE build, with its LICENSE beside it).
+Mermaid is MIT-licensed by Knut Sveidqvist and contributors.
+
+Source: https://github.com/mermaid-js/mermaid
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2014 - 2022 Knut Sveidqvist
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+mermaid.min.js also contains these libraries, each under its own licence:
+
+| Library | Licence |
+|---|---|
+| dagre-d3-es, cytoscape (+ cose-bilkent, fcose), katex, khroma, marked, roughjs, dayjs, stylis, uuid, langium, lodash-es, ts-dedent, @braintree/sanitize-url, @iconify/utils | MIT |
+| d3 and its d3-* modules | ISC |
+| d3-sankey | BSD-3-Clause |
+| chevrotain | Apache-2.0 |
+| DOMPurify | MPL-2.0 OR Apache-2.0 |

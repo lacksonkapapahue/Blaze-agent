@@ -11,3 +11,6 @@
 # v0.23.3: the Design view's JS bridge (BlazeDesign.gl / error / ready / fail) is called by name from the page.
 -keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
 -keep class com.blaze.assistant.ui.DesignBridge { *; }
+# v0.26.3 blaze.db: the bundled SQLite's native code throws androidx.sqlite.SQLiteException by class name.
+-keep class androidx.sqlite.SQLiteException { *; }
+-keep class androidx.sqlite.driver.bundled.** { *; }
