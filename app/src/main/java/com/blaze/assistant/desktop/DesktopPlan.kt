@@ -79,7 +79,9 @@ object DesktopPlan {
     fun clickCmd(x: Int, y: Int, button: Int = 1, double: Boolean = false): String =
         "DISPLAY=$DISPLAY xdotool mousemove ${x.coerceAtLeast(0)} ${y.coerceAtLeast(0)} click ${if (double) "--repeat 2 " else ""}${button.coerceIn(1, 5)}"
     fun typeCmd(text: String): String = "DISPLAY=$DISPLAY xdotool type --delay 30 -- ${q(text.take(2000))}"
-    fun keyCmd(keys: String): String = "DISPLAY=$DISPLAY xdotool key -- ${keys.split(' ', ',').filter { it.matches(Regex("[A-Za-z0-9_+]{1,40}")) }.joinToString(" ")}"
+    /** Only the key names before any shell separator; anything after `;`, `&`, `|`, backtick or `$` is dropped. */
+    fun keyCmd(keys: String): String = "DISPLAY=$DISPLAY xdotool key -- ${keys.substringBefore(';').substringBefore('&').substringBefore('|').substringBefore('`').substringBefore('$')
+        .split(' ', ',').filter { it.matches(Regex("[A-Za-z0-9_+]{1,40}")) }.joinToString(" ")}"
     fun runCmd(app: String): String = "DISPLAY=$DISPLAY setsid ${appCommand(app)} >/dev/null 2>&1 & echo started"
 
     /** Friendly names to commands (anything else is run as typed, still behind the user's yes). */
