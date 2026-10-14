@@ -1923,7 +1923,7 @@ When you finish, say what you did in one short sentence.
                 "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
                 "blazerouter" -> { add(Role.STEP, "BlazeRouter: " + args.optString("action")); BlazeRouter.run(app, args) }
                 "desktop" -> {
-                    add(Role.STEP, "Linux desktop: " + args.optString("action"))
+                    // v0.25.5: the step line comes from Friendly.say (DesktopNarration), the same words as the live desktop card.
                     com.blaze.assistant.desktop.LinuxDesktop.run(app, args, shots,
                         confirm = { title, detail -> confirm(title, detail, "Allow") },
                         open = { com.blaze.assistant.ui.Views.open("linux") })

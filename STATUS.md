@@ -3,6 +3,10 @@
 - **Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release.**
 - **Rollover rule (Luke 2026-10-14): after a patch of .9 the next release rolls over: patch back to 0, minor +1 (0.24.9 → 0.25.0).** Shipped: v0.24.7 Magic Hand (#45), v0.24.8 rounded-everything (#44), v0.24.9 rich replies. **v0.25.0 = bug-fix release; v0.25.1 = Linux desktop; v0.25.2 = classic colours; v0.25.3 = "VPN that just works".**
 
+## linux-desktop-live-download (v0.25.5, versionCode 87)
+- **Branch:** `linux-desktop-live-download` (off main at v0.25.3; v0.25.4 is the open Magic Hand trail PR #53). Live desktop card (mini VNC view, plain status pill, X to stop, tap for full view) and a desktop download that retries, switches mirrors, resumes and keeps the phone awake. See CHANGELOG v0.25.5.
+- **Left (needs the A12):** a full first install on flaky Wi-Fi with the screen off; that the second, view-only VNC connection in the card doesn't slow the desktop; that Android 12+'s phantom-process killer leaves proot alone while the foreground service runs.
+
 ## vpn-just-works (v0.25.3, versionCode 85)
 - **Branch:** `vpn-just-works`. "VPN that just works": built-in **Blaze Free (Cloudflare WARP)** in the browser VPN, registered on the phone (keys made locally, `filesDir/blaze_free.json`), one-tap switch, endpoint/port fallback (2408, 500, 1701, 4500), auto-reconnect with backoff, 45 s health check, plain status line; kill switch unchanged; imported configs unchanged. Logic `browser/WarpFree.kt`, tests `WarpFreeTest`.
 - **Left (needs the A12):** that the WARP sign-up succeeds from the phone (Cloudflare may fingerprint the client API), that the tunnel handshakes on Zambian mobile data and Wi-Fi (and which port wins), that the trace shows `warp=on`, that killing the network reconnects on its own, and that the kill switch blocks pages while reconnecting.

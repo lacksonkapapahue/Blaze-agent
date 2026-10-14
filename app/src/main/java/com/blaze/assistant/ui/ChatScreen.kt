@@ -463,6 +463,8 @@ fun ChatScreen() {
             ConfirmCard()
             QuestionCard()
             SecureFormCard()
+            // v0.25.5: live mini view of the Linux desktop while Blaze works in it; tap for the full Desktop view.
+            if (settingsPage != "linux") DesktopLiveCard(onOpen = { com.blaze.assistant.desktop.LinuxDesktop.requestViewer(); settingsPage = "linux" })
             // v0.24.6: "Open in Design?" instead of switching views on its own.
             if (shellMode == "chat") viewOffer?.let { o -> if (showing != o.id) ViewOfferChip(Views.offerLabel(o.id),
                 onOpen = { Views.offer.value = null; Views.find(o.id)?.let { openView(it, o.target) } }, onDismiss = { Views.offer.value = null }) }

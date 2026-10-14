@@ -7,7 +7,9 @@ import com.blaze.assistant.terminal.Linux
 import com.blaze.assistant.terminal.Terminal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +38,17 @@ object LinuxDesktop {
     @Volatile var password: String = ""; private set
 
     private const val PREF_ON = "linux_desktop_on"
+    private const val PREF_MIRROR = "linux_desktop_mirror"
+
+    /** Set by the live desktop card: open the full-screen viewer as soon as the Desktop view shows. */
+    val viewerRequest = MutableStateFlow(false)
+    fun requestViewer() { viewerRequest.value = true }
+
+    /**
+     * v0.25.5: starts (and installs if needed) in Blaze's own scope, not the screen's, so leaving the Desktop view or
+     * closing Settings doesn't cancel a download half-way. The caller can await the plain result.
+     */
+    fun startAsync(ctx: Context): Deferred<String> { val app = ctx.applicationContext; return scope.async { start(app) } }
 
     private fun set(p: Phase, line: String, pct: Int? = null, err: String = "") { _state.value = State(p, line, pct, err) }
 
@@ -60,14 +73,22 @@ object LinuxDesktop {
             set(Phase.ERROR, m, err = m); return m
         }
         try {
-            if (!Linux.installed()) {
-                set(Phase.INSTALLING, "Setting up Linux first\u2026", 0)
-                val r = Linux.install()
-                if (!Linux.installed()) { set(Phase.ERROR, r, err = r); return r }
-            }
-            if (!installed()) {
-                val r = install()
-                if (r != null) { set(Phase.ERROR, r, err = r); return r }
+            if (!Linux.installed() || !installed()) {
+                // Keep the process (and Wi-Fi) awake while downloading, even with the screen off.
+                set(Phase.INSTALLING, "Getting ready to download\u2026", 0)
+                DesktopKeeper.start(ctx.applicationContext)
+                try {
+                    if (!Linux.installed()) {
+                        set(Phase.INSTALLING, "Setting up Linux first\u2026", 0)
+                        val mirror = scope.launch { Linux.status.collect { if (it.isNotBlank()) set(Phase.INSTALLING, it, _state.value.pct) } }
+                        val r = try { Linux.install() } finally { mirror.cancel() }
+                        if (!Linux.installed()) { set(Phase.ERROR, r, err = r); return r }
+                    }
+                    if (!installed()) {
+                        val r = install()
+                        if (r != null) { set(Phase.ERROR, r, err = r); return r }
+                    }
+                } finally { DesktopKeeper.stop(ctx.applicationContext) }
             }
             set(Phase.STARTING, "Starting the desktop\u2026")
             password = DesktopPlan.password()
@@ -85,22 +106,38 @@ object LinuxDesktop {
         }
     }
 
-    /** apk add with progress; null on success, else a plain error. */
+    /**
+     * apk add with progress, step by step with retries and mirror fallback ([DesktopInstall]); null on success, else a
+     * plain error. The mirror that last worked is remembered for next time.
+     */
     private suspend fun install(): String? = withContext(Dispatchers.IO) {
         set(Phase.INSTALLING, "Downloading the desktop\u2026 " + DesktopPlan.sizeLine(), 0)
+        val start = Settings.str(PREF_MIRROR, "0").toIntOrNull() ?: 0
+        DesktopInstall.run(
+            exec = { script, onLine -> runStep(script, onLine) },
+            status = { pct, line -> set(Phase.INSTALLING, line, pct ?: _state.value.pct) },
+            sleep = { ms -> Thread.sleep(ms) },
+            startMirror = start,
+            onMirror = { Settings.setStr(PREF_MIRROR, it.toString()) },
+        )
+    }
+
+    /** Runs one install step inside Alpine, streaming its output; never throws. */
+    private fun runStep(script: String, onLine: (String) -> Unit): DesktopInstall.Result {
         val p = try {
-            ProcessBuilder(Linux.command(DesktopPlan.installScript())).redirectErrorStream(true)
+            ProcessBuilder(Linux.command(script)).redirectErrorStream(true)
                 .also { it.environment().putAll(Linux.env()) }.start()
-        } catch (e: Exception) { return@withContext "Couldn't start the installer: ${e.message}" }
+        } catch (e: Exception) { return DesktopInstall.Result(-1, "ERROR: couldn't start the installer: ${e.message}") }
         try { p.outputStream.close() } catch (_: Exception) { }
         val tail = ArrayDeque<String>()
-        p.inputStream.bufferedReader().forEachLine { line ->
-            tail.addLast(line); if (tail.size > 8) tail.removeFirst()
-            DesktopPlan.progressLine(line)?.let { (pct, words) -> set(Phase.INSTALLING, words, pct ?: _state.value.pct) }
-        }
-        val code = p.waitFor()
-        if (code == 0 && installed()) null
-        else "The desktop couldn't be installed (check your connection and free space). " + tail.joinToString(" ").takeLast(200)
+        try {
+            p.inputStream.bufferedReader().forEachLine { line ->
+                tail.addLast(line); if (tail.size > 12) tail.removeFirst()
+                onLine(line)
+            }
+        } catch (e: Exception) { tail.addLast("ERROR: ${e.message}") }
+        val code = try { p.waitFor() } catch (_: Exception) { -1 }
+        return DesktopInstall.Result(code, tail.joinToString("\n"))
     }
 
     suspend fun alive(): Boolean = try {
@@ -126,13 +163,15 @@ object LinuxDesktop {
     fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject().put("name", "desktop")
         .put("description", "A real Linux desktop (XFCE) inside Blaze's Alpine Linux, shown in the Desktop view. " +
             "start (installs on first use, ~${DesktopPlan.DOWNLOAD_MB} MB), stop, status, screenshot (attached as an image; coordinates are in that picture's pixels), " +
-            "click x y [button 1 left / 3 right] [double], type text, key keys (xdotool names like ctrl+s Return), run app (terminal, files, browser, editor or a command), open (show the Desktop view).")
+            "click x y [button 1 left / 3 right] [double], type text, key keys (xdotool names like ctrl+s Return), run app (terminal, files, browser, editor or a command), open (show the Desktop view). " +
+            "For click and type, set label to what you're clicking or typing into in 1-3 plain words (\"Save\", \"Terminal\"): the user watches a live view with that label.")
         .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
             .put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("start", "stop", "status", "screenshot", "click", "type", "key", "run", "open"))))
             .put("x", JSONObject().put("type", "integer")).put("y", JSONObject().put("type", "integer"))
             .put("button", JSONObject().put("type", "integer")).put("double", JSONObject().put("type", "boolean"))
             .put("text", JSONObject().put("type", "string")).put("keys", JSONObject().put("type", "string"))
-            .put("app", JSONObject().put("type", "string")))
+            .put("app", JSONObject().put("type", "string"))
+            .put("label", JSONObject().put("type", "string").put("description", "What you're clicking or typing into, 1-3 plain words, shown to the user (e.g. Save, Terminal, File menu).")))
             .put("required", JSONArray(listOf("action")))))
 
     /** The screenshot as a data URL (≤ 1024 px), or null. */
@@ -142,6 +181,7 @@ object LinuxDesktop {
         val f = File(File(ctx.filesDir, "home"), ".desktop_shot.png")
         if (!f.exists()) return@withContext null
         val b = f.readBytes(); f.delete()
+        DesktopLive.shot(b)
         "data:image/png;base64," + android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)
     }
 
@@ -151,6 +191,22 @@ object LinuxDesktop {
      */
     suspend fun run(ctx: Context, args: JSONObject, shots: MutableList<String>, confirm: suspend (String, String) -> Boolean, open: () -> Unit): String {
         val a = args.optString("action")
+        // v0.25.5: the user tapped X on the live desktop card.
+        if (DesktopLive.stopped && a !in setOf("status", "stop")) return "The user tapped X on the live desktop card to stop your desktop work. " +
+            "Don't use the desktop tool again in this task unless the user asks; tell them you stopped and what was done so far."
+        val words = DesktopNarration.status(args, installed())
+        val r = act(ctx, a, args, shots, confirm, open, words)
+        return r
+    }
+
+    /** Wraps one desktop action in the live card's begin / end (only after the user's yes, so the card shows real work). */
+    private suspend fun <T> live(words: String?, x: Int = -1, y: Int = -1, block: suspend () -> T): T {
+        if (words == null) return block()
+        DesktopLive.begin(words, x, y)
+        try { return block() } finally { DesktopLive.end() }
+    }
+
+    private suspend fun act(ctx: Context, a: String, args: JSONObject, shots: MutableList<String>, confirm: suspend (String, String) -> Boolean, open: () -> Unit, words: String?): String {
         if (a !in setOf("status", "stop", "open") && !cpuOk()) return DesktopPlan.UNSUPPORTED
         val needsUp = a in setOf("screenshot", "click", "type", "key", "run")
         if (needsUp && !alive()) return "The desktop isn't running. Call desktop action=start first."
@@ -160,9 +216,9 @@ object LinuxDesktop {
                     if (!confirm("Install the Linux desktop?", DesktopPlan.sizeLine())) "The user said no; nothing was installed."
                     // The first install takes minutes: it runs in the background and the Desktop view shows progress.
                     else { scope.launch { start(ctx) }; open(); "Installing the desktop in the background (${DesktopPlan.sizeLine()}). Call desktop action=status in a few minutes." }
-                } else start(ctx)
+                } else live(words) { start(ctx) }
             }
-            "stop" -> stop()
+            "stop" -> live(words) { stop() }
             "status" -> when {
                 !cpuOk() -> DesktopPlan.UNSUPPORTED
                 alive() -> "Running at ${DesktopPlan.WIDTH}x${DesktopPlan.HEIGHT}, ${DesktopPlan.DEPTH}-bit colour, 127.0.0.1 only."
@@ -170,31 +226,31 @@ object LinuxDesktop {
                 else -> "Not installed (start installs it: ${DesktopPlan.sizeLine()})"
             }
             "open" -> { open(); "Opened the Desktop view." }
-            "screenshot" -> screenshot(ctx)?.let { shots += it; "Desktop screenshot attached in the next message (coordinates are in its pixels; the desktop is ${DesktopPlan.WIDTH}x${DesktopPlan.HEIGHT})." }
+            "screenshot" -> live(words) { screenshot(ctx) }?.let { shots += it; "Desktop screenshot attached in the next message (coordinates are in its pixels; the desktop is ${DesktopPlan.WIDTH}x${DesktopPlan.HEIGHT})." }
                 ?: "Couldn't take a desktop screenshot."
             "click" -> {
                 val x = args.optInt("x", -1); val y = args.optInt("y", -1)
                 if (x < 0 || y < 0) "click needs x and y."
                 else if (!clickOk && !confirm("Let Blaze click in the Linux desktop?", "At $x, $y. You'll be asked once per session.").also { clickOk = it }) "The user said no."
-                else Terminal.run(DesktopPlan.clickCmd(x, y, args.optInt("button", 1), args.optBoolean("double")), timeoutSec = 15, linux = true).let { "Clicked at $x, $y." }
+                else live(words, x, y) { Terminal.run(DesktopPlan.clickCmd(x, y, args.optInt("button", 1), args.optBoolean("double")), timeoutSec = 15, linux = true) }.let { "Clicked at $x, $y." }
             }
             "type" -> {
                 val t = args.optString("text")
                 if (t.isBlank()) "type needs text."
                 else if (!confirm("Type in the Linux desktop?", "\u201c${t.take(120)}\u201d")) "The user said no."
-                else Terminal.run(DesktopPlan.typeCmd(t), timeoutSec = 60, linux = true).let { "Typed ${t.length} characters." }
+                else live(words) { Terminal.run(DesktopPlan.typeCmd(t), timeoutSec = 60, linux = true) }.let { "Typed ${t.length} characters." }
             }
             "key" -> {
                 val k = args.optString("keys")
                 if (k.isBlank()) "key needs keys."
                 else if (!confirm("Press keys in the Linux desktop?", k)) "The user said no."
-                else Terminal.run(DesktopPlan.keyCmd(k), timeoutSec = 15, linux = true).let { "Pressed $k." }
+                else live(words) { Terminal.run(DesktopPlan.keyCmd(k), timeoutSec = 15, linux = true) }.let { "Pressed $k." }
             }
             "run" -> {
                 val app = args.optString("app")
                 if (app.isBlank()) "run needs app."
                 else if (!confirm("Open in the Linux desktop?", DesktopPlan.appCommand(app))) "The user said no."
-                else Terminal.run(DesktopPlan.runCmd(app), timeoutSec = 15, linux = true).let { "Started ${DesktopPlan.appCommand(app)}. Take a screenshot to see it." }
+                else live(words) { Terminal.run(DesktopPlan.runCmd(app), timeoutSec = 15, linux = true) }.let { "Started ${DesktopPlan.appCommand(app)}. Take a screenshot to see it." }
             }
             else -> "Unknown action. Use start, stop, status, screenshot, click, type, key, run or open."
         }
