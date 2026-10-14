@@ -670,7 +670,7 @@ fun StatusChip(text: String, color: Color, filled: Boolean) {
     }
 }
 
-/** v0.24.8: a project's round initial badge (soft orange-to-blue wash) instead of the old "01 / 02" numbers. */
+/** v0.24.8: a project's round initial badge (soft classic-blue wash) instead of the old "01 / 02" numbers. */
 @Composable
 fun ProjectBadge(name: String) {
     val c = LocalBlaze.current

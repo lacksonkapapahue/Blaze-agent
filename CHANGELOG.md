@@ -2,6 +2,10 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.25.2: classic Blaze colours back
+- The v0.24.8 orange-to-blue gradient is gone everywhere: send button, primary buttons (Create, Allow, Continue, setup, Learn, lock screen…), project badges, progress bars, the "Blaze is working" overlay title, step-flow dots in rich replies, Magic Hand highlights and its notification. All use the classic solid Blaze blue (`BlazeBrush.primary` / `primarySoft`, `Glass.brand`). The flame mascot and app icon keep their own colours; warnings and danger buttons keep their warm warning colour.
+- "VPN that just works" moves to v0.25.3.
+
 ## v0.25.1: Linux desktop on the phone
 - **Settings › Advanced › Desktop (Linux)** (view `linux`, aliases linux desktop / xfce / vnc): a real XFCE desktop (terminal, Thunar, Mousepad, NetSurf) inside Blaze's Alpine Linux (proot) under TigerVNC bound to 127.0.0.1 with a random 8-character password (`desktop/DesktopPlan.kt`, `desktop/LinuxDesktop.kt`). Packages come free from Alpine on first Start (~260 MB download, ~750 MB on disk); A12-friendly defaults 1024×576, 16-bit; refuses to start below 350 MB free RAM; unsupported CPUs get one plain line.
 - Blaze's own RFB viewer (`desktop/Rfb.kt`, `ui/LinuxDesktopPage.kt`): full screen, touch as a mouse, on-screen keyboard.

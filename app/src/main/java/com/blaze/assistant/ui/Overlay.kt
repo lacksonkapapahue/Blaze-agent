@@ -551,7 +551,7 @@ fun TaskCard(onOpen: () -> Unit, onStop: () -> Unit, onMinimise: () -> Unit = {}
         Column(Modifier.weight(1f)) {
             Text(if (tasks > 1) "Blaze \u00b7 $tasks tasks" else "Blaze is working", maxLines = 1,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
-                    brush = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color(0xFFFFB25A), Color(0xFF6FAEF2)))))
+                    color = Color(0xFF6B8CFF)))
             Text(step, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 style = TextStyle(fontFamily = Type.Sans, fontSize = 13.5.sp, color = DialogColors.title))
         }

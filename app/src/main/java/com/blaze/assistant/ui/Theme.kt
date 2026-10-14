@@ -134,12 +134,12 @@ object BlazeShapes {
         extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(28.dp))
 }
 
-/** Brand gradient for primary buttons: the mascot's warm orange into its blue (v0.24.8). */
+/** Primary buttons: the classic Blaze blue, solid (v0.25.2; the v0.24.8 orange-to-blue gradient is gone). */
 object BlazeBrush {
     val orange = Color(0xFFFF9A3C)
     val blue = Color(0xFF4C7DFF)
-    val primary: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(orange, blue))
-    val primarySoft: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(orange.copy(alpha = 0.18f), blue.copy(alpha = 0.18f)))
+    val primary: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.SolidColor(blue)
+    val primarySoft: androidx.compose.ui.graphics.Brush get() = androidx.compose.ui.graphics.SolidColor(blue.copy(alpha = 0.18f))
 }
 
 /** Material colour scheme from Blaze's tokens (v0.24.5): blue primary, orange secondary, Blaze surfaces; never purple. */

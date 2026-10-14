@@ -220,11 +220,11 @@ private fun DeckArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, des
     }
 }
 
-/** Step-flow card: numbered orange → blue dots joined by a line, a bold title and its detail per step. */
+/** Step-flow card: numbered blue dots joined by a line, a bold title and its detail per step. */
 @Composable
 fun RichSteps(steps: List<RichReplies.Step>, text: @Composable (String) -> Unit) {
     val c = LocalBlaze.current
-    val orange = Color(0xFFFF9A3C); val blue = Color(0xFF4C7DFF)
+    val orange = Color(0xFF4C7DFF); val blue = Color(0xFF4C7DFF) // v0.25.2: classic solid blue, no orange
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(c.faint).padding(horizontal = 12.dp, vertical = 12.dp)) {
         steps.forEachIndexed { i, s ->
             val f = if (steps.size <= 1) 0f else i / (steps.size - 1f)

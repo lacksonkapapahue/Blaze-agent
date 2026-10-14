@@ -84,7 +84,7 @@ object MagicHandWatches {
         val open = app.packageManager.getLaunchIntentForPackage(w.pkg)?.let {
             android.app.PendingIntent.getActivity(app, w.id.hashCode(), it, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
         }
-        val n = NotificationCompat.Builder(app, CH).setSmallIcon(com.blaze.assistant.R.drawable.ic_stat_blaze).setColor(0xFFFF9A3C.toInt())
+        val n = NotificationCompat.Builder(app, CH).setSmallIcon(com.blaze.assistant.R.drawable.ic_stat_blaze).setColor(0xFF4C7DFF.toInt())
             .setContentTitle(w.app.ifBlank { "Blaze watch" }).setContentText(c.summary(w.label))
             .setAutoCancel(true).apply { open?.let { setContentIntent(it) } }.build()
         try { NotificationManagerCompat.from(app).notify(7400 + (w.id.hashCode() and 0xff), n) } catch (_: SecurityException) { }
