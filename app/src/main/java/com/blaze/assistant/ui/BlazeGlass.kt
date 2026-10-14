@@ -65,7 +65,7 @@ object Glass {
     val orange = Color(0xFFFF9A3C)
     val cyan = Color(0xFF66D8FF)
     val privateBg = Color(0xFF1A1622)
-    val brand: Brush get() = Brush.horizontalGradient(listOf(Color(0xFFFFB25A), Color(0xFF6FAEF2), blue))
+    val brand: Brush get() = androidx.compose.ui.graphics.SolidColor(blue)
     val pill = RoundedCornerShape(50)
     val card = RoundedCornerShape(24.dp)
 }

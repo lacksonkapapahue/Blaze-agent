@@ -127,3 +127,6 @@
 - **Branch:** `linux-desktop`, PR opened Oct 14 2026; merge on green CI and release v0.25.1.
 - **Left (needs the A12):** Start the desktop on Wi-Fi, check install time, RAM headroom, touch-mouse and keyboard; ask Blaze to open the terminal on the desktop.
 - **Next:** v0.25.2 VPN that just works.
+
+## classic-colors (v0.25.2, versionCode 84)
+- Luke (Oct 14 2026): remove the orange/blue gradient everywhere, back to classic solid Blaze blue. Branch `classic-colors` on top of linux-desktop. Next: v0.25.3 VPN that just works.

@@ -740,7 +740,7 @@ object MagicHand {
         // wallpaper (dark ones included) and is visible even before Compose draws its first frame.
         private val halo = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
         private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f * d; color = 0xE6FFFFFF.toInt() }
-        private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * d; color = 0x99FF9A3C.toInt() }
+        private val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * d; color = 0x994C7DFF.toInt() }
         init { setWillNotDraw(false) }
         override fun dispatchDraw(c: Canvas) {
             val cx = width / 2f; val cy = height / 2f; val r = minOf(width, height) / 2f - 3f * d
@@ -781,8 +781,8 @@ object MagicHand {
         private var b: MagicHandLogic.Box? = null
         private val path = Path()
         private var trailOn = false
-        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * d; color = 0xFFFF9A3C.toInt() }
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0x22FF9A3C }
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * d; color = 0xFF4C7DFF.toInt() }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0x224C7DFF }
         private val trail = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * d; color = 0xCC4C7DFF.toInt(); strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         fun box(n: MagicHandLogic.Box?) { if (n != b) { b = n; invalidate() } }
         fun trail(pts: List<MagicHandLogic.P>) {
