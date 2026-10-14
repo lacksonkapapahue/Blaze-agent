@@ -61,3 +61,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+## Linux desktop (v0.25.1), downloaded on first Start, not bundled
+The Desktop view installs these free and open-source packages from Alpine Linux's official repositories into Blaze's
+Alpine Linux on the phone, only when the user taps Start (or approves the agent's `desktop` start). None of them is
+shipped inside the APK. Each keeps its own licence (as packaged by Alpine; `apk info -L <pkg>` lists its files):
+
+| Package | Project | Licence |
+|---|---|---|
+| xfce4, xfce4-session, xfwm4, xfdesktop, xfce4-panel, xfce4-terminal, thunar, mousepad | Xfce | GPL-2.0-or-later / LGPL-2.0-or-later |
+| tigervnc (Xvnc, vncpasswd) | TigerVNC | GPL-2.0-or-later |
+| xdotool | xdotool | BSD-3-Clause |
+| imagemagick (import) | ImageMagick | ImageMagick License (Apache-2.0 style) |
+| netsurf | NetSurf | GPL-2.0-only |
+| dbus, dbus-x11 | freedesktop.org D-Bus | AFL-2.1 OR GPL-2.0-or-later |
+| font-dejavu | DejaVu Fonts | Bitstream Vera Fonts License (free) |
+| adwaita-icon-theme | GNOME | LGPL-3.0-or-later OR CC-BY-SA-3.0 |
+
+Blaze's VNC viewer (`desktop/Rfb.kt`) is Blaze's own code, written from the public RFB protocol specification (RFC 6143).

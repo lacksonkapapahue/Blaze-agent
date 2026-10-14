@@ -2,6 +2,12 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.25.1: Linux desktop on the phone
+- **Settings › Advanced › Desktop (Linux)** (view `linux`, aliases linux desktop / xfce / vnc): a real XFCE desktop (terminal, Thunar, Mousepad, NetSurf) inside Blaze's Alpine Linux (proot) under TigerVNC bound to 127.0.0.1 with a random 8-character password (`desktop/DesktopPlan.kt`, `desktop/LinuxDesktop.kt`). Packages come free from Alpine on first Start (~260 MB download, ~750 MB on disk); A12-friendly defaults 1024×576, 16-bit; refuses to start below 350 MB free RAM; unsupported CPUs get one plain line.
+- Blaze's own RFB viewer (`desktop/Rfb.kt`, `ui/LinuxDesktopPage.kt`): full screen, touch as a mouse, on-screen keyboard.
+- `desktop` agent tool so Blaze can install / start / stop and use the desktop (screenshots, xdotool), with a confirm card first.
+- Tests `DesktopPlanTest`, `RfbTest`; ShotsTest page. THIRD_PARTY_NOTICES lists the open-source packages. No database changes; prefs backward compatible.
+
 ## v0.25.0: Blaze Cloud only, Magic Hand can't lock the phone, swipeable Undo bar
 Bug-fix release from Luke's Galaxy A12 reports. (The planned "VPN that just works" moves to v0.25.2; v0.25.1 is the Linux desktop.)
 - **Magic Hand lock-up fixed** (had to reboot): in teach mode the dock's review step made its window focusable *without* `FLAG_NOT_TOUCH_MODAL`, so it captured every touch on the screen, and it sat over the navigation bar; meanwhile every accessibility event (System UI, Samsung capture…) was handled on the UI thread with binder calls, which froze Blaze into "isn't responding". Now (`phone/MagicHandSafety.kt`): the highlight layer is never touchable, the hand and dock are always `NOT_TOUCH_MODAL`, the dock sits above the nav bar / gesture area, the hand is clamped on screen; probing what's under the tip, teach events, screenshots, crops and OCR run off the UI thread with timeouts; key events are only observed, never consumed.

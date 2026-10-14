@@ -756,6 +756,7 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.ui.Views.tool())
         t.put(SelfKnowledge.tool())
         t.put(BlazeRouter.tool())
+        t.put(com.blaze.assistant.desktop.LinuxDesktop.tool())
         if (Settings.longChat || Mind.ready) LongChat.tools().forEach { t.put(it) }
         t.put(Flashcards.tool())
         if (Designs.templateLoader == null) Designs.templateLoader = { app.assets.open("skills/three-d-design/assets/mockup.html").bufferedReader().use { it.readText() } }
@@ -1921,6 +1922,12 @@ When you finish, say what you did in one short sentence.
                 "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
                 "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
                 "blazerouter" -> { add(Role.STEP, "BlazeRouter: " + args.optString("action")); BlazeRouter.run(app, args) }
+                "desktop" -> {
+                    add(Role.STEP, "Linux desktop: " + args.optString("action"))
+                    com.blaze.assistant.desktop.LinuxDesktop.run(app, args, shots,
+                        confirm = { title, detail -> confirm(title, detail, "Allow") },
+                        open = { com.blaze.assistant.ui.Views.open("linux") })
+                }
                 SelfKnowledge.TOOL -> { add(Role.STEP, "Checking my own setup"); kotlinx.coroutines.withContext(Dispatchers.IO) { SelfKnowledge.report(app, args.optString("section")) } }
                 com.blaze.assistant.ui.Views.TOOL -> {
                     val v = com.blaze.assistant.ui.Views.find(args.optString("view"))

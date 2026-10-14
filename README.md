@@ -34,6 +34,9 @@ before it were numbered 1.0–1.17.0 (CHANGELOG.md keeps those numbers); `versio
 update normally. Because the name went down, CI also publishes the same APK as `Blaze-v1.999.<versionCode>.apk`:
 1.x builds compare names and see it as newer, and v0.8.0+ reads the build number from it and compares `versionCode`.
 
+## Linux desktop (v0.25.1)
+Settings › Advanced › Desktop (Linux) installs and runs a real XFCE desktop inside Blaze's Alpine Linux, shown full screen with touch-mouse and keyboard. Blaze can use it too (`desktop` tool). See CHANGELOG.md.
+
 ## One mind
 One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/mind.db` holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats stay on disk and in the journal (Blaze finds them with `search_chat`); since v0.24.0 there is no chat list or Archive screen, and `/clear` empties the screen without forgetting anything. Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.
 
