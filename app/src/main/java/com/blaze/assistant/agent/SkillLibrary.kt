@@ -84,6 +84,7 @@ object SkillLibrary {
         if (CoreSkills.isCore(dirName) && !on) return                       // core skills can't be switched off
         val s = offSet().toMutableSet(); if (on) s -= dirName else s += dirName
         Settings.setStr("skills_off", s.sorted().joinToString(","))
+        SkillMatch.invalidate()   // v0.26.2: the skills index is rebuilt on toggle
     }
 
     // ---------- delete / restore ----------
@@ -91,6 +92,7 @@ object SkillLibrary {
     fun delete(dirName: String) {
         if (CoreSkills.isCore(dirName)) return                              // core skills can't be deleted (Restore original resets edits)
         File(root(), dirName).deleteRecursively()
+        SkillMatch.invalidate()
         com.blaze.assistant.connect.SkillSync.localChange()
         val m = manifest()
         m.optJSONObject(dirName)?.let { m.put(dirName, it.put("deleted", true)); saveManifest(m) }

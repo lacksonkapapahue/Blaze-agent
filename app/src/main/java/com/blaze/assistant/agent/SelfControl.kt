@@ -40,6 +40,15 @@ object SelfControl {
      * Returns the reply, or null when this isn't one of them.
      */
     fun quick(ctx: Context, text: String): String? {
+        // v0.26.2: "what sound profile is my phone set to?", "am I on mute?" → straight from the phone's own readings.
+        PhoneState.kind(text)?.let { k ->
+            try {
+                val snap = com.blaze.assistant.device.DeviceStatus.snap(ctx)
+                val nm = ctx.getSystemService(android.app.NotificationManager::class.java)
+                val dnd = nm != null && nm.currentInterruptionFilter > android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+                return PhoneState.answer(k, snap.ringer, dnd, snap.battery, snap.charging, snap.network)
+            } catch (_: Exception) { }
+        }
         val t = text.trim().lowercase().replace(Regex("[?.!,]+"), " ").replace(Regex("\\s+"), " ").trim()
             .removePrefix("hey blaze ").removePrefix("blaze ").removePrefix("please ").removeSuffix(" please").removeSuffix(" blaze").trim()
         if (t.length > 45) return null

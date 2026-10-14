@@ -65,6 +65,11 @@ export interface RouteResult {
   clientError?: { status: number; message: string };
 }
 
+/** blaze_avoid from the app: at most 8 "provider/model" strings. */
+export function avoidSet(v: unknown): Set<string> {
+  return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.length > 0 && x.length < 200).slice(0, 8) : []);
+}
+
 /**
  * Tries the task's models in order until one answers. Exported for tests: [deps] lets them swap the
  * network and clock. Persists health through [persist] (the caller hands it to waitUntil).
@@ -76,7 +81,12 @@ export async function route(
 ): Promise<RouteResult> {
   const now = deps.now ?? Date.now;
   const start = now();
-  const plan = planCandidates((cfg.routes[task] ?? []).filter(c => isRoutable(c, cfg.paid ?? new Set())), p => isUsable(cfg, env, p, start), marks, start);
+  // App v0.26.2: routes ("provider/model") that just came back empty (reasoning only) or broke mid-stream for this
+  // request; they go last so the next model in the lineup answers. Never empties the lineup.
+  const avoid = avoidSet(body.blaze_avoid);
+  const lineup = (cfg.routes[task] ?? []).filter(c => isRoutable(c, cfg.paid ?? new Set()));
+  const preferred = lineup.filter(c => !avoid.has(`${c.provider}/${c.model}`));
+  const plan = planCandidates(preferred.length ? [...preferred, ...lineup.filter(c => avoid.has(`${c.provider}/${c.model}`))] : lineup, p => isUsable(cfg, env, p, start), marks, start);
   const attempts: Attempt[] = [];
   let badRequests = 0;
   let lastBad: { status: number; message: string } | undefined;

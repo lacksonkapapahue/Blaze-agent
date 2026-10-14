@@ -94,9 +94,11 @@ object SpecialistMatch {
         if (specs.isEmpty()) return ""
         val names = specs.joinToString(", ") { "${it.name} (${it.id})" }
         return "\n\nSPECIALISTS FOR THIS REQUEST: $names. Their skills are attached above; follow blaze-specialists. " +
-            "Small or step-by-step work: do it yourself. Big work that splits into independent pieces: call delegate once with one task per piece " +
-            "(one per target: comparing 3 shops = 3 tasks), each a tight brief (goal, what to return, limits, stop and report after two failed tries). " +
-            "Long jobs can go to start_agent; steer them with message_agent instead of starting duplicates. Merge the results into one answer."
+            "Delegate only when it helps: independent parts that can run in parallel, or big research. Small or step-by-step work: do it yourself. " +
+            "Otherwise call delegate once with one task per target (comparing 3 shops = 3 tasks; never two specialists on the same target), each a tight brief " +
+            "(goal, what to return, limits, stop and report after two failed tries), and scope: one line for the user (\"Sending Researcher and Shopper to compare…\"), which delegate shows in the chat. " +
+            "delegate doesn't block: keep helping, and when each result lands write a short follow-up from it; merge when the last is in. " +
+            "Steer one with message_agent, stop one with cancel_agent. If a part needs a field no specialist covers, create_specialist makes one (with a real field playbook)."
     }
 
     fun cardLine(specs: List<Specialists.Spec>): String = if (specs.isEmpty()) "" else "Specialist: " + specs.joinToString(", ") { it.name }

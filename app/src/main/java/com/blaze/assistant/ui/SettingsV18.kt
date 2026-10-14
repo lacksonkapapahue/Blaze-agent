@@ -397,16 +397,43 @@ fun SpecialistsPage() {
     V18Note("Blaze can hand parts of a job to focused specialists, each with its own instructions and only the tools it needs. Several run at the same time, so research + writing + planning finish faster.")
     ToggleRow("Use specialists", "Blaze decides when it's worth delegating", on) { on = !on; Settings.setBool("specialists_on", on) }
     V18Section("Team")
+    // v0.26.2: every specialist has a field playbook; ones Blaze made say so, and custom ones can be edited or deleted.
+    var editing by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxWidth().hairline(c.hair)) {
         (com.blaze.assistant.agent.Specialists.builtIn + custom).forEach { s ->
-            Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(s.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
-                    Text(s.prompt, maxLines = 2, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-                    Label(s.groups.joinToString(" · "), color = c.accent, size = 9.sp)
+            Column(Modifier.fillMaxWidth().hairlineBottom(c.hair).clickable(enabled = s.custom) { editing = if (editing == s.id) null else s.id }.padding(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.name, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
+                        Text(s.prompt, maxLines = 2, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
+                        val tags = listOfNotNull(
+                            if (s.byBlaze) "MADE BY BLAZE" else null,
+                            if (!s.custom || s.playbook.isNotBlank()) "PLAYBOOK" else "PLAYBOOK ON FIRST USE",
+                            s.groups.joinToString(" · "))
+                        Label(tags.joinToString(" · "), color = c.accent, size = 9.sp)
+                    }
+                    if (s.custom) ActionText("×", color = c.sub, size = 14.sp, modifier = Modifier.clickable {
+                        custom = custom.filterNot { it.id == s.id }; com.blaze.assistant.agent.Specialists.saveCustom(custom); if (editing == s.id) editing = null }.padding(8.dp))
                 }
-                if (s.custom) ActionText("×", color = c.sub, size = 14.sp, modifier = Modifier.clickable {
-                    custom = custom.filterNot { it.id == s.id }; com.blaze.assistant.agent.Specialists.saveCustom(custom) }.padding(8.dp))
+                if (s.custom && editing == s.id) {
+                    var ePrompt by remember(s.id) { mutableStateOf(s.prompt) }
+                    var ePlay by remember(s.id) { mutableStateOf(s.playbook) }
+                    var note by remember(s.id) { mutableStateOf("") }
+                    Spacer(Modifier.height(8.dp))
+                    V18Field("What it does and how", ePrompt) { ePrompt = it }
+                    V18Field("Playbook (## Principles of the field, ## Quality bar, ## Best practices, ## Common mistakes to avoid, ## Self-check, ## Output format)", ePlay) { ePlay = it }
+                    if (note.isNotBlank()) Text(note, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.accent))
+                    V18Button("Save changes", primary = false) {
+                        val check = if (ePlay.isBlank()) null else com.blaze.assistant.agent.Playbooks.validate(ePlay, "${s.name} ${s.id} $ePrompt")
+                        custom = custom.map { if (it.id == s.id) it.copy(prompt = ePrompt.trim(), playbook = ePlay.trim()) else it }
+                        com.blaze.assistant.agent.Specialists.saveCustom(custom)
+                        note = when {
+                            check == null -> "Saved. Blaze writes a playbook the first time it uses this specialist."
+                            check.ok -> "Saved."
+                            else -> "Saved, but the playbook needs work: " + check.problems.take(3).joinToString(" ")
+                        }
+                    }
+                }
             }
         }
     }
@@ -431,7 +458,8 @@ fun SpecialistsPage() {
     Spacer(Modifier.height(10.dp))
     V18Button("Add specialist") {
         if (name.isNotBlank() && prompt.isNotBlank()) {
-            custom = custom + com.blaze.assistant.agent.Specialists.Spec(name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-'), name.trim(), prompt.trim(), groups, true)
+            custom = custom + com.blaze.assistant.agent.Specialists.Spec(name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-'), name.trim(), prompt.trim(), groups, true,
+                madeBy = com.blaze.assistant.agent.Specialists.USER)
             com.blaze.assistant.agent.Specialists.saveCustom(custom); name = ""; prompt = ""
         }
     }

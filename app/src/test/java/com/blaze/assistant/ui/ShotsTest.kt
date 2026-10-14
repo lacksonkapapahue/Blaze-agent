@@ -811,4 +811,27 @@ class ShotsTest {
                 "```chart\n{\"type\":\"pie\",\"title\":\"Where the K495 goes\",\"labels\":[\"Food\",\"Drinks\",\"Tip\"],\"series\":[{\"values\":[300,150,45]}],\"unit\":\"K\"}\n```")
         }
     }
+
+    // v0.26.2: specialists handed out at once (cards with Steer / Stop, one already done) and the follow-up chips as one swipe row.
+    @Test fun specialistsAndChipRow() = shot("60-specialists-chip-row") {
+        val now = System.currentTimeMillis()
+        com.blaze.assistant.agent.BgAgents.preview(listOf(
+            com.blaze.assistant.agent.BgAgents.Bg("B3", "Galaxy A15 at Game", "brief", "main", "bg-1", status = com.blaze.assistant.agent.BgAgents.DONE,
+                created = now - 50_000, started = now - 48_000, ended = now - 9_000, steps = 5,
+                result = "K3,499 at Game Manda Hill, in stock, free delivery to Ndola in 3 days.", specialist = "shopper"),
+            com.blaze.assistant.agent.BgAgents.Bg("B4", "Galaxy A15 at Jumia", "brief", "main", "bg-2", status = com.blaze.assistant.agent.BgAgents.RUNNING,
+                created = now - 50_000, started = now - 47_000, steps = 3, last = "Reading the Jumia listing", specialist = "shopper"),
+            com.blaze.assistant.agent.BgAgents.Bg("B5", "Phone prices this year", "brief", "main", "bg-3", status = com.blaze.assistant.agent.BgAgents.QUEUED,
+                created = now - 49_000, specialist = "researcher"),
+        ))
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Sending Shopper ×2 and Researcher to work on this at the same time. Results land here as each one finishes.",
+                style = TextStyle(fontSize = 15.sp, color = LocalBlaze.current.ink))
+            AgentCard("B4")
+            AgentCard("B5")
+            AgentCard("B3")
+            Text("Game has it for K3,499 with free delivery to Ndola. Waiting on Jumia and the price check.", style = TextStyle(fontSize = 15.sp, color = LocalBlaze.current.ink))
+            FollowupRow(listOf("Which one is cheaper?", "Add delivery to the total", "Remind me on payday", "Compare the A25 too")) { }
+        }
+    }
 }

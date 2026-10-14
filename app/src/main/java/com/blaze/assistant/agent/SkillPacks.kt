@@ -50,6 +50,7 @@ object SkillPacks {
      * System prompt block. With a handful of skills, names and one-line descriptions; with more,
      * the ones that match this request in full plus the rest by name only (like Blaze Desktop).
      * Skills switched off in Settings are left out.
+     * v0.26.2: no longer sent each turn (SkillMatch.lookupBlock replaces it); kept for /skills-style listings.
      */
     fun promptBlock(query: String = ""): String {
         // v0.26.1: an in-chat diagram / chart leaves out the file-route skills (VisualRoute).
@@ -255,7 +256,7 @@ object SkillPacks {
 3. Never delete anything outside ~ without the user's OK; show what will be removed first.
 4. Report the final path and size when done.
 """),
-        Triple("phone-task-speed", "Doing multi-step tasks inside phone apps as fast as possible", """
+        Triple("phone-task-speed", "Doing multi-step tasks inside phone apps as fast as possible (actions in apps, not questions about the phone's state)", """
 # Fast phone tasks
 1. Use run_plan with the whole script at once, targets by their visible words.
 2. Set watchers for pop-ups you expect (preset=popups) so they never cost a step.
@@ -274,7 +275,7 @@ object SkillPacks {
 
     // ---------- Tools ----------
 
-    val names = setOf("use_skill", "skill_file", "install_skill", "write_skill", "save_workflow")
+    val names = setOf("use_skill", "find_skill", "skill_file", "install_skill", "write_skill", "save_workflow")
 
     private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
         JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
@@ -282,6 +283,8 @@ object SkillPacks {
 
     fun tools(): List<JSONObject> = listOf(
         fn("use_skill", "Read a skill's full instructions (SKILL.md) before a task it covers.", JSONObject().put("name", str()), listOf("name")),
+        fn("find_skill", "Search all installed and learned skills by what you need to do (best matches first, with descriptions). Use it when the skills listed this turn don't fit.",
+            JSONObject().put("query", str("What the task is about, in plain words")), listOf("query")),
         fn("skill_file", "Read an extra file from a skill (reference or script).", JSONObject().put("name", str()).put("path", str()), listOf("name", "path")),
         fn("install_skill", "Install skills from a GitHub folder/repo link, a SKILL.md link, or a .zip URL.", JSONObject().put("url", str()), listOf("url")),
         fn("write_skill", "Save a procedure you worked out as a skill (SKILL.md) for next time.",
@@ -300,8 +303,9 @@ object SkillPacks {
 
     suspend fun run(name: String, a: JSONObject): String = when (name) {
         "use_skill" -> use(a.optString("name"))
+        "find_skill" -> SkillMatch.find(a.optString("query").ifBlank { a.optString("name") })
         "skill_file" -> file(a.optString("name"), a.optString("path"))
-        "install_skill" -> install(a.optString("url")).also { com.blaze.assistant.connect.SkillSync.localChange() }
+        "install_skill" -> install(a.optString("url")).also { SkillMatch.invalidate(); com.blaze.assistant.connect.SkillSync.localChange() }
         "write_skill" -> write(a.optString("name"), a.optString("description"), a.optString("instructions")).also { com.blaze.assistant.connect.SkillSync.localChange() }
         "save_workflow" -> saveWorkflow(a.optString("name"), a.optString("trigger"), textOrList(a, "steps"), textOrList(a, "checks"),
             a.optJSONArray("tags")?.let { t -> (0 until t.length()).map { t.optString(it) } } ?: emptyList(), a.optBoolean("tested", false))

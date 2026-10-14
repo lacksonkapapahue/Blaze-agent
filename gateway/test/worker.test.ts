@@ -140,6 +140,20 @@ describe("chat", () => {
     expect(calls.map(c => c.body.model)).toEqual(["m3"]); // cooling models never tried
   });
 
+  it("blaze_avoid (app v0.26.2): a route that just came back empty goes last, and is never sent upstream", async () => {
+    await addKey("groq", "gsk_test_key_AAAA");
+    await setRoute("chat", [["groq", "m1"], ["groq", "m2"]]);
+    const r = await chat({ blaze_task: "chat", blaze_avoid: ["groq/m1"] });
+    await ctx.settle();
+    expect(r.headers.get("X-Blaze-Model")).toBe("m2");
+    expect(calls[0]!.body.blaze_avoid).toBeUndefined();
+    calls.length = 0;
+    // Avoiding every route still answers (the avoided ones are tried last, never dropped).
+    const r2 = await chat({ blaze_task: "chat", blaze_avoid: ["groq/m1", "groq/m2"] });
+    await ctx.settle();
+    expect(r2.status).toBe(200);
+  });
+
   it("rotates keys: a rejected key cools only itself; a 429 tries the provider's next key", async () => {
     await addKey("groq", "gsk_bad_key_1111");
     await addKey("groq", "gsk_good_key_2222");

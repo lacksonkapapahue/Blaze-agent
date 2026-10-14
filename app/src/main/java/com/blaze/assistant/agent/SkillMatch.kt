@@ -31,6 +31,8 @@ object SkillMatch {
         "what when where which who how why its it's about from into have has had get got make made want need let lets " +
         "some any all one two also very really then than them they their there here now today help hey blaze okay ok thanks").split(" ").toSet()
 
+    private val genericName = setOf("phone", "task", "app", "skill", "flow", "speed", "general")
+
     /** Lowercase word stems: "flashcards" → "flashcard", "studying" → "study", "quizzes" → "quiz". */
     fun stem(w: String): String {
         var s = w
@@ -50,7 +52,9 @@ object SkillMatch {
     fun score(query: String, c: Cand): Int {
         val q = words(query); if (q.isEmpty()) return 0
         val low = " " + query.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ") + " "
-        var s = 3 * (words(c.name.replace('-', ' ')) intersect q).size
+        // v0.26.2: generic name words ("phone", "task", "app") count once, so "what's my phone's sound profile?" doesn't pull in phone-task-speed.
+        val nameHits = words(c.name.replace('-', ' ')) intersect q
+        var s = nameHits.fold(0) { acc, w -> acc + if (w in genericName) 1 else 3 }
         val kw = c.keywords.map { it.trim().lowercase() }.filter { it.isNotEmpty() }
         s += 2 * (kw.filter { !it.contains(' ') }.flatMap { words(it) }.toSet() intersect q).size
         s += 3 * kw.count { it.contains(' ') && low.contains(" $it ") }
@@ -137,5 +141,31 @@ object SkillMatch {
     // v0.26.1: an in-chat diagram / chart doesn't pull in the file-route skills (VisualRoute); it's drawn in the reply.
     fun forTurn(query: String): Result = try { match(query, VisualRoute.filter(query, cached())) } catch (_: Throwable) { Result.NONE }
 
-    fun invalidate() { cache = null }
+    fun invalidate() { cache = null; index = null }
+
+    // ---------------- v0.26.2: skills by lookup (SkillIndex, Desktop's bm25 ranking) ----------------
+
+    /** A candidate as an index row: name, description, when-to-use (keywords + the learned "When:" line). */
+    fun doc(c: Cand): SkillIndex.Doc = SkillIndex.Doc(c.name, listOf(c.name, c.description,
+        (c.keywords + listOfNotNull(Regex("(?m)^When: (.+)$").find(c.body)?.groupValues?.get(1))).joinToString(" ")),
+        note = if (c.source == "learned" && c.body.contains("run_skill")) " [replayable with run_skill]" else "")
+
+    /** The index for these candidates (enabled ones only; VisualRoute's skips applied by the caller). Pure. */
+    fun indexOf(cands: List<Cand>): SkillIndex.Index = SkillIndex.skills(cands.filter { it.on }.distinctBy { it.name.lowercase() }.map { doc(it) })
+
+    /** Rebuilt whenever the skill set changes: keyed on a signature of the candidates (install, toggle, learn, delete). */
+    @Volatile private var index: Pair<Int, SkillIndex.Index>? = null
+    fun index(cands: List<Cand> = cached()): SkillIndex.Index {
+        val sig = cands.joinToString("\n") { "${it.name}\t${it.description}\t${it.on}\t${it.keywords}" }.hashCode()
+        index?.takeIf { it.first == sig }?.let { return it.second }
+        return indexOf(cands).also { index = sig to it }
+    }
+
+    /** The per-turn skills block: the 2-3 best matches with short descriptions and one line about find_skill. No name list. */
+    fun lookupBlock(query: String, skip: Set<String> = emptySet()): String = try {
+        SkillIndex.promptBlock(index(VisualRoute.filter(query, cached())), query, skip)
+    } catch (_: Throwable) { "" }
+
+    /** find_skill: search every enabled skill. */
+    fun find(query: String): String = try { SkillIndex.findLine(index(), query) } catch (e: Throwable) { "Error: ${e.message}" }
 }

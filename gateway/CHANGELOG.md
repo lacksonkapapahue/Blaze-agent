@@ -1,5 +1,11 @@
 # Blaze Gateway changelog
 
+## 0.2.2 (2026-10-14)
+
+- `blaze_avoid` (app v0.26.2): up to 8 "provider/model" routes the app just got an empty (reasoning-only)
+  reply from, or whose stream broke mid-reply. They go last in that request's lineup, so the next model
+  answers; avoiding every route still answers. Stripped before the upstream call like every `blaze_*` field.
+
 ## 0.2.1 (2026-10-14)
 
 - Model picker: the native dropdown (square OS popup) is replaced by a rounded, searchable list

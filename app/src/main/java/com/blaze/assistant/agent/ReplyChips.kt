@@ -38,5 +38,12 @@ object ReplyChips {
         return meta.split(" \u00b7 ").map { it.trim() }.filter { it.isNotEmpty() && !isTechnical(it) }.joinToString(" \u00b7 ")
     }
 
+    /**
+     * v0.26.2: the old "Fresh start. Earlier turns are out of my context…" / "Fresh start. Here's where we were" bubble.
+     * New context windows are silent now; saved chats that still have one don't show it either. Pure.
+     */
+    fun isFreshStart(text: String, meta: String): Boolean =
+        text.startsWith("Fresh start. ") && (meta.contains("New context") || text.startsWith("Fresh start. Earlier turns are out of my context") || text.startsWith("Fresh start. Here's where we were"))
+
     fun showTech(): Boolean = try { Settings.bool(PREF, false) } catch (_: Throwable) { false }
 }
