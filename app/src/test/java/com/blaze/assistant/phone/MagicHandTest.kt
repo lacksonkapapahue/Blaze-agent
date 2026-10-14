@@ -222,4 +222,14 @@ class MagicHandTest {
         assertTrue(MagicHandLogic.prompt(Action.TRANSLATE, "Bonjour", "").startsWith("Translate"))
         assertEquals("abc\u2026", MagicHandLogic.preview("abcdef  ghi", 4))
     }
+
+    @Test fun drawingLineStartsAtTheHandsCentre() {
+        val p = MagicHandLogic.trailPoint(100, 200, 128, 7L)
+        assertEquals(164f, p.x, 0.001f)
+        assertEquals(264f, p.y, 0.001f)
+        assertEquals(7L, p.t)
+        // Moving the window moves the line by the same amount, so loop detection is unchanged.
+        val q = MagicHandLogic.trailPoint(150, 260, 128)
+        assertEquals(50f, q.x - p.x, 0.001f); assertEquals(60f, q.y - p.y, 0.001f)
+    }
 }
