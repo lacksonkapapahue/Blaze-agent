@@ -26,7 +26,7 @@ object MagicHandTeach {
     /** A workflow ready for SkillPacks.saveWorkflow (steps / checks are one per line). */
     data class Draft(val name: String, val trigger: String, val steps: String, val checks: String, val tags: List<String>, val tested: Boolean = false)
 
-    const val MAX_STEPS = 60
+    const val MAX_STEPS = 30
 
     /**
      * Collects steps in order. Repeated screens are folded, typing into the same field keeps only its final text, and
@@ -34,13 +34,15 @@ object MagicHandTeach {
      */
     class Recorder(private val ownPkg: String) {
         private val list = ArrayList<Step>()
-        val steps: List<Step> get() = list.toList()
-        val size: Int get() = list.size
+        val steps: List<Step> @Synchronized get() = list.toList()
+        val size: Int @Synchronized get() = list.size
         private var lastPkg = ""
         private var lastScreen = ""
 
-        fun window(pkg: String, app: String, screen: String, at: Long = 0L) {
+        @Synchronized
+        fun window(pkg: String, app: String, screen0: String, at: Long = 0L) {
             if (pkg.isBlank() || pkg == ownPkg || full()) return
+            val screen = MagicHandSafety.humanLabel(screen0)
             if (pkg != lastPkg) {
                 list += Step(Kind.OPEN_APP, pkg, app = app, screen = screen, at = at)
                 lastPkg = pkg; lastScreen = screen; return
@@ -53,13 +55,16 @@ object MagicHandTeach {
             }
         }
 
-        fun click(pkg: String, app: String, label: String, viewId: String, className: String, at: Long = 0L) {
+        @Synchronized
+        fun click(pkg: String, app: String, label0: String, viewId: String, className: String, at: Long = 0L) {
             if (pkg.isBlank() || pkg == ownPkg || full()) return
+            val label = MagicHandSafety.humanLabel(label0)
             if (label.isBlank() && viewId.isBlank()) return
             ensureApp(pkg, app, at)
             list += Step(Kind.TAP, pkg, app = app, screen = lastScreen, label = label.trim().take(80), viewId = viewId, className = className, at = at)
         }
 
+        @Synchronized
         fun typed(pkg: String, app: String, field: String, viewId: String, text: String, password: Boolean, at: Long = 0L) {
             if (pkg.isBlank() || pkg == ownPkg) return
             val prev = list.lastOrNull()
@@ -73,7 +78,9 @@ object MagicHandTeach {
                 text = if (password) "" else text.take(500), secret = password, at = at)
         }
 
+        @Synchronized
         fun undo() { if (list.isNotEmpty()) list.removeAt(list.size - 1) }
+        @Synchronized
         fun clear() { list.clear(); lastPkg = ""; lastScreen = "" }
 
         private fun ensureApp(pkg: String, app: String, at: Long) {
@@ -88,11 +95,11 @@ object MagicHandTeach {
     /** One plain instruction per step, with the identifiers Blaze needs to find the element again. */
     fun line(s: Step): String = when (s.kind) {
         Kind.OPEN_APP -> "Open ${s.app.ifBlank { s.pkg }} (package ${s.pkg})"
-        Kind.SCREEN -> "Wait for the ${q(s.screen)} screen"
+        Kind.SCREEN -> "Wait for the ${q(s.screen)} screen"   // only human screen titles reach here (MagicHandSafety.humanLabel)
         Kind.TAP -> buildString {
             append("Tap ").append(if (s.label.isNotBlank()) q(s.label) else "the ${id(s.viewId) ?: "element"} button")
-            val ids = listOfNotNull(id(s.viewId)?.let { "id $it" }, s.className.substringAfterLast('.').takeIf { it.isNotBlank() })
-            if (ids.isNotEmpty()) append(" (").append(ids.joinToString(", ")).append(")")
+            // v0.25.0: the view id helps Blaze find it again; class names never appear in a step.
+            id(s.viewId)?.let { append(" (id ").append(it).append(")") }
             if (s.screen.isNotBlank()) append(" on ").append(q(s.screen))
         }
         Kind.TYPE -> buildString {

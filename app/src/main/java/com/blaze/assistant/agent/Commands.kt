@@ -14,8 +14,6 @@ object Commands {
     val actions = listOf(
         Command("clear", "", "Clear the screen (nothing is forgotten; undo for a few seconds)"),
         Command("new", "", "Fresh start: a new context window (in a project: a new thread)"),
-        Command("model", "<model>", "Switch model"),
-        Command("provider", "<provider>", "Switch AI provider"),
         Command("persona", "<style>", "Change Blaze's personality"),
         Command("settings", "", "Open settings"),
         Command("retry", "", "Regenerate the last answer"),

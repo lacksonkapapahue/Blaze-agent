@@ -90,7 +90,7 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                 OrbFace(72.dp)
                 Spacer(Modifier.height(28.dp))
                 val (title, body) = when (page) {
-                    0 -> "Hi, I'm Blaze." to "I live in your phone and get things done for you: open apps, play music, send texts, find answers. First, pick my brain."
+                    0 -> "Hi, I'm Blaze." to "I live in your phone and get things done for you: open apps, play music, send texts, find answers. Sign in to your Blaze account and I'm ready."
                     1 -> "Let me use your phone." to "Turn on Blaze in Accessibility so I can tap and type for you. I'll always ask before sending, paying or deleting anything."
                     else -> "Just say it." to "Type or tap the mic and tell me what you want, like \u201cplay lofi on YouTube\u201d. Turn on \u201cHey Blaze\u201d in Settings to call me hands-free."
                 }
@@ -100,10 +100,7 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                 Spacer(Modifier.height(24.dp))
                 when (page) {
                     0 -> {
-                        Choice("Free \u2014 start now", "No key needed. Blaze picks a free model for you.", brain == "free") {
-                            Settings.providerId = Providers.AUTO; brain = "free" }
-                        Spacer(Modifier.height(10.dp))
-                        Choice("I have an API key", "Gemini, OpenAI, OpenRouter, Groq\u2026 set it after this.", brain == "key") { brain = "key" }
+                        Choice("Free \u2014 start now", "Blaze Cloud picks the best free model for every message.", true) { brain = "free" }
                     }
                     1 -> Choice(if (a11y) "Phone control is on \u2713" else "Open Accessibility settings", if (a11y) "Nice. I can see and tap the screen now." else "Find Blaze in the list and switch it on.", a11y) {
                         if (!a11y) ctx.startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -111,9 +108,9 @@ fun Onboarding(page0: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
             }
             Box(Modifier.fillMaxWidth().height(54.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                 when (page) {
-                    0 -> { if (brain.isEmpty()) { Settings.providerId = Providers.AUTO; brain = "free" }; page = 1 }
+                    0 -> { brain = "free"; page = 1 }
                     1 -> page = 2
-                    else -> finish(if (brain == "key") "/settings ai" else "Introduce yourself in one sentence, then tell me three things you can do on my phone.")
+                    else -> finish(if (false) "" else "Introduce yourself in one sentence, then tell me three things you can do on my phone.")
                 }
             }, contentAlignment = Alignment.Center) {
                 ButtonText(when (page) { 0 -> "Continue"; 1 -> if (a11y) "Continue" else "Later"; else -> "Let's go" }, color = Color.White)

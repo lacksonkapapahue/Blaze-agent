@@ -100,12 +100,8 @@ object SelfControl {
         "speed_stats" -> SpeedLog.summary()
         "tool_stats" -> ToolStats.report() + (LlmClient.lastHealed.takeIf { it.isNotBlank() }?.let { "\n\nLast self-healed error: ${it.take(200)}" } ?: "")
         "crash_log" -> com.blaze.assistant.device.CrashLog.read().takeLast(3000).ifBlank { "No errors logged." }
-        "set_model" -> {
-            val p = args.optString("provider")
-            if (p.isNotBlank()) Providers.all.firstOrNull { it.id.equals(p, true) || it.name.equals(p, true) }?.let { Settings.providerId = it.id; if (it.id != Providers.AUTO && Settings.stepsProvider == Providers.AUTO) Settings.stepsProvider = "" }
-            if (args.optString("model").isNotBlank()) Settings.model = args.optString("model")
-            "Now using ${Settings.provider.name} · ${Settings.model}."
-        }
+        // v0.25.0: no model choice any more; Blaze Cloud picks per message.
+        "set_model" -> "Blaze picks the best free model for every message by itself. There's nothing to choose."
         "set_persona" -> {
             val id = args.optString("persona")
             val pz = Personas.all.firstOrNull { it.id.equals(id, true) || it.name.equals(id, true) }
@@ -136,7 +132,7 @@ object SelfControl {
     fun status(ctx: Context): String {
         val v = runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault("?")
         return buildString {
-            append("Blaze $v. Brain: ${Settings.provider.name} · ${Settings.model}. Personality: ${Personas.byId(Settings.personaId).name}.\n")
+            append("Blaze $v. Brain: Blaze Cloud (picks the best free model per message). Personality: ${Personas.byId(Settings.personaId).name}.\n")
             append("Phone control ${if (Settings.phoneControl && com.blaze.assistant.phone.BlazeAccessibilityService.instance != null) "on" else "off"}, ")
             append("wake word ${if (Settings.wakeWord) "on" else "off"}, read aloud ${if (Settings.speakReplies) "on" else "off"}, ")
             append("fast lane ${if (Settings.fastLane) "on" else "off"}, orb ${if (Overlay.orbShowing) "showing" else "hidden"}.\n")

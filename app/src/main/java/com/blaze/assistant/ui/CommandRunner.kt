@@ -24,14 +24,6 @@ object CommandRunner {
         val arg = text.substringAfter(' ', "").trim().lowercase()
         if (hasSpace) {
             return when (name) {
-                "model" -> {
-                    val models = (ModelCatalog.cached()?.models?.map { it.id to it.note } ?: emptyList())
-                        .ifEmpty { listOf(Settings.model to "current") }
-                    models.filter { arg.isEmpty() || it.first.lowercase().contains(arg) }.take(12)
-                        .map { (id, note) -> Suggestion(id, if (id == Settings.model) "current" else note, "/model $id", true) }
-                }
-                "provider" -> Providers.all.filter { arg.isEmpty() || it.name.lowercase().contains(arg) || it.id.contains(arg) }
-                    .map { Suggestion(it.name, if (it.id == Settings.providerId) "current" else "", "/provider ${it.id}", true) }
                 "persona" -> Personas.all.filter { it.id != Personas.CUSTOM && (arg.isEmpty() || it.name.lowercase().contains(arg) || it.id.contains(arg)) }
                     .map { Suggestion(it.name, it.blurb, "/persona ${it.id}", true) }
                 else -> emptyList()
@@ -58,11 +50,8 @@ object CommandRunner {
         when (name) {
             "new" -> Agent.clear()
             "clear" -> if (Agent.clearScreen() == com.blaze.assistant.agent.ClearScreen.Result.BUSY) toast("Blaze is working. Stop it first, then /clear.")
-            "model" -> if (arg.isEmpty()) openSettings("ai") else { Settings.model = arg; Agent.note("Model: $arg") }
-            "provider" -> {
-                val p = Providers.all.firstOrNull { it.id.equals(arg, true) || it.name.equals(arg, true) || it.name.lowercase().startsWith(arg.lowercase()) }
-                if (p == null) openSettings("ai") else { Settings.providerId = p.id; if (p.id != com.blaze.assistant.agent.Providers.AUTO && Settings.stepsProvider == com.blaze.assistant.agent.Providers.AUTO) Settings.stepsProvider = ""; Agent.note("Provider: ${p.name} · ${Settings.model}") }
-            }
+            // v0.25.0: no model or provider choice; old habits get one plain line.
+            "model", "provider" -> Agent.note("Blaze picks the best free model for every message by itself. There's nothing to choose.")
             "persona" -> {
                 val p = Personas.all.firstOrNull { it.id.equals(arg, true) || it.name.equals(arg, true) }
                 if (p == null) openSettings("persona") else { Settings.personaId = p.id; Agent.note("Personality: ${p.name}") }

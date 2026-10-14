@@ -68,71 +68,62 @@ object LlmClient {
         // Every request goes out clean (each tool call answered once, valid JSON, no orphans).
         // If the provider still refuses its shape (400 INVALID_ARGUMENT and friends), retry once
         // with the tool turns flattened to plain text, which every provider accepts.
-        var clean = try { ToolCalls.clean(messages) } catch (_: Exception) { messages }
-        // Photos: if this turn's brain can't see, have a vision brain describe them first.
-        if (Vision.hasImages(clean)) {
-            val auto = Settings.providerId == Providers.AUTO
-            val model = if (auto) "" else target(Settings.providerId).model
-            if (auto || !Vision.canSee(model) || Settings.lowData) clean = Vision.describeAll(clean)
-        }
+        // v0.25.0: pictures go to the gateway as they are; its vision lineup reads them.
+        val clean = try { ToolCalls.clean(messages) } catch (_: Exception) { messages }
         return try { completeRaw(clean, tools, onText, onThink, lane) }
         catch (e: LlmException) {
             if (!ToolCalls.isShapeError(e)) throw e
             lastHealed = e.message.orEmpty()
             try { completeRaw(ToolCalls.flatten(clean), tools, onText, onThink, lane).also { lastRoute = "$lastRoute · healed" } }
-            catch (e2: LlmException) { throw LlmException(ToolCalls.friendly(e2) + "\n\n(" + (e2.message ?: "").take(200) + ")", e2.code, e2.retryAfterSec) }
+            catch (e2: LlmException) { throw LlmException(if (e2.code == 400) Cloud.BUSY else e2.message.orEmpty(), e2.code, e2.retryAfterSec) }
         }
     }
 
     /** The provider error the last self-heal recovered from (diagnostics). */
     @Volatile var lastHealed: String = ""
 
+    /** The model the gateway says answered last ("provider · model"), for the details sheet / diagnostics only. */
+    @Volatile var lastServedBy: String = ""
+
+    /** The last gateway failure, raw (diagnostics only; people see [Cloud.friendly]). */
+    @Volatile var lastCloudError: String = ""
+
+    /**
+     * v0.25.0: one path for every lane (chat, the assist panel, Magic Hand, background, vision, code, agent):
+     * the Blaze gateway with a task hint. Network trouble, busy models and model-gone / refused-model errors are
+     * retried quietly with backoff (the gateway re-routes to its task lineup); a request that outgrew the model
+     * is trimmed once. The user's old provider / model / key prefs are ignored (kept on disk, never used or sent).
+     */
     private suspend fun completeRaw(messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)?,
                          onThink: ((String) -> Unit)?, lane: Lane): JSONObject {
-        // Steps model: a separate, optional model for in-between phone turns. If it fails, the
-        // turn falls back to the user's main model instead of surfacing another provider's error.
-        val mainAuto = Settings.providerId == Providers.AUTO
-        if (lane == Lane.STEPS && Settings.stepsProvider.isNotBlank() && Settings.stepsProvider != Settings.providerId) {
+        val token = Settings.gatewayToken()
+        if (token.isBlank()) throw LlmException(Cloud.SIGNED_OUT, 401)
+        val t = Target(Providers.GATEWAY, Providers.GATEWAY_BASE, token, Cloud.MODEL)
+        var msgs = messages
+        val task = Cloud.task(msgs, tools, liteTurn || (quickTurn && (tools == null || tools.length() == 0)))
+        var trimmed = false
+        var last: LlmException? = null
+        var i = 0
+        while (i < Cloud.MAX_TRIES) {
             try {
-                if (Settings.stepsProvider == Providers.AUTO) return FreeRouter.complete(messages, tools, onText, onThink, lane)
-                val t = target(Settings.stepsProvider, Settings.stepsModel)
-                if (t.key.isNotBlank()) return call(t, messages, tools, onText, null, false).also { lastRoute = t.label }
+                return call(t, msgs, tools, onText, if (lane == Lane.MAIN) onThink else null, false, task = task)
+                    .also { lastRoute = "Blaze Cloud" + (if (lastServedBy.isNotBlank()) " · $lastServedBy" else "") + if (trimmed) " · trimmed" else "" }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
-            } catch (e: Exception) { if (mainAuto) throw e; lastStepsError = e.message.orEmpty() }
-        }
-        // Daily spend cap: once today's estimated cost passes it, switch to the free chain.
-        val cap = Settings.str("daily_cap", "").toDoubleOrNull()
-        if (cap != null && cap > 0 && Settings.providerId != Providers.AUTO && try { Usage.today().cost >= cap } catch (_: Exception) { false })
-            return FreeRouter.complete(messages, tools, onText, onThink, lane).also { lastRoute = "Free (daily cap) · " + lastRoute }
-        if (mainAuto) return FreeRouter.complete(messages, tools, onText, onThink, lane)
-        val t = target(Settings.providerId)
-        val wantThoughts = lane == Lane.MAIN && Settings.showReasoning && !thoughtsRefused && t.pid == "gemini"
-        return try { call(t, messages, tools, onText, onThink, wantThoughts).also { lastRoute = t.label } }
-        catch (e: LlmException) {
-            // Older Gemini models don't think; retry once without asking for thoughts.
-            if (wantThoughts && (e.message ?: "").let { it.contains("thinking", true) || it.contains("extra_body", true) || it.contains("400") }) {
-                thoughtsRefused = true; call(t, messages, tools, onText, onThink, false).also { lastRoute = t.label }
-            } else if (tooLarge(e)) {
-                // The conversation outgrew this model's limit: retry once with a trimmed copy.
-                call(t, shrink(messages), tools, onText, onThink, false).also { lastRoute = t.label + " · trimmed" }
-            } else if (KeyRing.isQuota(e)) {
-                // This key is out of credits for this model: rest it and carry on with your next key, same model.
-                KeyRing.rest(t.pid, t.key, t.model)
-                for (k in KeyRing.fresh(t.pid, t.model, t.key)) {
-                    try { return call(t.copy(key = k), messages, tools, onText, onThink, false).also { lastRoute = t.label + " · key ${KeyRing.all(t.pid).indexOf(k) + 1}" } }
-                    catch (e2: kotlinx.coroutines.CancellationException) { throw e2 }
-                    catch (e2: LlmException) { if (KeyRing.isQuota(e2)) KeyRing.rest(t.pid, k, t.model) else throw e2 }
+            } catch (e: LlmException) {
+                lastCloudError = e.message.orEmpty().take(300)
+                if (!trimmed && tooLarge(e)) { trimmed = true; msgs = shrink(msgs); continue }
+                if (e.code == 401 || e.code == 403) throw LlmException(Cloud.EXPIRED, e.code)
+                if (!Cloud.retryable(e.code, e.message.orEmpty())) {
+                    if (ToolCalls.isShapeError(e)) throw e
+                    throw LlmException(Cloud.friendly(e.code, e.message.orEmpty()), e.code, e.retryAfterSec)
                 }
-                val n = KeyRing.all(t.pid).size
-                throw UsedUp(t.pid, t.model, "${Providers.byId(t.pid).name.substringBefore(" (")} has used up its credits on ${t.model}" +
-                    (if (n > 1) " on all $n of your keys" else "") + ". Pick another brain to keep going.")
-            } else if (e.code in 500..599) {
-                // Your chosen brain is down: carry on with the free chain instead of stopping.
-                try { FreeRouter.complete(if (Vision.hasImages(messages)) Vision.describeAll(messages) else messages, tools, onText, onThink, lane).also { lastRoute = "Free (${t.label} down) · " + lastRoute } }
-                catch (e2: kotlinx.coroutines.CancellationException) { throw e2 }
-                catch (_: Exception) { throw e }
-            } else throw e
+                last = e
+                i++
+                if (i < Cloud.MAX_TRIES) kotlinx.coroutines.delay(Cloud.backoffMs(i - 1, e.retryAfterSec))
+            }
         }
+        try { com.blaze.assistant.device.CrashLog.write("Blaze Cloud failed ${Cloud.MAX_TRIES}x: ${lastCloudError}") } catch (_: Throwable) { }
+        throw LlmException(Cloud.friendly(last?.code ?: 0, last?.message.orEmpty()), last?.code ?: 0, last?.retryAfterSec ?: 0)
     }
 
     /** Why the optional steps model last failed (shown in diagnostics); the main model took over. */
@@ -198,8 +189,7 @@ object LlmClient {
      */
     fun prewarm() {
         val bases = try {
-            if (Settings.providerId == Providers.AUTO) FreeRouter.warmTargets().map { it.base }
-            else listOf(target(Settings.providerId).base)
+            listOf(Providers.GATEWAY_BASE)
         } catch (_: Exception) { emptyList() }
         for (b in bases.map { it.trimEnd('/') }.filter { it.startsWith("http") }.distinct().take(2)) {
             val host = try { URL(b).host } catch (_: Exception) { continue }
@@ -220,7 +210,7 @@ object LlmClient {
     @Volatile var quickTurn = false
 
     internal suspend fun call(t: Target, messages: JSONArray, tools: JSONArray?, onText: ((String) -> Unit)?,
-                              onThink: ((String) -> Unit)?, thoughts: Boolean, timeoutMs: Int = 120_000): JSONObject = withContext(Dispatchers.IO) {
+                              onThink: ((String) -> Unit)?, thoughts: Boolean, timeoutMs: Int = 120_000, task: String? = null): JSONObject = withContext(Dispatchers.IO) {
         val key = t.key
         if (key.isBlank() && t.pid != Providers.keyless.id)
             throw LlmException("No API key for ${Providers.byId(t.pid).name} yet. Open Settings and paste your key.", 401)
@@ -256,6 +246,7 @@ object LlmClient {
                 val alts = FreeRouter.openRouterPicks().filter { it != t.model }.take(2)
                 if (alts.isNotEmpty()) put("models", JSONArray(listOf(t.model) + alts))
             }
+            if (t.pid == Providers.GATEWAY) Cloud.tag(this, task ?: Cloud.task(messages, tools, liteTurn))
             if (tools != null && tools.length() > 0) {
                 put("tools", try { ToolCalls.adapt(tools, t.pid, t.model) } catch (_: Exception) { tools })
                 put("tool_choice", "auto")
@@ -274,6 +265,8 @@ object LlmClient {
         val rh = rateHeaders(conn)
         lastCallHeaders = rh
         rh.takeIf { it.isNotEmpty() }?.let { lastRateHeaders = it }
+        if (t.pid == Providers.GATEWAY) lastServedBy = listOfNotNull(conn.getHeaderField("X-Blaze-Provider"), conn.getHeaderField("X-Blaze-Model"))
+            .filter { it.isNotBlank() }.joinToString(" · ")
         lastUsage = null
         if (code in 200..299 && onText != null &&
             (conn.contentType ?: "").contains("event-stream", ignoreCase = true)) {

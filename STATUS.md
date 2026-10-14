@@ -1,7 +1,7 @@
 # Blaze Android status
 
 - **Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release.**
-- **Rollover rule (Luke 2026-10-14): after a patch of .9 the next release rolls over: patch back to 0, minor +1 (0.24.9 → 0.25.0).** Planned: v0.24.7 Magic Hand (#45), v0.24.8 rounded-everything (#44), v0.24.9 rich replies, then **v0.25.0 = "VPN that just works"** (the release after rich replies).
+- **Rollover rule (Luke 2026-10-14): after a patch of .9 the next release rolls over: patch back to 0, minor +1 (0.24.9 → 0.25.0).** Shipped: v0.24.7 Magic Hand (#45), v0.24.8 rounded-everything (#44), v0.24.9 rich replies. **v0.25.0 = bug-fix release; v0.25.1 = Linux desktop; "VPN that just works" moved to v0.25.2.**
 
 ## simplify-day (v0.24.4, versionCode 76)
 - **Branch:** `simplify-icons-notify`, PR #40 (https://github.com/lacksonkapapahue/Blaze-agent/pull/40). Planned as "v0.25.0", then "v0.24.2"; shipped as v0.24.4 (versionCode 76) because v0.24.3 (#41) landed on main first and the rule is patch +1 per release.
@@ -117,6 +117,8 @@
 - **What:** `ui/RichReplies.kt` (pure: blocks, deck maths, flip, diagram URLs, PROMPT), `ui/RichBlocks.kt` (RichSteps, RichPicture + `RichImages` loader/cache, RichImageText, RichImageGroup / RichDeck with card flip, instant when animator scale is 0, RichDiagram via mermaid.ink / kroki.io, never in Private), wired into `AnswerBody`; static RICH REPLIES prompt block after the VIEWS block. Pref `rich_replies` (default on, no UI yet). Tests `RichRepliesTest`.
 - **Left (needs the A12):** ask "how do I turn on battery saver" (expect a step-flow card), "show me 5 photos of Victoria Falls" (deck: swipe, flip; then turn on Remove animations and check it swaps instantly), "draw a flowchart of my morning" (mermaid diagram). Check real Wikimedia URLs load on mobile data.
 
-## Next release
-- **v0.25.0 = "VPN that just works"** (rollover after .9; versionCode 82). Branch from main c1d6831 (or newer).
-- **Next command:** `cd work/Blaze-agent && git checkout main && git pull && git checkout -b vpn-just-works`
+## fixes-0250 (v0.25.0, versionCode 82): in progress
+- **Branch:** `fixes-0250` from main 5cb5ab1. Bug-fix release (Luke's A12): Blaze Cloud only (no keys / models in the app), Magic Hand lock-up + invisible pointer, "model gone" error, no model line under replies, swipeable Undo bar. See CHANGELOG v0.25.0.
+
+## Next releases (re-planned 2026-10-14)
+- **v0.25.0** = bug fixes (above). **v0.25.1 = "Linux desktop"** (XFCE + VNC inside Alpine, in-app viewer, `desktop` tool). **v0.25.2 = "VPN that just works"** (moved twice: was v0.25.0, then v0.25.1).

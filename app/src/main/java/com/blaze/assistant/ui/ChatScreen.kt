@@ -174,7 +174,7 @@ fun ChatScreen() {
 
     var settingsPage by rememberSaveable { mutableStateOf<String?>(null) }
     // First run only: people who already set Blaze up never see it.
-    var onboard by rememberSaveable { mutableStateOf(!Settings.bool("onboarded", false) && !com.blaze.assistant.agent.Brains.hasAny() && !hasMessages) }
+    var onboard by rememberSaveable { mutableStateOf(!Settings.bool("onboarded", false) && !Settings.ready && !hasMessages) }
     var setupPage by rememberSaveable { mutableStateOf(0) }
     val galleryOpen by GalleryUi.open.collectAsState()
     LaunchedEffect(Unit) { if (!onboard) Settings.setBool("onboarded", true) }
@@ -404,7 +404,7 @@ fun ChatScreen() {
                 onMode = { m -> shellMode = m; if (m == "projects") projectOpen = "" },
                 onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
                 onSearch = { showSearch = true },
-                routerOk = if (Settings.providerId == com.blaze.assistant.agent.BlazeRouter.ID) routerState.running else com.blaze.assistant.agent.Brains.hasAny() || Settings.providerId == com.blaze.assistant.agent.Providers.AUTO,
+                routerOk = Settings.ready,
                 onRouter = { settingsPage = "ai" },
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
                 onAvatar = { avatarMenu = true }, mood = mood,
@@ -431,7 +431,7 @@ fun ChatScreen() {
                         home = try { com.blaze.assistant.terminal.Terminal.home() } catch (_: Exception) { null })
                     BackHandler { exitView() }
                 } else if (!hasMessages) {
-                    Welcome(needsSetup = !com.blaze.assistant.agent.Brains.hasAny(), onSetup = { setupPage = 0; onboard = true }) { Agent.send(it) }
+                    Welcome(needsSetup = !Settings.ready, onSetup = { setupPage = 0; onboard = true }) { Agent.send(it) }
                 } else {
                     val dens = LocalDensity.current
                     CompositionLocalProvider(LocalTextToolbar provides toolbar,
@@ -443,7 +443,7 @@ fun ChatScreen() {
                 }
                 if (clearedAt > 0L && shellMode == "chat") {
                     LaunchedEffect(clearedAt) { delay(com.blaze.assistant.agent.ClearScreen.UNDO_MS - 3_000); clearedAt = 0L }
-                    UndoBar("Chat cleared \u00b7 nothing is forgotten", onUndo = { Agent.undoClear(); clearedAt = 0L })
+                    UndoBar("Chat cleared \u00b7 nothing is forgotten", onUndo = { Agent.undoClear(); clearedAt = 0L }, onDismiss = { clearedAt = 0L })
                 }
                 // Dim the chat while a sheet (+ menu, /views) is open, so half-cut lines at its edge read as background.
                 if (shellMode == "chat" && showing.isEmpty() && (plusOpen || showViews)) SheetScrim { plusOpen = false; showViews = false }
@@ -485,7 +485,7 @@ fun ChatScreen() {
                     BackHandler { showViews = false }
                 }
                 if (plusOpen) {
-                    val model = if (Settings.providerId == com.blaze.assistant.agent.Providers.AUTO) "Auto (free)" else Settings.model.substringAfterLast('/').take(28)
+                    val model = ""
                     PlusMenu(plusItems(work, approval, model, clipHasImage, com.blaze.assistant.agent.Projects.of(currentChat) != null)) { id ->
                         plusOpen = false
                         when (id) {
@@ -805,9 +805,9 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
         Role.ERROR -> Column(Modifier.fillMaxWidth()) {
             ErrorBubble(m.text, pos)
             Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = false)
-            if (canAct && m.meta.startsWith("usedup:")) BrainSwitcher(m.meta.removePrefix("usedup:")) { onFollowup("Continue where you stopped") }
             // Pick up where it broke instead of starting over: the history keeps the steps done so far.
-            else if (canAct) Followups(listOf("Continue where you stopped"), onFollowup)
+            // (v0.25.0: no brain switcher on old "used up" errors; there is nothing to pick.)
+            if (canAct) Followups(listOf("Continue where you stopped"), onFollowup)
         }
         Role.STEP -> {}
     }

@@ -11,7 +11,7 @@ import com.blaze.assistant.phone.MagicHandLogic.Kind
  */
 object MagicHandState {
     /** What the dock is showing below its header. */
-    enum class Panel { STATUS, MENU, ASKING, ANSWER, CONFIRM, GRAB, TEACH, TEACH_REVIEW }
+    enum class Panel { STATUS, MENU, ASKING, ANSWER, CONFIRM, GRAB, TEACH_INTRO, TEACH, TEACH_REVIEW }
 
     /** Actions offered on grabbed (circled) text. */
     enum class GrabAction(val label: String) { COPY("Copy"), TRANSLATE("Translate"), SEARCH("Search"), SAVE("Save"), CARRY("Carry") }
@@ -38,6 +38,8 @@ object MagicHandState {
         val teachName: String = "",
         val private: Boolean = false,
         val note: String = "",
+        /** The teach explainer's words (TEACH_INTRO panel). */
+        val intro: String = "",
     ) {
         val carrying: Boolean get() = carried.isNotBlank()
     }
@@ -45,7 +47,9 @@ object MagicHandState {
     const val HELLO = "Drag me. Double-tap for a menu, hold on a value to watch it, draw a circle to grab text."
     const val NOTHING = "Nothing readable here. Move me onto some text or a button."
     const val NEEDS_A11Y = "Magic Hand needs phone control. Turn on Blaze in Settings \u203a Accessibility."
-    const val TEACH_HELLO = "Teaching: do the task yourself. I'm only watching your taps and typing. Tap Done when finished."
+    const val TEACH_HELLO = "Teaching: do the task once in any app. I only watch your taps and typing. Tap \u2713 when done."
+    const val TEACH_SHORT = "Tap Start, do the task once, then tap Done."
+    const val TEACH_FULL = "That's the step limit (${MagicHandTeach.MAX_STEPS}). Tap \u2713 to save what I have."
     const val BUSY = "Blaze is still answering. Try again in a moment."
 
     fun start(private: Boolean): Ui = Ui(on = true, private = private, note = if (private) MagicHandGuard.PRIVATE_NOTE else HELLO)
@@ -87,9 +91,15 @@ object MagicHandState {
     fun carry(u: Ui, text: String): Ui = back(u.copy(carried = text.trim()), "Carrying \u201c${MagicHandLogic.preview(text)}\u201d. Double-tap a text box in any app to drop it.")
     fun dropped(u: Ui): Ui = back(u.copy(carried = ""), "Dropped.")
 
+    /** v0.25.0: the explainer before recording starts (full words the first time, short after). */
+    fun intro(u: Ui, firstTime: Boolean): Ui = if (!MagicHandGuard.canTeach(u.private)) back(u, MagicHandGuard.PRIVATE_NOTE)
+        else u.copy(panel = Panel.TEACH_INTRO, menu = emptyList(), confirm = null, note = "Teach Blaze a routine",
+            intro = if (firstTime) MagicHandSafety.TEACH_INTRO else TEACH_SHORT)
+
     fun teach(u: Ui): Ui = if (!MagicHandGuard.canTeach(u.private)) back(u, MagicHandGuard.PRIVATE_NOTE)
         else u.copy(mode = MagicHandLogic.Mode.TEACH, panel = Panel.TEACH, teachSteps = emptyList(), note = TEACH_HELLO, menu = emptyList())
-    fun teachSteps(u: Ui, lines: List<String>): Ui = u.copy(teachSteps = lines)
+    fun teachSteps(u: Ui, lines: List<String>): Ui = u.copy(teachSteps = lines,
+        note = if (u.mode == MagicHandLogic.Mode.TEACH && lines.size >= MagicHandTeach.MAX_STEPS) TEACH_FULL else if (u.note == TEACH_FULL) TEACH_HELLO else u.note)
     fun review(u: Ui, lines: List<String>, defaultName: String): Ui =
         u.copy(panel = Panel.TEACH_REVIEW, teachSteps = lines, teachName = u.teachName.ifBlank { defaultName })
     fun endTeach(u: Ui, note: String): Ui = u.copy(mode = MagicHandLogic.Mode.POINT, panel = Panel.STATUS, teachSteps = emptyList(), teachName = "", note = note)
@@ -98,7 +108,7 @@ object MagicHandState {
     enum class DockButton(val desc: String) { TEACH("Teach Blaze a task"), DONE("Done teaching"), DROP_CHAT("Drop in chat"), CLOSE("Close Magic Hand") }
     fun dockButtons(u: Ui): List<DockButton> = buildList {
         if (u.mode == MagicHandLogic.Mode.TEACH) { if (u.panel == Panel.TEACH) add(DockButton.DONE) }
-        else if (!u.private) add(DockButton.TEACH)
+        else if (!u.private && u.panel != Panel.TEACH_INTRO) add(DockButton.TEACH)
         if (u.carrying && !u.private && u.mode == MagicHandLogic.Mode.POINT) add(DockButton.DROP_CHAT)
         add(DockButton.CLOSE)
     }

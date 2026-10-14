@@ -78,16 +78,16 @@ object Settings {
     }
 
     /**
-     * v0.24.6: with nothing picked yet, Blaze uses the Blaze Gateway (models are managed on its dashboard). Installs that
-     * never saved a provider but have a Gemini key keep Gemini (the old default). The gateway needs a signed-in Blaze
-     * account; until then Auto (free) answers. A saved choice is never changed.
+     * v0.25.0: there is one brain, Blaze Cloud (the gateway): it holds the provider keys and picks the model for
+     * every message. The old saved provider / model / key prefs stay on disk untouched (backward compatible) but
+     * are never read for routing, and setting them does nothing.
      */
     var providerId: String
-        get() {
-            val v = prefs.getString("provider", null) ?: if (keyFor("gemini").isNotBlank()) "gemini" else Providers.GATEWAY
-            return if (v == Providers.GATEWAY && gatewayToken().isBlank()) Providers.AUTO else v
-        }
-        set(v) = prefs.edit().putString("provider", v).apply()
+        get() = Providers.GATEWAY
+        @Suppress("UNUSED_PARAMETER") set(v) { }
+
+    /** The provider an older version saved (diagnostics only; ignored for routing). */
+    val savedProviderId: String get() = prefs.getString("provider", null) ?: ""
 
     /** The Blaze account session token the gateway takes as its API key ("" when signed out). */
     fun gatewayToken(): String = try { com.blaze.assistant.connect.BlazeAccount.sessionToken() } catch (_: Throwable) { "" }
@@ -169,15 +169,16 @@ object Settings {
         set(v) = prefs.edit().putString("custom_base", v.trim()).apply()
 
     /** True when Blaze can answer: a key is set, or Auto (free) is picked. */
-    val ready: Boolean get() = providerId == Providers.AUTO || apiKey.isNotBlank()
+    val ready: Boolean get() = gatewayToken().isNotBlank()
 
     val baseUrl: String
         get() = if (providerId == Providers.CUSTOM) customBase else provider.baseUrl
 
     fun modelFor(pid: String) = prefs.getString("model_$pid", null) ?: Providers.byId(pid).defaultModel
+    /** v0.25.0: the gateway picks the model; this is its "pick for me" name. Setting it does nothing. */
     var model: String
-        get() = modelFor(providerId)
-        set(v) = prefs.edit().putString("model_$providerId", v.trim()).apply()
+        get() = Cloud.MODEL
+        @Suppress("UNUSED_PARAMETER") set(v) { }
 
     /** Long-chat engine (v0.15.0): rolling summary, search_chat, artifacts, token meter. */
     var longChat: Boolean

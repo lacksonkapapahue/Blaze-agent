@@ -22,13 +22,11 @@ object SelfCheck {
         if (includeAi) out += try {
             withTimeoutOrNull(25_000) {
                 LlmClient.complete(JSONArray().put(JSONObject().put("role", "user").put("content", "Reply with the single word OK.")), null, null, null, LlmClient.Lane.BACKGROUND)
-            }?.let { Item("AI model", true, "${LlmClient.lastRoute.ifBlank { Settings.model }} answered in ${System.currentTimeMillis() - t0} ms") }
-                ?: Item("AI model", false, "No answer in 25 s. Check your connection or try another model.")
+            }?.let { Item("AI model", true, "Blaze Cloud answered in ${System.currentTimeMillis() - t0} ms") }
+                ?: Item("AI model", false, "No answer in 25 s. Check your data or Wi-Fi.")
         } catch (e: Exception) { Item("AI model", false, e.message?.take(160) ?: "Failed") }
-        val pid = Settings.providerId
-        val needsKey = pid !in setOf(com.blaze.assistant.agent.Providers.AUTO, "pollinations", com.blaze.assistant.agent.Providers.CUSTOM)
-        val hasKey = !needsKey || Settings.keyFor(pid).isNotBlank()
-        out += Item("API key", hasKey, if (hasKey) "Key present for ${pid}" else "No key saved for $pid (Settings → AI & model).", "settings ai")
+        val signed = Settings.ready
+        out += Item("Blaze account", signed, if (signed) "Signed in: Blaze Cloud answers" else "Not signed in (Settings → Account).", "settings account")
         val dropped = Settings.secretsDropped
         val plain = com.blaze.assistant.agent.Secrets.plainFallbacks
         out += Item("Saved keys", dropped == 0 && plain == 0, when {

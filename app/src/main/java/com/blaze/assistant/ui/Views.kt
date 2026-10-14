@@ -27,7 +27,7 @@ object Views {
         BlazeView("agents", "Agents", "Specialists and background agents", page = "specialists", aliases = listOf("specialists")),
         BlazeView("accounts", "Accounts", "Connected apps: Google, GitHub, Spotify, Notion", page = "connections", aliases = listOf("connections", "connectors")),
         BlazeView("router", "Brain routing", "Auto (free) or a fixed model; the router dashboard is gone (v0.24.4)", page = "ai", aliases = listOf("blazerouter", "dashboard-router")),
-        BlazeView("brain", "Brain", "Providers, keys and models (classic editor)", page = "ai", aliases = listOf("models", "model", "keys", "classic")),
+        BlazeView("brain", "Brain", "Blaze Cloud: the best free model for every message", page = "ai", aliases = listOf("models", "model", "keys", "classic", "cloud")),
         BlazeView("skills", "Skills", "Skill library: on, off, restore", page = "skills"),
         BlazeView("gallery", "Gallery", "Images, music and files Blaze made", special = "gallery"),
         BlazeView("browser", "Browser", "Blaze's own browser and tabs", special = "browser"),

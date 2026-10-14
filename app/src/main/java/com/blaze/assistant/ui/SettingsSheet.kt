@@ -104,7 +104,7 @@ val advancedPages = listOf(
  * open_view and the "Open in …?" chip. Brain stays here too (models live on the gateway dashboard).
  */
 val viewPages = listOf(
-    SettingsPage("ai", "Brain", "Which AI answers: Blaze Gateway, Auto (free) or your own model and keys"),
+    SettingsPage("ai", "Brain", "Blaze Cloud picks the best free model for every message"),
     SettingsPage("terminal", "Jobs", "A real shell, jobs, Linux, Termux"),
     SettingsPage("memory", "Memory", "What Blaze remembers and has learned"),
     SettingsPage("routines", "Schedule", "Things Blaze does on a schedule"),
@@ -148,12 +148,8 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "updates" -> UpdatesPage()
                 "about" -> AboutPage()
                 "advanced" -> AdvancedList { page = it }
-                "ai" -> {
-                    BrainCard()
-                    var adv by remember { mutableStateOf(Settings.providerId != com.blaze.assistant.agent.Providers.AUTO) }
-                    if (adv) AiPage() else Row(Modifier.fillMaxWidth().clickable { adv = true }.padding(vertical = 14.dp)) {
-                        Label("Show advanced brain settings  ↓", color = c.accent, size = 10.sp) }
-                }
+                // v0.25.0: one brain, Blaze Cloud. No providers, keys or models to pick.
+                "ai" -> { BrainCard { page = "account" }; AiPage() }
                 "account" -> AccountPage()
                 "feel" -> FeelPage()
                 "connections" -> ConnectionsPage()
@@ -222,10 +218,6 @@ fun AdvancedList(onPage: (String) -> Unit) {
 @Composable
 private fun AiPage() {
     var name by remember { mutableStateOf(Settings.userName) }
-    var pid by remember { mutableStateOf(Settings.providerId) }
-    var key by remember { mutableStateOf(Settings.apiKey) }
-    var model by remember { mutableStateOf(Settings.model) }
-    var base by remember { mutableStateOf(Settings.customBase) }
     var think by remember { mutableStateOf(Settings.showReasoning) }
     var showSteps by remember { mutableStateOf(Settings.showSteps) }
     var fold by remember { mutableStateOf(Settings.foldAnswers) }
@@ -234,47 +226,10 @@ private fun AiPage() {
     var fu by remember { mutableStateOf(Settings.followups) }
     val c = LocalBlaze.current
 
-    fun switchTo(newPid: String) {
-        Settings.apiKey = key; Settings.model = model
-        Settings.providerId = newPid
-        // Picking a specific model means that model does the work: a leftover "Auto" for phone
-        // steps would otherwise quietly route half of every task through the free chain.
-        if (newPid != Providers.AUTO && Settings.stepsProvider == Providers.AUTO) Settings.stepsProvider = ""
-        pid = newPid; key = Settings.apiKey; model = Settings.model
-    }
     // Saved when you leave the page.
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose {
-            Settings.userName = name; Settings.providerId = pid; Settings.apiKey = key
-            Settings.model = model; Settings.customBase = base
-        }
-    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Settings.userName = name } }
     Spacer(Modifier.height(12.dp))
     Field("Your name", name, { name = it; Settings.userName = it }, "What should Blaze call you?")
-    ProviderPicker(pid) { switchTo(it) }
-    val prov = Providers.byId(pid)
-    if (pid == Providers.AUTO) {
-        AutoRouterSection()
-    } else {
-    Field("${prov.name} key", key, { key = it; Settings.apiKey = it }, prov.keyHint, secret = true)
-    ExtraKeys(pid)
-    com.blaze.assistant.agent.LlmClient.keyOwner(key)?.takeIf { it != pid && pid != Providers.CUSTOM }?.let { owner ->
-        Text("This looks like a ${Providers.byId(owner).name} key, not a ${prov.name} key. Paste it under ${Providers.byId(owner).name} instead.",
-            modifier = Modifier.padding(bottom = 10.dp), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.accent))
-    }
-    if (prov.keyPage.isNotBlank()) {
-        val uri = LocalUriHandler.current
-        Row(Modifier.fillMaxWidth().padding(bottom = 14.dp)) {
-            Text("No key yet?", modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
-            ActionText("Get a key →", color = c.accent, size = 11.sp, modifier = Modifier.clickable { uri.openUri(prov.keyPage) })
-        }
-    }
-    if (pid == Providers.CUSTOM) Field("Service address", base, { base = it; Settings.customBase = it }, "https://…/v1/")
-    androidx.compose.runtime.key(pid) {
-        ModelPicker(model, key, pid, base) { model = it; Settings.model = it }
-        QuotaPanel(key, pid, model, base)
-    }
-    }
     Spacer(Modifier.height(10.dp))
     ToggleRow("Show reasoning", "A brain button reveals how the model thought, when it shares it", think) { think = !think; Settings.showReasoning = think }
     var tech by remember { mutableStateOf(com.blaze.assistant.agent.ReplyChips.showTech()) }
@@ -285,7 +240,6 @@ private fun AiPage() {
     ToggleRow("Fold long answers", "Long tables, lists, code and reports open as cards you tap to expand", fold) { fold = !fold; Settings.foldAnswers = fold }
     ToggleRow("Suggested follow-ups", "Three tap-to-send ideas under each answer", fu) { fu = !fu; Settings.followups = fu }
     FastLaneSection()
-    StepsModelSection()
 }
 
 @Composable

@@ -52,14 +52,14 @@ object SelfKnowledge {
                 append("## This app\n")
                 append("Blaze for Android v").append(safe { version(ctx) }).append(", package ").append(ctx.packageName).append(".\n")
                 append("Mode: ").append(safe { Modes.work.value + " · " + Modes.approval.value }).append(". Personality: ").append(safe { Settings.personaId }).append(".\n")
-                append("Screen: Chat | Projects switch, Search, BlazeRouter dot, avatar menu (Account, Settings, Theme, Updates). Composer + menu: attach, @ files, voice, call, Plan/Build, Auto/Autopilot, model, views.\n")
+                append("Screen: Chat | Projects switch, Search, BlazeRouter dot, avatar menu (Account, Settings, Theme, Updates). Composer + menu: attach, @ files, voice, call, Plan/Build, Auto/Autopilot, views.\n")
                 append("Projects: ").append(safe { Projects.all.value.joinToString { "${it.name} (${it.chats.size} chats)" }.ifBlank { "none" } }).append(".\n\n")
             }
             if (on("phone")) { append("## Phone\n").append(safe { com.blaze.assistant.device.DeviceStatus.identity(ctx) }).append("\n\n") }
             if (on("brains")) {
                 append("## Brains (AI providers)\n")
-                append("Answering with: ").append(safe { if (Settings.providerId == Providers.AUTO) "Auto (free brains, fastest first)" else Settings.provider.name + " · " + Settings.model }).append(".\n")
-                append("Providers with keys: ").append(safe { Providers.all.filter { it.id != Providers.AUTO && KeyRing.all(it.id).isNotEmpty() }.joinToString { "${it.name} (${KeyRing.all(it.id).size})" }.ifBlank { "none (Auto still works keyless)" } }).append(".\n")
+                append("Answering with: Blaze Cloud (the gateway picks the best free model per message; the user can't and needn't choose models or add keys).\n")
+                append("Signed in to Blaze: ").append(safe { if (Settings.ready) "yes" else "no (Settings › Account)" }).append(".\n")
                 append("BlazeRouter (this phone): ").append(safe { val st = BlazeRouter.state.value; if (st.running) "running in ${BlazeRouter.label(st.where)} on ${BlazeRouter.BASE}/v1 (dashboard /views › BlazeRouter)" else "stopped (blazerouter start; runner ${BlazeRouter.runner})" }).append(".\n")
                 append("Fast lane (on-device): ").append(safe { if (FastLane.ready(ctx)) "installed" else "not installed" }).append(".\n\n")
             }

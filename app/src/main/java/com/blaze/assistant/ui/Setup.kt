@@ -120,10 +120,11 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
     val have = remember(tick, brainStatus) { Brains.connected() }
     val state = remember(tick) { needs.associate { it.id to it.ok(ctx) } }
     BackHandler(enabled = page > 0) { page-- }
-    var hadBrain by remember { mutableStateOf(have.isNotEmpty()) }
-    LaunchedEffect(have) {
-        if (page == 0 && !hadBrain && have.isNotEmpty()) { delay(1200); if (page == 0) page = 1 }
-        hadBrain = have.isNotEmpty()
+    val account by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
+    var wasIn by remember { mutableStateOf(account.user != null) }
+    LaunchedEffect(account.user) {
+        if (page == 0 && !wasIn && account.user != null) { delay(1200); if (page == 0) page = 1 }
+        wasIn = account.user != null
     }
     fun finish(prompt: String?) { Settings.setBool("onboarded", true); ComeBack.prefetch(ctx); onDone(prompt) }
 
@@ -169,7 +170,7 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                 OrbFace(64.dp)
                 Spacer(Modifier.height(22.dp))
                 val (title, body) = when (page) {
-                    0 -> "Give me a brain." to "I already work for free. Sign in below and I get smarter and faster. No keys, no settings: one tap and you're back here."
+                    0 -> "Sign in to Blaze." to "One free Blaze account and I'm ready. Blaze Cloud picks the best free model for every message. No keys, no settings."
                     1 -> "Let me help on your phone." to "Tap the button and switch each one on. I'll bring you straight back here every time."
                     else -> "All set. Say hi." to "Ask me anything, tell me to do something on your phone, or ask me to draw a picture or make a beat."
                 }
@@ -178,29 +179,8 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
                 Text(body, style = TextStyle(fontFamily = Type.Sans, fontSize = 16.sp, lineHeight = 24.sp, color = c.sub))
                 Spacer(Modifier.height(22.dp))
                 when (page) {
-                    0 -> {
-                        val orOn = "OpenRouter" in have.joinToString()
-                        val gOn = have.any { it.startsWith("Google") }
-                        SetupRow(if (orOn) "OpenRouter connected" else "Sign in with OpenRouter", "Free models, one tap. Sign in with Google or email there.", orOn, working = busy && !orOn) {
-                            if (!busy && !orOn) { busy = true; scope.launch { Brains.connectOpenRouter(ctx); busy = false } }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        SetupRow(if (gOn) "Google Gemini connected" else "Get a free Google brain", "Opens Google. Tap Create API key, then the copy icon, then come back here.", gOn) {
-                            if (!gOn) Brains.getGoogleKey(ctx)
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        if (!gOn && Settings.bool("key_catch_armed", false)) {
-                            Box(Modifier.fillMaxWidth().height(52.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
-                                scope.launch { Brains.takeFromClipboard(ctx, userTapped = true) }
-                            }, contentAlignment = Alignment.Center) { ButtonText("I copied my key \u2713  tap here", color = Color.White) }
-                            Spacer(Modifier.height(10.dp))
-                        }
-                        if (brainStatus.isNotBlank()) Label(brainStatus, color = c.accent, size = 10.sp)
-                        if (have.isEmpty()) {
-                            Spacer(Modifier.height(10.dp))
-                            Label("Or just continue. I'll use a free basic brain until you sign in.", color = c.weak, size = 10.sp)
-                        }
-                    }
+                    // v0.25.0: no keys or providers: the Blaze account is the brain.
+                    0 -> AccountPage()
                     1 -> {
                         needs.forEach { n ->
                             val on = state[n.id] == true
@@ -212,13 +192,13 @@ fun SetupFlow(startPage: Int = 0, onDone: (firstPrompt: String?) -> Unit) {
             }
             val nextNeed = needs.firstOrNull { state[it.id] != true }
             val label = when (page) {
-                0 -> if (have.isEmpty()) "Continue free" else "Continue"
+                0 -> if (Settings.ready) "Continue" else "Later"
                 1 -> if (nextNeed != null) "Turn on: ${nextNeed.title.lowercase()}" else "Continue"
                 else -> "Say hi to Blaze"
             }
             Box(Modifier.fillMaxWidth().height(56.dp).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable {
                 when (page) {
-                    0 -> { if (!Brains.hasAny() || Settings.providerId != Providers.AUTO && Settings.apiKey.isBlank()) Settings.providerId = Providers.AUTO; page = 1 }
+                    0 -> page = 1
                     1 -> if (nextNeed != null) fix(nextNeed) else page = 2
                     else -> finish("Hi! Introduce yourself in two sentences and tell me three useful things you can do for me.")
                 }
@@ -246,35 +226,48 @@ private fun SetupRow(title: String, sub: String, on: Boolean, working: Boolean =
     }
 }
 
-/** Small card at the top of Settings → Brain: what's connected and the one-tap buttons. */
+/** Settings › Brain (v0.25.0): one brain, Blaze Cloud, and whether this phone can reach it. */
 @Composable
-fun BrainCard() {
+fun BrainCard(onSignIn: () -> Unit = {}) {
     val c = LocalBlaze.current
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val st by Brains.status.collectAsState()
+    val account by com.blaze.assistant.connect.BlazeAccount.view.collectAsState()
+    val signedIn = account.user != null
+    var reach by remember { mutableStateOf<Boolean?>(null) }
     var tick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(1500); tick++ } }
-    val have = remember(tick, st) { Brains.connected() }
+    LaunchedEffect(tick) {
+        reach = null
+        reach = kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try { com.blaze.assistant.connect.Http.req("GET", com.blaze.assistant.agent.Providers.GATEWAY_BASE.removeSuffix("/").removeSuffix("/v1") + "/health", timeoutMs = 8_000).first == 200 }
+            catch (_: Exception) { false }
+        }
+    }
+    val (dot, line) = BrainStatus.of(signedIn, reach)
     Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
         Label("Brain", size = 10.sp)
         Spacer(Modifier.height(6.dp))
-        Text(if (have.isEmpty()) "Free basic brain" else "Auto: " + have.joinToString(" + "),
-            style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, color = c.ink))
-        Text("Blaze picks the best free model for every message and skips busy ones by itself.",
-            style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
+        Text("Blaze Cloud", style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, color = c.ink))
+        Text(BrainStatus.TAGLINE, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
         Spacer(Modifier.height(10.dp))
-        Row {
-            if ("OpenRouter" !in have.joinToString()) Box(Modifier.weight(1f).clip(BlazeShapes.pill).background(BlazeBrush.primary, BlazeShapes.pill).clickable { scope.launch { Brains.connectOpenRouter(ctx) } }.padding(12.dp)) {
-                ButtonText("Sign in: OpenRouter", color = Color.White) }
-            if ("OpenRouter" !in have.joinToString() && have.none { it.startsWith("Google") }) Spacer(Modifier.width(8.dp))
-            if (have.none { it.startsWith("Google") }) Box(Modifier.weight(1f).hairline(c.ink).clickable { Brains.getGoogleKey(ctx) }.padding(12.dp)) {
-                Label("Get Google key", color = c.ink, size = 10.sp) }
+        Row(Modifier.fillMaxWidth().clip(BlazeShapes.medium).background(c.raised).clickable { if (!signedIn) onSignIn() else tick++ }.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(BlazeShapes.pill).background(when (dot) { BrainStatus.Dot.OK -> c.accent; BrainStatus.Dot.BAD -> Glass.orange; else -> c.weak }))
+            Spacer(Modifier.width(10.dp))
+            Text(line, modifier = Modifier.weight(1f), style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.body))
+            ActionText(if (signedIn) "Check" else "Sign in", color = c.accent, size = 10.sp)
         }
-        if (st.isNotBlank()) { Spacer(Modifier.height(6.dp)); Label(st, color = c.accent, size = 10.sp) }
         Spacer(Modifier.height(14.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(c.hair))
-        Spacer(Modifier.height(4.dp))
-        Label("Advanced: pick a provider, paste a key, choose models", color = c.weak, size = 9.sp)
+    }
+}
+
+/** Pure: the Brain page's status line (tested). */
+object BrainStatus {
+    const val TAGLINE = "Picks the best free model for every message and skips busy ones by itself."
+    enum class Dot { OK, BAD, WAIT }
+    fun of(signedIn: Boolean, reachable: Boolean?): Pair<Dot, String> = when {
+        !signedIn -> Dot.BAD to "Not signed in. Sign in to your Blaze account to start."
+        reachable == null -> Dot.WAIT to "Checking the connection\u2026"
+        reachable -> Dot.OK to "Connected"
+        else -> Dot.BAD to "Can't reach Blaze Cloud right now. Check your data or Wi-Fi."
     }
 }

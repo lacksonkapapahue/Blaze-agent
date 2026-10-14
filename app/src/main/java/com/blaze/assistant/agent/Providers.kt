@@ -16,7 +16,8 @@ object Providers {
     const val AUTO = "auto"
     /** v0.24.6: Blaze Gateway, one endpoint holding Blaze's own free-tier keys; models are managed on its dashboard. */
     const val GATEWAY = "gateway"
-    const val GATEWAY_BASE = "https://blaze-gateway.blaze-app.workers.dev/v1/"
+    /** v0.25.0: the gateway's own name (the old blaze-gateway.blaze-app.workers.dev address still answers too). */
+    const val GATEWAY_BASE = "https://ai.blaze-app.workers.dev/v1/"
     /** Keyless public endpoint used as the very last resort (chat only, no tools). */
     val keyless = Provider("pollinations", "Pollinations (keyless)", "https://text.pollinations.ai/openai/",
         "openai-fast", "", "", "")

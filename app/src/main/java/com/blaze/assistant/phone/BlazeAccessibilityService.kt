@@ -47,6 +47,12 @@ class BlazeAccessibilityService : AccessibilityService() {
     @Volatile private var lastEventAt = 0L
     @Volatile private var lastWindowPkg = ""
 
+    /** v0.25.0: only observed while Magic Hand is on (Back twice closes it). Never consumed: always false. */
+    override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
+        if (event != null) try { MagicHand.onKey(event) } catch (_: Throwable) { }
+        return false
+    }
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         lastEventAt = android.os.SystemClock.uptimeMillis()

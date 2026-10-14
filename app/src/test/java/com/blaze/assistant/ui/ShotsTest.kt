@@ -724,6 +724,18 @@ class ShotsTest {
         }
     }
 
+    // v0.25.0: the teach explainer with Start, and the teach dock with Undo / Cancel / Done.
+    @Test fun magicHandTeachIntro() = shot("55-magic-hand-teach-intro") {
+        FakeApp {
+            Column {
+                com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.intro(handState(), firstTime = true), com.blaze.assistant.phone.DockCalls())
+                com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.teachSteps(
+                    com.blaze.assistant.phone.MagicHandState.teach(handState()), listOf("Open WhatsApp (package com.whatsapp)", "Tap \u201cMum\u201d")),
+                    com.blaze.assistant.phone.DockCalls())
+            }
+        }
+    }
+
     @Test fun magicHandWatches() = shot("52-magic-hand-watches", dark = true) {
         val now = 1_760_000_000_000L
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
