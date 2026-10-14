@@ -72,6 +72,14 @@ class MindTest {
         assertEquals(Mind.Rung.SUMMARY, Mind.rung(20_000, 12_000, true, 800, 20_000, 0))
     }
 
+    @Test fun pressureUsesTheSummaryUnderBudget() {
+        // v0.26.0: the history alone is under the budget, but the whole request nears the window.
+        assertEquals(Mind.Rung.RECENT, Mind.rung(8_000, 12_000, true, 800, 3_000, 16_384))
+        assertEquals(Mind.Rung.SUMMARY, Mind.rung(8_000, 12_000, true, 800, 3_000, 16_384, pressure = true))
+        // No summary yet: nothing to switch to.
+        assertEquals(Mind.Rung.RECENT, Mind.rung(8_000, 12_000, false, 0, 3_000, 16_384, pressure = true))
+    }
+
     private fun msg(role: String, text: String) = JSONObject().put("role", role).put("content", text)
 
     @Test fun lookupTailStartsAtAUserMessage() {

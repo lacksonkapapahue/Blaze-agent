@@ -20,13 +20,19 @@ object MagicHandSafety {
     const val FLAG_LAYOUT_NO_LIMITS = 0x00000200
     const val FLAG_WATCH_OUTSIDE_TOUCH = 0x00040000
 
-    enum class Win { HIGHLIGHT, HAND, DOCK }
+    /** BOX (v0.26.0) = the movable, resizable grab rectangle: a window just around the box, only while grabbing. */
+    enum class Win { HIGHLIGHT, HAND, DOCK, BOX }
 
-    /** The flags for each Magic Hand window. [typing] = the dock's name field needs the keyboard (teach review only). */
-    fun flags(w: Win, typing: Boolean = false): Int = when (w) {
+    /**
+     * The flags for each Magic Hand window. [typing] = the dock's name field needs the keyboard (teach review only).
+     * [active] = the grab box is showing (otherwise its window takes no touches at all).
+     */
+    fun flags(w: Win, typing: Boolean = false, active: Boolean = true): Int = when (w) {
         Win.HIGHLIGHT -> FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCHABLE or FLAG_NOT_TOUCH_MODAL or FLAG_LAYOUT_IN_SCREEN
         Win.HAND -> FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCH_MODAL or FLAG_LAYOUT_NO_LIMITS
         Win.DOCK -> FLAG_NOT_TOUCH_MODAL or FLAG_WATCH_OUTSIDE_TOUCH or (if (typing) 0 else FLAG_NOT_FOCUSABLE)
+        Win.BOX -> FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCH_MODAL or FLAG_LAYOUT_IN_SCREEN or FLAG_LAYOUT_NO_LIMITS or
+            (if (active) 0 else FLAG_NOT_TOUCHABLE)
     }
 
     /** True when a window with [flags] could swallow touches meant for other apps or the system bars. */

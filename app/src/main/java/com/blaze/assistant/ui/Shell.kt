@@ -405,22 +405,6 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
     }
 }
 
-/** "This chat is getting long" with a button that starts a fresh chat opening with its summary. */
-@Composable
-fun FreshChatOffer(onFresh: () -> Unit) {
-    val c = LocalBlaze.current
-    Row(Modifier.padding(top = 10.dp, end = 28.dp).widthIn(max = 340.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(c.accentSoft)
-        .clickable(onClick = onFresh).padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("This chat is getting long", style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = c.ink))
-            Text("Start a fresh chat that opens with a summary of this one.", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 17.sp, color = c.sub))
-        }
-        Spacer(Modifier.width(10.dp))
-        Text("Fresh chat →", maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = c.accent))
-    }
-}
-
 // ---------------------------------------------------------------- composer
 
 /** What the + menu offers. [id] is handled by the screen. */

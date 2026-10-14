@@ -140,8 +140,10 @@ object Mind {
      * Which rung of the ladder a turn uses. [history] = tokens of the history in this context window,
      * [budget] = when the summary starts (12k or 60% of the window), [window] = the model's context (0 = unknown, 32k assumed).
      */
-    fun rung(history: Int, budget: Int, hasSummary: Boolean, summary: Int, tail: Int, window: Int): Rung {
-        if (history <= budget) return Rung.RECENT
+    fun rung(history: Int, budget: Int, hasSummary: Boolean, summary: Int, tail: Int, window: Int, pressure: Boolean = false): Rung {
+        // v0.26.0: [pressure] = the whole request (system prompt + tools + history) is near the context limit, so a
+        // chat with a summary uses it even while its history alone is under the budget.
+        if (history <= budget && !(pressure && hasSummary)) return Rung.RECENT
         val w = if (window > 0) window else 32_768
         if (hasSummary && summary + tail <= w * 9 / 10) return Rung.SUMMARY
         return Rung.LOOKUP

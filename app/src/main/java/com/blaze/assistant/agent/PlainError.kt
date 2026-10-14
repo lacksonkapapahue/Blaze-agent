@@ -7,6 +7,9 @@ package com.blaze.assistant.agent
 object PlainError {
     private val codeRe = Regex("\\((\\d{3})\\)")
 
+    /** After automatic compaction and a retry, the request still didn't fit (v0.26.0). */
+    const val CONTEXT = "That was too much for this model even after I condensed the older messages. Tap Retry, or pick a model with a bigger context in Settings \u2192 AI."
+
     fun of(raw: String): String {
         val t = raw.trim()
         if (t.isEmpty()) return "Something went wrong. Tap Retry."
@@ -25,7 +28,9 @@ object PlainError {
             code != null && code in 500..599 || "overloaded" in low || "unavailable" in low -> "$who is having trouble on its side right now. Tap Retry in a moment."
             "timeout" in low || "timed out" in low -> "$who took too long to answer. Tap Retry."
             "unable to resolve host" in low || "failed to connect" in low || "network" in low -> "I can't reach the internet right now. Check your data or Wi-Fi, then tap Retry."
-            "context" in low && ("length" in low || "too long" in low || "token" in low) -> "This chat got too long for $who. Start a new chat, or tap Retry and I'll trim it."
+            // v0.26.0: a too-long chat is compacted and retried automatically (AutoCompact); this line only shows when even
+            // the compacted request didn't fit, and never asks for a new chat.
+            AutoCompact.isContextError(low) -> CONTEXT
             else -> "$who couldn't finish that one. Tap Retry."
         }
     }
