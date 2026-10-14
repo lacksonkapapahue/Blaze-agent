@@ -10,6 +10,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
@@ -44,23 +47,32 @@ fun PrivacySheet(onImport: () -> Unit, onPrivateTab: () -> Unit) {
             Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     P("VPN", c.ink, 15)
-                    val country = Countries.byCode(BrowserVpn.exitCountry ?: cur?.country)
-                    val line = when (st) {
-                        BrowserVpn.Status.OFF -> if (BrowserVpn.locations.isEmpty()) "Off. Import a WireGuard config to add a country." else "Off. Sites see your real IP."
-                        BrowserVpn.Status.CONNECTING -> "Connecting to ${cur?.label ?: "the VPN"}…"
-                        BrowserVpn.Status.ON -> "${country?.flag ?: ""} ${country?.name ?: cur?.label} · ${BrowserVpn.exitIp}".trim()
-                        BrowserVpn.Status.FAILED -> "Not connected: ${BrowserVpn.error} Pages stay blocked so nothing leaks."
-                    }
-                    P(line, if (st == BrowserVpn.Status.FAILED) Color(0xFFD93025) else if (st == BrowserVpn.Status.ON) c.accent else c.sub, 12)
+                    P(BrowserVpn.statusLine(), if (st == BrowserVpn.Status.FAILED) Color(0xFFD93025) else if (st == BrowserVpn.Status.ON) c.accent else c.sub, 12)
                 }
-                Switch(checked = BrowserVpn.on, enabled = BrowserVpn.locations.isNotEmpty(), onCheckedChange = { v ->
-                    if (v) (cur ?: BrowserVpn.locations.firstOrNull())?.let { BrowserVpn.connect(it.id) } else BrowserVpn.disconnect()
+                // v0.25.3: one tap works with nothing imported (Blaze Free).
+                Switch(checked = BrowserVpn.on, onCheckedChange = { v ->
+                    if (v) BrowserVpn.connect(BrowserVpn.defaultId()) else BrowserVpn.disconnect()
                 }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
+            }
+
+            // Blaze Free: always there, free, no setup.
+            Label("Location", modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
+            val freeSel = BrowserVpn.isFree && BrowserVpn.on
+            Row(Modifier.fillMaxWidth().background(if (freeSel) c.faint else c.paper).hairlineTop(c.hair)
+                .clickable { BrowserVpn.connect(BrowserVpn.FREE_ID) }.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Shield, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    P(WarpFree.NAME, c.ink, 14, maxLines = 1)
+                    P("Free, no account. Hides your IP; exits near you.", c.sub, 11, maxLines = 1)
+                }
+                if (freeSel) P(if (st == BrowserVpn.Status.ON) "Connected" else if (st == BrowserVpn.Status.CONNECTING) "…" else "Retrying",
+                    if (st == BrowserVpn.Status.FAILED) Color(0xFFD93025) else c.accent, 12)
             }
 
             // Countries
             if (BrowserVpn.locations.isNotEmpty()) {
-                Label("Country", modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
+                Label("Your countries", modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 4.dp))
                 LazyColumn(Modifier.heightIn(max = 240.dp)) {
                     items(BrowserVpn.locations.sortedBy { it.label }, key = { it.id }) { l ->
                         val sel = l.id == BrowserVpn.selected && BrowserVpn.on
@@ -97,7 +109,7 @@ fun PrivacySheet(onImport: () -> Unit, onPrivateTab: () -> Unit) {
             Switch(checked = BrowserVpn.maskLocation, onCheckedChange = { BrowserVpn.setMask(it) }, colors = SwitchDefaults.colors(checkedTrackColor = c.accent))
         }
         Row2("New private tab", if (BrowserEngine.privateIsolated) "No history; cookies and site data wiped when you close it" else "No history (cookies are shared on this phone's WebView)", onPrivateTab)
-        P("Where to get configs: Proton VPN's free plan (account.protonvpn.com › Downloads › WireGuard) covers a few countries; Mullvad, IVPN, Windscribe and Surfshark give WireGuard files for most. One file per country.",
+        P("Blaze Free needs nothing. To pick a country, import configs: Proton VPN's free plan (account.protonvpn.com › Downloads › WireGuard) covers a few countries; Mullvad, IVPN, Windscribe and Surfshark give WireGuard files for most. One file per country.",
             c.weak, 11, Modifier.hairlineTop(c.hair).padding(16.dp))
     }
 }

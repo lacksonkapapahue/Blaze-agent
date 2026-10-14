@@ -47,9 +47,11 @@ object BrowserTools {
                 .put("submit", p("boolean", "Submit the form after filling (default true)"))
                 .put("fresh", p("boolean", "Ask even if values are saved for this site (e.g. the saved password was wrong)")), listOf("title", "fields")),
         fn("browser_show", "Show the built-in browser on screen with the current page, so the user can watch or take over (e.g. to pay, solve a captcha, or approve Google's own sign-in). Optional: work stays in the background by default."),
-        fn("browser_vpn", "The built-in browser's VPN (only the browser goes through it, from the user's own WireGuard configs, one per country). " +
-            "status: is it on, which country, which IP, which countries are available. connect: browse from a country (name or code), e.g. to see a site as it looks there. " +
-            "disconnect: back to the real connection. Only countries the user has imported are available; if none, tell them to import a WireGuard config in the browser (⋯ › VPN & privacy).",
+        fn("browser_vpn", "The built-in browser's VPN (only the browser goes through it). Built in and free: Blaze Free (Cloudflare WARP), one tap, no setup, exits near the user " +
+            "(hides the real IP but can't pick a country). Plus any per-country WireGuard configs the user imported. " +
+            "status: is it on, which country, which IP, which locations exist. connect: with no country (or \"free\") uses Blaze Free when nothing is imported, else the last/first imported one; " +
+            "with a country (name or code) uses that imported config, e.g. to see a site as it looks there. disconnect: back to the real connection. " +
+            "Countries need an imported WireGuard config (browser ⋯ › VPN & privacy).",
             JSONObject().put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("status", "connect", "disconnect"))))
                 .put("country", p("string", "Country name or code for connect, e.g. Germany or DE")), listOf("action")),
     )
@@ -90,8 +92,8 @@ object BrowserTools {
         return when (a.optString("action")) {
             "connect" -> {
                 val q = a.optString("country")
-                val loc = BrowserVpn.find(q) ?: return "No VPN location for \u201c$q\u201d. Available: " +
-                    BrowserVpn.locations.joinToString { it.label }.ifBlank { "none yet (the user imports WireGuard configs in the browser: ⋯ › VPN & privacy)" }
+                val loc = BrowserVpn.find(q) ?: return "No VPN location for \u201c$q\u201d. Available: Blaze Free (Cloudflare WARP, exits near the user)" +
+                    BrowserVpn.locations.joinToString("") { ", " + it.label } + ". Other countries need a WireGuard config imported in the browser (⋯ › VPN & privacy)."
                 BrowserVpn.connectNow(loc.id)
             }
             "disconnect" -> { BrowserVpn.disconnect(); "VPN off. The browser uses the real connection again." }
