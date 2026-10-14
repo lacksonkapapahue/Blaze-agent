@@ -79,6 +79,12 @@ object MagicHand {
     private var dock: View? = null
     private var dockLp: WindowManager.LayoutParams? = null
     private var dockOwner: OverlayOwner? = null
+    // v0.26.0: the movable / resizable grab box (its own small window, added under the dock and the hand).
+    private var boxView: BoxFrame? = null
+    private var boxLp: WindowManager.LayoutParams? = null
+    private var grabBox: MagicHandLogic.Box? = null
+    private var regrabJob: Job? = null
+    private var grabGen = 0
     private val lit = mutableStateOf(false)
     private val carryingState = mutableStateOf(false)
 
@@ -106,7 +112,10 @@ object MagicHand {
     const val HAND_DP = 64
 
     private fun set(f: (MagicHandState.Ui) -> MagicHandState.Ui) {
-        val n = f(_ui.value); _ui.value = n
+        val old = _ui.value
+        val n = f(old); _ui.value = n
+        // The grab box lives as long as the grabbed-text card.
+        if (old.panel == Panel.GRAB && n.panel != Panel.GRAB) hideBox()
         carryingState.value = n.carrying
         updateDockFocus(n.panel == Panel.TEACH_REVIEW)
     }
@@ -137,6 +146,7 @@ object MagicHand {
         _ui.value = MagicHandState.start(isPrivate())
         insets(s, w)
         addHighlight(s, w)
+        addBox(s, w)
         addDock(s, w)
         addHand(s, w)
         touchAt = SystemClock.uptimeMillis(); beatAt = touchAt
@@ -231,7 +241,7 @@ object MagicHand {
 
     private fun stopNow() {
         run {
-            if (!on && hand == null && dock == null && hi == null) { _ui.value = MagicHandState.close(); return@run }
+            if (!on && hand == null && dock == null && hi == null && boxView == null) { _ui.value = MagicHandState.close(); return@run }
             watchdog?.interrupt(); watchdog = null
             probeJob?.cancel(); probeJob = null
             svc?.let { keyFilter(it, false) }
@@ -239,11 +249,12 @@ object MagicHand {
             dockFocusable = false
             if (askedAgent && askJob?.isActive == true && Agent.mood.value != Mood.IDLE) try { Agent.stop() } catch (_: Throwable) { }
             askJob?.cancel(); askJob = null; askedAgent = false
+            regrabJob?.cancel(); regrabJob = null; grabBox = null
             scope?.cancel(); scope = null
             recorder = null; lastHit = null; pendingHit = null
             val w = wm
-            listOf(hand, hi, dock).forEach { v -> if (v != null) try { w?.removeViewImmediate(v) } catch (_: Exception) { } }
-            hand = null; hi = null; dock = null; handLp = null; dockLp = null
+            listOf(hand, hi, dock, boxView).forEach { v -> if (v != null) try { w?.removeViewImmediate(v) } catch (_: Exception) { } }
+            hand = null; hi = null; dock = null; handLp = null; dockLp = null; boxView = null; boxLp = null
             handOwner?.destroy(); handOwner = null
             dockOwner?.destroy(); dockOwner = null
             _ui.value = MagicHandState.close()
@@ -290,7 +301,9 @@ object MagicHand {
         val v = DockFrame(s).apply {
             owner.attach(this)
             addView(inner, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
-            onLongPress = { if (_ui.value.panel != Panel.TEACH_REVIEW) stop() }
+            // v0.26.0: not while the dock shows selectable text (grabbed text, an answer). Long-pressing that text to
+            // select part of it used to hit this 650 ms timer and close Magic Hand, box and card included.
+            onLongPress = { if (MagicHandState.longPressCloses(_ui.value)) stop() }
             onBack = { touchAt = SystemClock.uptimeMillis(); if (backTwice.press(SystemClock.uptimeMillis())) stop() else updateDockFocus(false) }
             onOutside = { if (dockFocusable) updateDockFocus(false) }
             onAnyTouch = { touchAt = SystemClock.uptimeMillis() }
@@ -516,10 +529,11 @@ object MagicHand {
 
     /** Hides every Magic Hand window, waits a frame, runs [block], shows them again. */
     private suspend fun <T> hidden(block: suspend () -> T): T {
-        val views = listOfNotNull(hand, hi, dock)
+        val views = listOfNotNull(hand, hi, dock, boxView)
+        val was = views.map { it.visibility }
         views.forEach { it.visibility = View.INVISIBLE }
         delay(160)
-        try { return block() } finally { views.forEach { it.visibility = View.VISIBLE } }
+        try { return block() } finally { views.forEachIndexed { i, v -> v.visibility = was[i] } }
     }
 
     private suspend fun crop(b: MagicHandLogic.Box, around: Boolean): android.graphics.Bitmap? {
@@ -598,23 +612,133 @@ object MagicHand {
         val s = svc ?: return
         if (!MagicHandGuard.canGrab(isPrivate())) { set { MagicHandState.back(it, MagicHandGuard.PRIVATE_NOTE) }; return }
         val (sw, sh) = screen()
-        val b = MagicHandLogic.loopBounds(pts, sw, sh, (8 * density).toInt()) ?: return
-        hi?.box(b)
+        val b0 = MagicHandLogic.loopBounds(pts, sw, sh, (8 * density).toInt()) ?: return
+        val b = MagicHandBox.fit(b0, boxBounds(), dp(MagicHandBox.MIN_DP))
+        regrabJob?.cancel()
+        val gen = ++grabGen
+        showBox(b)
         set { it.copy(note = "Reading what you circled\u2026") }
-        scope?.launch {
-            val bmp = crop(b, around = false)
-            val ocr = if (bmp != null) kotlinx.coroutines.withTimeoutOrNull(8_000) { MagicHandScreen.ocr(bmp) }.orEmpty() else ""
-            val text = ocr.ifBlank { withContext(Dispatchers.Default) { kotlinx.coroutines.withTimeoutOrNull(2_000) { try { MagicHandScreen.textIn(s, b) } catch (_: Exception) { "" } }.orEmpty() } }
-            val src = lastHit?.pkg?.let(::appLabel) ?: s.currentPkg().let(::appLabel)
-            set { MagicHandState.grabbed(it.copy(note = ""), text, src) }
+        regrabJob = scope?.launch {
+            val text = readText(s, b)
+            if (gen != grabGen) return@launch
+            set { MagicHandState.grabbed(it.copy(note = ""), text, grabSource(s)) }
+            if (_ui.value.panel != Panel.GRAB) hideBox()
+        }
+    }
+
+    private fun grabSource(s: BlazeAccessibilityService): String = lastHit?.pkg?.let(::appLabel) ?: s.currentPkg().let(::appLabel)
+
+    /** The words inside [b]: OCR of a screenshot crop (Magic Hand's windows hidden), else the accessibility text. */
+    private suspend fun readText(s: BlazeAccessibilityService, b: MagicHandLogic.Box): String {
+        val bmp = crop(b, around = false)
+        val ocr = if (bmp != null) kotlinx.coroutines.withTimeoutOrNull(8_000) { MagicHandScreen.ocr(bmp) }.orEmpty() else ""
+        return ocr.ifBlank { withContext(Dispatchers.Default) { kotlinx.coroutines.withTimeoutOrNull(2_000) { try { MagicHandScreen.textIn(s, b) } catch (_: Exception) { "" } }.orEmpty() } }
+    }
+
+    // ---------- the grab box: move it, resize it, read again (v0.26.0) ----------
+    private fun dp(n: Int): Int = (n * density).toInt()
+    private fun boxBounds(): MagicHandBox.Bounds { val (sw, sh) = screen(); return MagicHandBox.bounds(sw, sh, topInset, bottomInset) }
+
+    /** Added once at start, under the dock and the hand (so both stay on top), taking no touches until a grab. */
+    private fun addBox(s: Context, w: WindowManager) {
+        val v = BoxFrame(s, density)
+        v.visibility = View.GONE
+        v.onTouch = ::onBoxTouch
+        val lp = WindowManager.LayoutParams(1, 1, type(), MagicHandSafety.flags(MagicHandSafety.Win.BOX, active = false),
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
+        try { w.addView(v, lp); boxView = v; boxLp = lp } catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("Magic Hand grab box", e) }
+    }
+
+    private fun showBox(b: MagicHandLogic.Box) {
+        grabBox = b
+        val v = boxView; val lp = boxLp
+        if (v == null || lp == null) { hi?.box(b); return }   // no box window: the plain outline, as before
+        hi?.box(null)
+        placeBox(b, active = true)
+        v.box(b)
+        v.visibility = View.VISIBLE
+    }
+
+    private fun placeBox(b: MagicHandLogic.Box, active: Boolean) {
+        val v = boxView ?: return; val lp = boxLp ?: return
+        val win = MagicHandBox.window(b, dp(MagicHandBox.PAD_DP))
+        lp.x = win.l; lp.y = win.t; lp.width = win.w; lp.height = win.h
+        lp.flags = MagicHandSafety.flags(MagicHandSafety.Win.BOX, active = active)
+        try { wm?.updateViewLayout(v, lp) } catch (_: Exception) { }
+    }
+
+    private fun hideBox() {
+        regrabJob?.cancel(); regrabJob = null; grabGen++
+        grabBox = null
+        val v = boxView ?: return; val lp = boxLp ?: return
+        v.box(null); v.visibility = View.GONE
+        lp.width = 1; lp.height = 1
+        lp.flags = MagicHandSafety.flags(MagicHandSafety.Win.BOX, active = false)
+        try { wm?.updateViewLayout(v, lp) } catch (_: Exception) { }
+    }
+
+    private var boxStart: MagicHandLogic.Box? = null
+    private var boxHandle = MagicHandBox.Handle.NONE
+    private var boxDownX = 0f
+    private var boxDownY = 0f
+    private var boxCancelledRead = false
+
+    /** Drag inside to move, a corner or an edge to resize; the text is read again a moment after the finger lifts. */
+    private fun onBoxTouch(e: MotionEvent): Boolean {
+        val b = grabBox ?: return false
+        touchAt = SystemClock.uptimeMillis()
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                boxHandle = MagicHandBox.hit(b, e.rawX.toInt(), e.rawY.toInt(), dp(MagicHandBox.REACH_DP))
+                if (boxHandle == MagicHandBox.Handle.NONE) return false
+                boxStart = b; boxDownX = e.rawX; boxDownY = e.rawY
+                // A new drag cancels a read still waiting or running for the old rectangle (read again on release).
+                boxCancelledRead = regrabJob?.isActive == true
+                regrabJob?.cancel(); grabGen++
+                boxView?.dragging(boxHandle)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val st = boxStart ?: return false
+                val nb = MagicHandBox.drag(st, boxHandle, (e.rawX - boxDownX).toInt(), (e.rawY - boxDownY).toInt(), boxBounds(), dp(MagicHandBox.MIN_DP))
+                if (nb != grabBox) { grabBox = nb; placeBox(nb, active = true); boxView?.box(nb) }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val st = boxStart; boxStart = null
+                boxView?.dragging(MagicHandBox.Handle.NONE)
+                val now = grabBox
+                if (st != null && now != null && (boxCancelledRead || MagicHandBox.changed(st, now, dp(3)))) reread(now)
+                boxCancelledRead = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> Unit
+        }
+        return true
+    }
+
+    /** Debounced: read the text in [b] [MagicHandBox.REREAD_DELAY_MS] after the finger lifts, newest box only. */
+    private fun reread(b: MagicHandLogic.Box) {
+        val s = svc ?: return
+        if (!MagicHandGuard.canGrab(isPrivate())) { set { MagicHandState.back(it, MagicHandGuard.PRIVATE_NOTE) }; return }
+        regrabJob?.cancel()
+        val gen = ++grabGen
+        set { MagicHandState.regrabbing(it) }
+        regrabJob = scope?.launch {
+            delay(MagicHandBox.REREAD_DELAY_MS)
+            val text = readText(s, b)
+            if (gen != grabGen || grabBox != b) return@launch
+            val src = grabSource(s)
+            // Still on the card: update it. A drag before the first read finished: this is the first read.
+            set { if (it.panel == Panel.GRAB) MagicHandState.regrabbed(it, text, src) else MagicHandState.grabbed(it.copy(note = ""), text, src) }
+            if (_ui.value.panel != Panel.GRAB) hideBox()
         }
     }
 
     private fun onGrab(g: GrabAction) {
         val s = svc ?: return
         val t = _ui.value.grabbed
+        if (t.isBlank() || _ui.value.grabBusy) return
         when (g) {
-            GrabAction.COPY -> { PointerActions.copy(s, "Text", t); set { MagicHandState.back(it, "Copied.") } }
+            // v0.26.0: Copy keeps the card and the box (fix the box, copy again); X closes.
+            GrabAction.COPY -> { PointerActions.copy(s, "Text", t); set { it.copy(note = "Copied.") } }
             GrabAction.TRANSLATE -> ask(Action.TRANSLATE, null, custom = MagicHandLogic.prompt(Action.TRANSLATE, t, _ui.value.grabSource))
             GrabAction.SEARCH -> { set { MagicHandState.back(it) }; open(MagicHandState.searchUrl(t)) }
             GrabAction.SAVE -> {
@@ -774,6 +898,46 @@ object MagicHand {
         override fun dispatchKeyEvent(e: android.view.KeyEvent): Boolean {
             if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK) { if (e.action == android.view.KeyEvent.ACTION_UP) onBack(); return true }
             return super.dispatchKeyEvent(e)
+        }
+    }
+
+    /**
+     * v0.26.0: the grab box's window (the box plus a margin for its handles). Draws the blue rectangle with corner and
+     * edge handles; every touch goes to [onTouch] in screen coordinates (rawX / rawY), so moving the window while
+     * dragging never makes the box jump.
+     */
+    private class BoxFrame(ctx: Context, private val d: Float) : View(ctx) {
+        var onTouch: (MotionEvent) -> Boolean = { false }
+        private var b: MagicHandLogic.Box? = null
+        private var active = MagicHandBox.Handle.NONE
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * d; color = 0xFF4C7DFF.toInt() }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0x224C7DFF }
+        private val knob = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0xFFFFFFFF.toInt() }
+        private val knobRim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * d; color = 0xFF4C7DFF.toInt() }
+        private val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 4f * d; strokeCap = Paint.Cap.ROUND; color = 0xFFFFFFFF.toInt() }
+        init { contentDescription = "Grabbed area. Drag to move it, drag a corner to resize it." }
+        fun box(n: MagicHandLogic.Box?) { b = n; invalidate() }
+        fun dragging(h: MagicHandBox.Handle) { active = h; invalidate() }
+        @SuppressLint("ClickableViewAccessibility")
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean = onTouch(ev)
+        override fun onDraw(c: Canvas) {
+            val r = b ?: return
+            val loc = IntArray(2); getLocationOnScreen(loc)
+            c.save(); c.translate(-loc[0].toFloat(), -loc[1].toFloat())
+            val rf = RectF(r.l.toFloat(), r.t.toFloat(), r.r.toFloat(), r.b.toFloat())
+            fill.color = if (active == MagicHandBox.Handle.MOVE) 0x334C7DFF else 0x224C7DFF
+            c.drawRoundRect(rf, 12 * d, 12 * d, fill); c.drawRoundRect(rf, 12 * d, 12 * d, stroke)
+            // Edge bars (drag an edge) and corner knobs (drag a corner).
+            val half = minOf(10 * d, rf.width() / 6, rf.height() / 6)
+            c.drawLine(rf.centerX() - half, rf.top, rf.centerX() + half, rf.top, bar)
+            c.drawLine(rf.centerX() - half, rf.bottom, rf.centerX() + half, rf.bottom, bar)
+            c.drawLine(rf.left, rf.centerY() - half, rf.left, rf.centerY() + half, bar)
+            c.drawLine(rf.right, rf.centerY() - half, rf.right, rf.centerY() + half, bar)
+            val kr = 6.5f * d
+            listOf(rf.left to rf.top, rf.right to rf.top, rf.left to rf.bottom, rf.right to rf.bottom).forEach { (x, y) ->
+                c.drawCircle(x, y, kr, knob); c.drawCircle(x, y, kr, knobRim)
+            }
+            c.restore()
         }
     }
 

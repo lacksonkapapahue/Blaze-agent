@@ -245,7 +245,6 @@ class ShotsTest {
                 WorkCard(listOf(step(21, "Looking back through this chat for \u201clamp prices\u201d"), step(22, "Reading an earlier message")), live = false,
                     startAt = t0, endAt = t0 + 14_000, meter = "in 26.9k · out 0.4k", meterHigh = true)
                 BlazeReply(23, "On turn 41 we set **$24.99** for the moon lamp and **$19.99** for the mini, with free shipping over $35.")
-                FreshChatOffer {}
             }
         }
     }

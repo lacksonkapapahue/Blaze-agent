@@ -46,6 +46,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -128,8 +136,50 @@ object MagicHandIcons {
 
 private val sans = TextStyle(fontFamily = Type.Sans, color = Glass.text)
 
+/**
+ * v0.26.0: the text selection menu for the dock. The dock is a bare accessibility overlay window (no Activity, no
+ * DecorView), so Android's own floating Copy toolbar can't open there (View.startActionMode returns null) and
+ * selecting part of the grabbed text left no way to copy it. This one is drawn inside the card instead.
+ */
+class DockToolbar : TextToolbar {
+    var copy by mutableStateOf<(() -> Unit)?>(null)
+        private set
+    var selectAll by mutableStateOf<(() -> Unit)?>(null)
+        private set
+    override var status: TextToolbarStatus by mutableStateOf(TextToolbarStatus.Hidden)
+        private set
+    override fun showMenu(rect: Rect, onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?,
+                          onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?) {
+        copy = onCopyRequested; selectAll = onSelectAllRequested; status = TextToolbarStatus.Shown
+    }
+    override fun hide() { copy = null; selectAll = null; status = TextToolbarStatus.Hidden }
+}
+
 @Composable
 fun MagicHandDock(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float = 340f) {
+    val bar = remember { DockToolbar() }
+    CompositionLocalProvider(LocalTextToolbar provides bar) { DockCard(u, calls, widthDp, bar) }
+}
+
+/** "Copy · Select all" for selected text in the dock (shown while some text is selected). */
+@Composable
+private fun SelectionBar(bar: DockToolbar) {
+    if (bar.status != TextToolbarStatus.Shown) return
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.End) {
+        bar.selectAll?.let { f -> SmallPill("Select all", false) { f() }; Spacer(Modifier.width(6.dp)) }
+        bar.copy?.let { f -> SmallPill("Copy", true) { f(); bar.hide() } }
+    }
+}
+
+@Composable
+private fun SmallPill(text: String, primary: Boolean, onClick: () -> Unit) =
+    Box(Modifier.height(30.dp).clip(Glass.pill).background(if (primary) Glass.blue else Glass.raised2)
+        .clickable(onClickLabel = text, onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = sans.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White))
+    }
+
+@Composable
+private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar: DockToolbar) {
     val card = RoundedCornerShape(28.dp)
     Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 10.dp)
         .shadow(20.dp, card, ambientColor = Color.Black, spotColor = Color.Black)
@@ -161,6 +211,7 @@ fun MagicHandDock(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float = 340f)
             }
             Panel.ASKING -> Line("Asking Blaze about \u201c${MagicHandLogic.preview(u.question.ifBlank { u.pointing }, 40)}\u201d\u2026")
             Panel.ANSWER -> {
+                Box(Modifier.padding(horizontal = 16.dp)) { SelectionBar(bar) }
                 Column(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
                     SelectionContainer {
                         Text(Md.render(u.answer, Glass.cyan, Glass.raised2), style = sans.copy(fontSize = 14.5.sp, lineHeight = 21.sp))
@@ -176,7 +227,7 @@ fun MagicHandDock(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float = 340f)
                 }
                 Buttons(listOf(c.no to false, c.yes to true)) { calls.onConfirm(it == 1) }
             }
-            Panel.GRAB -> GrabCard(u, calls)
+            Panel.GRAB -> GrabCard(u, calls, bar)
             Panel.TEACH_INTRO -> {
                 Text(u.intro, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp))
                 Buttons(listOf("Cancel" to false, "Start" to true)) { if (it == 1) calls.onTeachStart() else calls.onBack() }
@@ -206,17 +257,26 @@ fun MagicHandMenuCard(u: MagicHandState.Ui, widthDp: Float, onPick: (Action) -> 
         u.menu.map { a -> PointerTile(a.label, a.label, MagicHandIcons.of(a), a == Action.ASK || a == Action.DROP) { onPick(a) } }, widthDp)
 
 @Composable
-private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls) {
+private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = DockToolbar()) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(RoundedCornerShape(20.dp)).background(Glass.raised).padding(12.dp)) {
-        Text("Grabbed" + if (u.grabSource.isNotBlank()) " \u00b7 ${u.grabSource}" else "", style = sans.copy(fontSize = 11.5.sp, color = Glass.orange, fontWeight = FontWeight.Medium))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Grabbed" + if (u.grabSource.isNotBlank()) " \u00b7 ${u.grabSource}" else "", modifier = Modifier.weight(1f),
+                style = sans.copy(fontSize = 11.5.sp, color = Glass.orange, fontWeight = FontWeight.Medium))
+            if (u.grabBusy) Text("Reading\u2026", style = sans.copy(fontSize = 11.5.sp, color = Glass.sub))
+        }
+        Text(MagicHandState.GRAB_HINT, style = sans.copy(fontSize = 11.sp, lineHeight = 15.sp, color = Glass.sub))
         Spacer(Modifier.height(4.dp))
+        SelectionBar(bar)
         Column(Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState())) {
-            SelectionContainer { Text(u.grabbed, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp)) }
+            if (u.grabbed.isBlank()) Text(if (u.grabBusy) "Reading the new area\u2026" else MagicHandState.GRAB_EMPTY, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp, color = Glass.sub))
+            // A new key per text, so an old selection never points into replaced text after the box moves.
+            else androidx.compose.runtime.key(u.grabbed) { SelectionContainer { Text(u.grabbed, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp)) } }
         }
     }
+    val enabled = u.grabbed.isNotBlank() && !u.grabBusy
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
         MagicHandState.grabActions(u.private).forEach { g ->
-            Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClickLabel = g.label) { calls.onGrab(g) }.padding(horizontal = 6.dp, vertical = 4.dp),
+            Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable(enabled = enabled, onClickLabel = g.label) { calls.onGrab(g) }.padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(38.dp).clip(CircleShape).background(if (g == GrabAction.COPY) Glass.blue else Glass.raised2), contentAlignment = Alignment.Center) {
                     Icon(MagicHandIcons.of(g), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))

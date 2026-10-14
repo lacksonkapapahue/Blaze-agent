@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 87
-        versionName = "0.25.5"
+        versionCode = 88
+        versionName = "0.26.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one

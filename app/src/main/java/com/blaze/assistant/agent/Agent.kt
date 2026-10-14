@@ -472,36 +472,6 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** When older turns fold into the rolling summary. */
     fun budget(): Int = LongChat.budget(ctxWindow())
 
-    /**
-     * "Start a fresh chat with a summary" (offered past 80% of the meter): a new chat that opens with
-     * the state note of this one, in the same project. The old chat stays as it was.
-     */
-    fun freshChat() {
-        val s = cur
-        if (s.busy || s.history.length() == 0) return
-        scope.launch {
-            s.status = "Summarising this chat"
-            val h = JSONArray(s.history.toString())
-            var note = s.lcSummary
-            if (s.lcUpto < h.length()) try {
-                val r = LlmClient.complete(LongChat.summariseRequest(note, h, s.lcUpto.coerceAtMost(h.length()), h.length()), null, null, null, LlmClient.Lane.BACKGROUND)
-                r.optString("content").substringAfterLast("</think>").trim().takeIf { it.isNotBlank() }?.let { note = it }
-            } catch (e: CancellationException) { throw e } catch (_: Exception) { }
-            s.status = ""
-            if (note.isBlank()) note = LongChat.transcript(h, maxOf(0, h.length() - 6), h.length())
-            if (s.id == Mind.MAIN) { s.freshContext(note.take(LongChat.SUMMARY_MAX)); return@launch }
-            val ns = Session(newId())
-            ns.title = (s.title.ifBlank { "Chat" } + " (continued)").take(60)
-            ns.keep = true
-            val intro = "Picking up from your previous chat. Here's where we are:\n\n" + note.take(LongChat.SUMMARY_MAX)
-            ns.add(Role.BLAZE, intro)
-            ns.history.put(JSONObject().put("role", "assistant").put("content", intro))
-            Projects.of(s.id)?.let { Projects.assign(ns.id, it.id) }
-            s.persist()
-            show(ns); ns.persist(); refreshChats()
-        }
-    }
-
     fun deleteChat(id: String) {
         io.launch { try { LongChat.db()?.forget(id) } catch (_: Exception) { } }
         sessions[id]?.stop()
@@ -841,6 +811,10 @@ When you finish, say what you did in one short sentence.
         var ctxFrom = 0
         /** The ladder rung the last request used (diagnostics, tests). */
         @Volatile var lastRung = Mind.Rung.RECENT
+        /** v0.26.0 auto-compaction: tokens of the last request's system prompt + tools (an estimate until the first call). */
+        @Volatile var overheadTok = 6_000
+        /** A provider refused this chat as too long: send the summary + tail from now on (not saved; a refusal sets it again). */
+        @Volatile var squeezed = false
         private var _meterV: Meter? = null
         var meter: Meter?
             get() = _meterV
@@ -1157,8 +1131,9 @@ When you finish, say what you did in one short sentence.
             val from: Int
             if (Settings.longChat) {
                 val sFrom = maxOf(LongChat.sendFrom(history, st), base)
-                rung = Mind.rung(LongChat.tokens(history, base), budget(), lcSummary.isNotBlank(), lcSummary.length / 4 + 40,
-                    LongChat.tokens(history, sFrom), ctxWindow())
+                val histTok = LongChat.tokens(history, base)
+                rung = Mind.rung(histTok, budget(), lcSummary.isNotBlank(), lcSummary.length / 4 + 40,
+                    LongChat.tokens(history, sFrom), ctxWindow(), AutoCompact.pressure(overheadTok, histTok, ctxWindow(), squeezed))
                 if (rung == Mind.Rung.LOOKUP && !Mind.ready) rung = if (lcSummary.isNotBlank()) Mind.Rung.SUMMARY else Mind.Rung.RECENT.also { windowed = true }
                 from = when {
                     windowed -> maxOf(windowStart(), base)
@@ -1211,26 +1186,30 @@ When you finish, say what you did in one short sentence.
         }
 
         /**
-         * Long chats (v0.15.0): when the un-summarised part is over the budget, everything before the last
-         * 12 messages folds into the rolling summary with one background call. On failure nothing changes
-         * and the old sliding window applies.
+         * Long chats (v0.15.0), automatic compaction (v0.26.0): when the un-summarised part is over the budget, or the
+         * whole request nears the model's context window, everything before the recent tail folds into the rolling
+         * summary with one background call, in this same chat and without asking. The chat on screen is untouched;
+         * only what is sent changes. The summary is saved with the chat (lc_summary / lc_upto), so it is updated,
+         * never redone each turn. [force] = the provider just refused the request as too long: keep fewer messages
+         * word for word and, if the summariser fails, fold a clipped transcript instead. True when something folded.
          */
-        suspend fun compact() {
-            if (!Settings.longChat) return
+        suspend fun compact(force: Boolean = false): Boolean {
+            if (!Settings.longChat) return false
             if (lcUpto > history.length()) { lcUpto = 0; lcSummary = "" }
             if (lcUpto < ctxFrom && ctxFrom <= history.length()) { lcUpto = ctxFrom; lcSummary = "" }
             val st = LongChat.State(lcSummary, lcUpto)
-            if (!LongChat.needsCompaction(history, st, budget())) return
-            val to = LongChat.tailStart(history)
-            val req = LongChat.summariseRequest(lcSummary, history, lcUpto, to)
-            status = "Summarising older turns"
-            val txt = try {
+            if (!AutoCompact.shouldCompact(history, st, budget(), overheadTok, ctxWindow(), force)) return false
+            val r = AutoCompact.range(history, st, force)
+            val req = LongChat.summariseRequest(lcSummary, history, r.first, r.last + 1)
+            var txt = try {
                 LlmClient.complete(req, null, null, null, LlmClient.Lane.BACKGROUND).optString("content").substringAfterLast("</think>").trim()
             } catch (e: CancellationException) { throw e } catch (_: Exception) { "" }
-            if (txt.isBlank()) return
-            val ns = LongChat.folded(history, txt)
+            if (txt.isBlank() && force) txt = AutoCompact.fallbackNote(lcSummary, history, r.first, r.last + 1)
+            if (txt.isBlank()) return false
+            val ns = LongChat.folded(history, txt, AutoCompact.keep(force))
             lcSummary = ns.summary; lcUpto = ns.upto
             persist()
+            return true
         }
 
         private suspend fun longChatTool(name: String, args: JSONObject): String {
@@ -1377,21 +1356,37 @@ When you finish, say what you did in one short sentence.
 
                     if (!lite) compact()
                     LlmClient.liteTurn = lite
-                    val req = if (lite) ChatLane.messages(requestMessages(), lastUserText(), personaText(), Settings.userName.ifBlank { null }) else requestMessages()
+                    var req = if (lite) ChatLane.messages(requestMessages(), lastUserText(), personaText(), Settings.userName.ifBlank { null }) else requestMessages()
                     // Orient loop, step 1 (context → orientation): where the phone is, sent with the first call only, never saved.
-                    if (!lite && !orientSent && orientNote.isNotEmpty()) { req.put(JSONObject().put("role", "user").put("content", orientNote)); orientSent = true }
+                    val orientNow = !lite && !orientSent && orientNote.isNotEmpty()
+                    if (orientNow) { req.put(JSONObject().put("role", "user").put("content", orientNote)); orientSent = true }
                     tools = if (lite) JSONArray() else ToolRouter.select(allTools, groupsOn)
+                    // v0.26.0 auto-compaction: what the system prompt and tools cost, so the next fold sees the whole request.
+                    if (!lite) overheadTok = ((req.optJSONObject(0)?.optString("content")?.length ?: 0) + tools.toString().length) / 4
                     // Watchdog: only a model that goes SILENT (no text, thinking or tool-call chunks) for the
                     // limit is cut off and retried once on the same model. Long thinking is fine while it streams.
                     val lane = if (step == 0) LlmClient.Lane.MAIN else LlmClient.Lane.STEPS
                     val limit = Settings.str("model_timeout_s", "100").toLongOrNull()?.coerceIn(30, 600)?.times(1000) ?: 100_000L
-                    val reply = Agent.idleGuard(limit) { LlmClient.complete(req, tools, onText, onThink, lane) }
+                    suspend fun call(r: JSONArray): JSONObject = Agent.idleGuard(limit) { LlmClient.complete(r, tools, onText, onThink, lane) }
                         ?: run {
                             add(Role.STEP, "The model went silent, retrying")
                             if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
-                            Agent.idleGuard(limit) { LlmClient.complete(req, tools, onText, onThink, lane) }
+                            Agent.idleGuard(limit) { LlmClient.complete(r, tools, onText, onThink, lane) }
                                 ?: throw LlmClient.LlmException("${LlmClient.lastRoute.ifBlank { "The model" }} sent nothing for ${limit / 1000}s, twice. Try again, or pick a faster model in Settings → AI.")
                         }
+                    val reply = try { call(req) } catch (e: LlmClient.LlmException) {
+                        // v0.26.0: "too long for the model" → fold older turns into the summary (same chat, nothing
+                        // asked) and retry once. Only if that still fails does the user see an error.
+                        if (liteNow || !(LlmClient.tooLarge(e) || AutoCompact.isContextError(e.message, e.code))) throw e
+                        if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                        squeezed = true
+                        val folded = compact(force = true)
+                        val retry = requestMessages()
+                        if (!folded && LongChat.tokens(retry) >= LongChat.tokens(req)) throw e
+                        if (orientNow) retry.put(JSONObject().put("role", "user").put("content", orientNote))
+                        req = retry
+                        call(req)
+                    }
                     if (firstMs < 0 && LlmClient.lastFirstTokenAt > 0) firstMs = (LlmClient.lastFirstTokenAt - turnStart).coerceAtLeast(0)
                     reply.optString("_reasoning").takeIf { it.isNotBlank() }?.let { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(it) }
                     reply.remove("_reasoning")

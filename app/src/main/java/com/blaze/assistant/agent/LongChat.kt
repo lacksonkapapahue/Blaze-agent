@@ -111,9 +111,9 @@ object LongChat {
 
     private fun role(h: JSONArray, i: Int) = h.optJSONObject(i)?.optString("role").orEmpty()
 
-    /** Where the word-for-word tail starts: KEEP_TAIL from the end, moved back to a user message. */
-    fun tailStart(h: JSONArray): Int {
-        var i = h.length() - KEEP_TAIL
+    /** Where the word-for-word tail starts: [keep] (KEEP_TAIL) from the end, moved back to a user message. */
+    fun tailStart(h: JSONArray, keep: Int = KEEP_TAIL): Int {
+        var i = h.length() - keep
         if (i <= 0) return 0
         while (i > 0 && role(h, i) != "user") i--
         return i
@@ -126,9 +126,9 @@ object LongChat {
     }
 
     /** The new state after [summary] covers everything before the tail. */
-    fun folded(h: JSONArray, summary: String): State {
+    fun folded(h: JSONArray, summary: String, keep: Int = KEEP_TAIL): State {
         val s = summary.trim().let { if (it.length > SUMMARY_MAX) it.take(SUMMARY_MAX) else it }
-        return State(s, tailStart(h))
+        return State(s, tailStart(h, keep))
     }
 
     /** First history index to send given the state: never a tool result or a call cut from its user turn. */

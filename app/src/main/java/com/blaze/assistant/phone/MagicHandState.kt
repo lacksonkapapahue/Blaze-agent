@@ -40,6 +40,8 @@ object MagicHandState {
         val note: String = "",
         /** The teach explainer's words (TEACH_INTRO panel). */
         val intro: String = "",
+        /** v0.26.0: the grab box was moved or resized and its text is being read again. */
+        val grabBusy: Boolean = false,
     ) {
         val carrying: Boolean get() = carried.isNotBlank()
     }
@@ -78,11 +80,28 @@ object MagicHandState {
 
     /** Back to the plain status line (after an answer, a cancel or a done action). */
     fun back(u: Ui, note: String = ""): Ui = u.copy(panel = if (u.mode == MagicHandLogic.Mode.TEACH) Panel.TEACH else Panel.STATUS,
-        menu = emptyList(), confirm = null, note = note)
+        menu = emptyList(), confirm = null, note = note, grabBusy = false)
 
     fun grabbed(u: Ui, text: String, source: String): Ui =
         if (text.isBlank()) back(u, "I couldn't read any text in that circle.")
-        else u.copy(panel = Panel.GRAB, grabbed = text.trim(), grabSource = source, menu = emptyList())
+        else u.copy(panel = Panel.GRAB, grabbed = text.trim(), grabSource = source, menu = emptyList(), grabBusy = false)
+
+    /** v0.26.0: the grab box moved or was resized; the card stays open while its text is read again. */
+    fun regrabbing(u: Ui): Ui = if (u.panel == Panel.GRAB) u.copy(grabBusy = true, note = "") else u
+
+    /** v0.26.0: the text read for the moved / resized box. An empty read keeps the card (and the box) open. */
+    fun regrabbed(u: Ui, text: String, source: String): Ui =
+        if (u.panel != Panel.GRAB) u else u.copy(grabbed = text.trim(), grabSource = source.ifBlank { u.grabSource }, grabBusy = false)
+
+    const val GRAB_EMPTY = "No text in this area. Move the box or drag its corners."
+    const val GRAB_HINT = "Drag the blue box to move it, or its corners to resize."
+
+    /**
+     * v0.26.0: a long-press on the dock closes Magic Hand, except where the dock shows text you can select (the
+     * grabbed text, an answer) or type (the teach review): there a long-press selects text and must never close it.
+     * Close (X), Back twice and the notification's Stop always work.
+     */
+    fun longPressCloses(u: Ui): Boolean = u.panel != Panel.GRAB && u.panel != Panel.ANSWER && u.panel != Panel.TEACH_REVIEW
 
     /** Grab actions: Translate and Save send or keep what was captured, so Private has none of them (grab itself is off there). */
     fun grabActions(private: Boolean): List<GrabAction> =

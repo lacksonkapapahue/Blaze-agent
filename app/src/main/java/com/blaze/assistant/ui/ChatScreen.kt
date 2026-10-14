@@ -657,7 +657,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                         is Item.Steps -> {
                             val st by Agent.status.collectAsState()
                             // v0.24.4: the token meter is a technical line; shown only with Show technical details on.
-                            val m = if (Settings.longChat && (com.blaze.assistant.agent.ReplyChips.showTech() || meter?.high == true) && (item.live || item.key == lastStepsKey)) meter else null
+                            val m = if (Settings.longChat && com.blaze.assistant.agent.ReplyChips.showTech() && (item.live || item.key == lastStepsKey)) meter else null
                             WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
                                 meter = m?.text.orEmpty(), meterHigh = m?.high == true)
                         }
@@ -680,8 +680,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                         if (live.isNotBlank() && Settings.showReasoning) ReasoningBlock(live, liveNow = true)
                     }
                 }
-                // Past 80% of the meter: offer a fresh chat that opens with this one's summary (v0.15.0).
-                if (mood == Mood.IDLE && Settings.longChat && meter?.high == true) FreshChatOffer { Agent.freshChat() }
+                // v0.26.0: no "this chat is getting long" banner; long chats compact themselves (AutoCompact).
             }
         }
         AnimatedVisibility(!atBottom, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
