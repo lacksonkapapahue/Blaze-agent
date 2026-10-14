@@ -500,6 +500,7 @@ fun ChatScreen() {
                             "approval" -> com.blaze.assistant.agent.Modes.toggleApproval()
                             "model" -> settingsPage = "ai"
                             "views" -> showViews = true
+                            "linux" -> settingsPage = "linux"
                             "new" -> newChat(com.blaze.assistant.agent.Projects.of(Agent.chatId.value)?.id.orEmpty())
                             "clear" -> clearScreen()
                         }

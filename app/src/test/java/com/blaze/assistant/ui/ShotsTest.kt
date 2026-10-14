@@ -736,6 +736,14 @@ class ShotsTest {
         }
     }
 
+    // v0.25.1: the Desktop view while the Linux desktop installs.
+    @Test fun linuxDesktop() = shot("56-linux-desktop", dark = true) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
+            LinuxDesktopPage(preview = com.blaze.assistant.desktop.LinuxDesktop.State(
+                com.blaze.assistant.desktop.DesktopPlan.Phase.INSTALLING, "Installing xfce4-panel (41 of 96)", 42))
+        }
+    }
+
     @Test fun magicHandWatches() = shot("52-magic-hand-watches", dark = true) {
         val now = 1_760_000_000_000L
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
