@@ -286,6 +286,36 @@
    "name": "blaze-specialists",
    "version": 2,
    "sha256": "59481b5166a0d670170356dd839c5bf69b344b77b275ce66005be88822ea484d"
+  },
+  {
+   "name": "wf-send-to-person",
+   "version": 1,
+   "sha256": "163498a4adf126e6949bd0bc36e07c8812185b6ba8b1a28baf66da59a8f63398"
+  },
+  {
+   "name": "wf-find-a-person",
+   "version": 1,
+   "sha256": "2e152e952653da844c2ef9c66d1bd3fddac75595a32df6d0949653a34df19b1f"
+  },
+  {
+   "name": "wf-call-someone",
+   "version": 1,
+   "sha256": "bffc400480b3ac16380df5e554f606bb0857879f449ba60b8b4c185331198ea9"
+  },
+  {
+   "name": "wf-reply-to-latest",
+   "version": 1,
+   "sha256": "a01ff085aaa3626a587c0059b25d4d89d9e3d6a4d6e28871f0c631b0e2eec3c1"
+  },
+  {
+   "name": "wf-make-and-share",
+   "version": 1,
+   "sha256": "5c1f40fe28a813dd31a0419594b1d91be362ea3f7915cd75110aec047d2dbcdc"
+  },
+  {
+   "name": "wf-do-it-on-screen",
+   "version": 1,
+   "sha256": "bf517f03d5c7eced897246e4889c1072e4065b925d90c8d7372e98df330409e2"
   }
  ]
 }

@@ -112,9 +112,10 @@ object BlazeDocs {
      * One doc → chunks of about [minTok]–[maxTok] tokens: a section is one chunk, a long one is split (each part keeps
      * its heading), and small neighbours are merged until they reach [minTok] (the first one's section path names it).
      */
-    fun chunk(doc: String, md: String, version: String, minTok: Int = MIN_TOKENS, maxTok: Int = MAX_TOKENS): List<Chunk> {
+    fun chunk(doc: String, md: String, version: String, minTok: Int = MIN_TOKENS, maxTok: Int = MAX_TOKENS, scrubSecrets: Boolean = true): List<Chunk> {
         val parts = ArrayList<Pair<String, String>>()   // section path, text
-        for (s in sections(scrub(md))) {
+        // v0.28.5: project docs are the user's own text, so ProjectDocs chunks them without scrubbing.
+        for (s in sections(if (scrubSecrets) scrub(md) else md)) {
             val path = s.path.joinToString(" > ")
             val text = s.lines.joinToString("\n").trim()
             if (text.isEmpty()) continue

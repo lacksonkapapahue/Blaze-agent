@@ -30,10 +30,11 @@ object ToolGuide {
         "add_calendar_event" to "Phone calendar. For Google Calendar specifically use gcal_create.",
         "gcal_create" to "Google Calendar via the connected account. For the phone's own calendar use add_calendar_event.",
         // Messaging
-        "send_sms" to "Plain SMS only. For WhatsApp/Telegram use send_text.",
-        "send_text" to "WhatsApp, Telegram and other chat apps. For plain SMS use send_sms.",
+        "send_sms" to "Plain SMS only. For WhatsApp/Telegram or pictures use message_contact.",
+        "send_text" to "Plain SMS (quick lane). For WhatsApp/Telegram or pictures use message_contact.",
+        "message_contact" to "WhatsApp/Telegram/SMS to a person, text and/or a picture (image=\"last\" after generate_image). Finds the contact itself; several matches come back as options to ask about. Only a 'Sent to' result means sent.",
         "compose_sms" to "Opens a filled-in SMS for the user to send themselves. To send directly use send_sms.",
-        "find_contact" to "Phone contacts. For Google contacts use gcontacts_search; to add or change one use add_contact/edit_contact.",
+        "find_contact" to "Phone contacts (the same ones WhatsApp uses; emoji names and small typos match). Search with the shortest part of the name. For Google contacts use gcontacts_search; to add or change one use add_contact/edit_contact.",
         // Screen
         "read_screen" to "Text of the current screen. Use look_at_screen only when text isn't enough (images, charts, games).",
         "look_at_screen" to "Costs a screenshot; prefer read_screen.",

@@ -129,7 +129,7 @@ object QuickRules {
         // Open an app: "open whatsapp", "launch the camera", "go to settings". Single target only.
         Regex("""^(?:open|launch|start|go to|take me to|bring up|show me|run) (?:the |my |up )?([a-z0-9][a-z0-9 .+&'-]{1,28}?)(?: app)?$""").matchEntire(t)?.let { m ->
             val app = m.groupValues[1].trim()
-            if (app.split(' ').size <= 3 && !Regex("\\b(and|then|search|play|on|in|with|to|for|about)\\b").containsMatchIn(app)
+            if (com.blaze.assistant.phone.AppMatch.clean(app).isNotEmpty() && app.split(' ').size <= 3 && !Regex("\\b(and|then|search|play|on|in|with|to|for|about)\\b").containsMatchIn(app)
                 && !Regex(".+ (settings?|preferences|options|menu|chats?|status|profile|page)$").matches(app))
                 return "open_app" to JSONObject().put("name", app)
         }

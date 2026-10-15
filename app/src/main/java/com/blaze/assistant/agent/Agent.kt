@@ -85,7 +85,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "memory_search", "search_past_chats", "gmail_search", "gmail_read",
         "gcal_events", "calendar_events", "drive_search", "gcontacts_search", "find_contact", "recent_notifications", "read_messages",
         "recent_calls", "device_status", "battery_level", "github_issues", "github_my_prs", "github_notifications", "github_search_repos",
-        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing", BlazeDocs.TOOL_SEARCH, BlazeDocs.TOOL_READ, com.blaze.assistant.home.HomeTools.LIST)
+        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing", BlazeDocs.TOOL_SEARCH, BlazeDocs.TOOL_READ,
+        ProjectDocs.TOOL_SEARCH, ProjectDocs.TOOL_READ, com.blaze.assistant.home.HomeTools.LIST)
 
     private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url", "search_in_app")
     private val ids = AtomicLong(1)
@@ -367,7 +368,33 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         }
         // Typing or speaking while Blaze waits on a question answers it.
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
+        // v0.28.x Blaze Camera: "scan this document", "read this sign", "look at this", "escanea este documento"… open the
+        // camera in that mode at once (no model guess); the capture comes back into this chat as the answer (fromCamera).
+        if (attachments.isEmpty() && untrusted == null && cur.job?.isActive != true) {
+            CameraIntent.match(text)?.let { mode ->
+                val s = cur
+                if (com.blaze.assistant.device.BlazeCamera.open(app, mode, com.blaze.assistant.device.CameraModes.Origin.REQUEST, s.id, text.trim())) {
+                    com.blaze.assistant.device.Haptics.tick(app)
+                    s.selfTurn(text.trim(), com.blaze.assistant.device.CameraModes.openingLine(mode), byVoice, "\uD83D\uDCF7 Blaze Camera")
+                    return
+                }
+            }
+        }
         cur.send(text, byVoice, attachments, untrusted = untrusted)
+    }
+
+    /**
+     * v0.28.x Blaze Camera: a capture (photo / document / text read / scanned code) goes into the chat that asked for it as
+     * the next message, so Blaze answers about it in that turn's thread. Falls back to the chat on screen.
+     */
+    fun fromCamera(chatId: String?, text: String, attachments: List<Attachment>) {
+        scope.launch {
+            val s = chatId?.takeIf { it.isNotBlank() }?.let { sessions[it] ?: load(it) } ?: cur
+            sessions[s.id] = s
+            if (s !== cur) show(s)
+            if (s.busy) s.job?.join()
+            s.send(text, attachments = attachments)
+        }
     }
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
@@ -709,7 +736,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             append("\nIf you're unsure what the user wants, or there are several options (accounts, contacts, items, times), don't guess and don't end your turn: call ask_user with short options, then carry on with the answer. ")
             if (control) {
                 append("""
-BACKGROUND FIRST: never take over the user's screen when a background tool can do it. Web questions → web_search/fetch_page; sites you must click, fill or log in to → browser_open/browser_click/browser_type (Blaze's own background browser; browser_show only when the user must see or take over). When a page needs the user's email, phone, username + password, API key or a one-time code, call browser_secure_input (a secure form in the chat; you get {{secret:name}} placeholders, never the values) instead of asking in chat or showing the browser. If a page says the account can't sign in with a password, don't loop on the password: offer Continue with Google, a passkey or the live browser with ask_user. Browser tools never need phone control. Messaging someone → message_contact (never open WhatsApp on screen yourself). Email → gmail_search/gmail_read. Calendar → gcal_events or calendar tools. Texts, calls, contacts → the SMS/call/contact tools. Notifications → recent_notifications. Music → spotify tools. Files/code → run_shell. Only if no background tool exists or it isn't connected, use the screen; when a background tool isn't connected, offer to connect it (blaze_self open "settings connections") instead of silently driving the app.
+BACKGROUND FIRST: never take over the user's screen when a background tool can do it. Web questions → web_search/fetch_page; sites you must click, fill or log in to → browser_open/browser_click/browser_type (Blaze's own background browser; browser_show only when the user must see or take over). When a page needs the user's email, phone, username + password, API key or a one-time code, call browser_secure_input (a secure form in the chat; you get {{secret:name}} placeholders, never the values) instead of asking in chat or showing the browser. If a page says the account can't sign in with a password, don't loop on the password: offer Continue with Google, a passkey or the live browser with ask_user. Browser tools never need phone control. Messaging someone → message_contact (never open WhatsApp on screen yourself); a picture Blaze makes → generate_image, then message_contact with image="last"; several contacts match → ask_user with the exact names; only a result starting "Sent to" means it was sent. Email → gmail_search/gmail_read. Calendar → gcal_events or calendar tools. Texts, calls, contacts → the SMS/call/contact tools. Notifications → recent_notifications. Music → spotify tools. Files/code → run_shell. Only if no background tool exists or it isn't connected, use the screen; when a background tool isn't connected, offer to connect it (blaze_self open "settings connections") instead of silently driving the app.
 You can control the phone. SPEED MATTERS: the user is watching.
 ${Orient.RULE}
 - For anything in an app, call run_plan ONCE with the whole script, using the visible words on buttons and fields as targets (e.g. open_app YouTube → tap "Search" → type "lofi hip hop" submit → tap the first result's title). You know how common apps look; you don't need to read the screen first. Add optional:true for popups you might need to dismiss, and expect:"..." when a step must lead somewhere.
@@ -814,6 +841,8 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.ui.Views.tool())
         t.put(SelfKnowledge.tool())
         BlazeDocs.tools().forEach { t.put(it) }
+        // v0.28.5: a project's full instructions / brief / notes as lookups; stripped from every chat that isn't in a project.
+        ProjectDocs.tools().forEach { t.put(it) }
         // v0.29.0 Home board: Blaze adds / changes / removes / lists the user's widgets.
         com.blaze.assistant.home.HomeTools.tools().forEach { t.put(it) }
         t.put(BlazeRouter.tool())
@@ -1289,7 +1318,7 @@ When you finish, say what you did in one short sentence.
                     SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date()), Memory.promptBlock(lastUserText()), agentId) +
                     Modes.promptLine(agentPlan) + (if (Settings.longChat && rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "")
                 else systemPrompt(lastUserText(), turnSkills.full.map { it.name }.toSet(), id) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
-                (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
+                (if (Settings.longChat) LongChat.PROMPT_LINE + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
                 (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs) +
@@ -1377,8 +1406,8 @@ When you finish, say what you did in one short sentence.
                 "update_brief" -> {
                     val p = Projects.of(me) ?: return "This chat isn't in a project, so there's no brief to update. Keep going without it."
                     add(Role.STEP, "Updating the project brief")
-                    Projects.setBrief(p.id, args.optString("brief"))
-                    "Brief for ${p.name} updated; it's sent with every turn in this project."
+                    // v0.28.5: capped at 600 tokens (squeezed, then its top part; the whole text and the old brief are kept as notes).
+                    Projects.updateBrief(p.id, args.optString("brief"))
                 }
                 else -> "Unknown tool"
             }
@@ -1417,6 +1446,7 @@ When you finish, say what you did in one short sentence.
             val bytes0 = DataMeter.used()
             try {
                 val allTools0 = tools().apply { put(ToolRouter.loadTool()) }.let { if (isPrivate) PrivateChat.filterTools(it) else it }
+                    .let { if (Projects.of(id) == null) ProjectDocs.strip(it) else it }
                 // Agents don't start or steer other agents; Plan keeps only read-only tools.
                 val spNow = specialist
                 val allTools = Modes.filterTools(if (agentId == null) allTools0 else JSONArray().apply {
@@ -1444,6 +1474,7 @@ When you finish, say what you did in one short sentence.
                     ViewRouter.followOnHint(curDesign.title, curDesign.kind, curDesign.path) else ""
                 turnOk.clear()
                 var claimNudged = false
+                var proofNudged = false
                 var emptyNudged = false
                 var leakNudged = false
                 var lastOkStep = ""
@@ -1692,6 +1723,24 @@ When you finish, say what you did in one short sentence.
                             }
                         }
                     }
+                    // v0.28.8 proof for every action (v0.28.7 did sends): "Message sent", "Alarm set for 7", "I turned on Wi-Fi",
+                    // "Saved to memory" with no tool of that kind succeeding this turn → one re-prompt to really do it, then the truth.
+                    if ((calls == null || calls.length() == 0) && !routine) {
+                        val shown = ReplyParts.split(textOut, final = true).text
+                        val okNames = synchronized(turnOk) { turnOk.map { it.name } }
+                        val miss = ActionProof.unbacked(shown, okNames, lastUserText())
+                        if (miss != null) {
+                            if (!proofNudged && nudgesLeft > 0 && step < maxSteps - 3) {
+                                proofNudged = true
+                                nudgesLeft--
+                                if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                                add(Role.STEP, RetryGuard.label(RetryGuard.Kind.CLAIM))
+                                history.put(JSONObject().put("role", "user").put("content", RetryGuard.anchor(ActionProof.nudge(miss), lastUserText())))
+                                continue
+                            }
+                            textOut = ActionProof.honest(shown, miss); reply.put("content", textOut); pendingFollowups = emptyList()
+                        }
+                    }
                     if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && nudgesLeft > 0 && !routine) {
                         val nudge = when {
                             FakeCall.looksFake(ReplyParts.split(textOut, final = true).text, ToolCalls.names(allTools), actedThisTurn, lastUserText(), lookedThisTurn) -> FakeCall.NUDGE
@@ -1876,7 +1925,7 @@ When you finish, say what you did in one short sentence.
 
         /** The blocking run (delegate wait=true): non-phone specialists in parallel, phone ones one after another. */
         private suspend fun delegateAndWait(briefs: List<Dispatch.Brief>): String = kotlinx.coroutines.coroutineScope {
-            val all = tools().let { if (isPrivate) PrivateChat.filterTools(it) else it }
+            val all = tools().let { if (isPrivate) PrivateChat.filterTools(it) else it }.let { if (Projects.of(id) == null) ProjectDocs.strip(it) else it }
             val jobs = briefs.take(Dispatch.MAX_TASKS).mapIndexed { i, b -> Triple(i, Specialists.byId(b.specialist) ?: Specialists.builtIn.first(), b.task) }
             val phoneLock = kotlinx.coroutines.sync.Mutex()
             val results = jobs.map { (i, spec, task) ->
@@ -2210,6 +2259,8 @@ When you finish, say what you did in one short sentence.
                 in com.blaze.assistant.home.HomeTools.NAMES -> { add(Role.STEP, com.blaze.assistant.home.HomeTools.step(name, args)); kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.home.HomeBoard.runTool(name, args) } }
                 BlazeDocs.TOOL_SEARCH -> { add(Role.STEP, "Looking it up in Blaze's docs"); kotlinx.coroutines.withContext(Dispatchers.IO) { BlazeDocs.search(args) } }
                 BlazeDocs.TOOL_READ -> { add(Role.STEP, "Reading Blaze's docs"); kotlinx.coroutines.withContext(Dispatchers.IO) { BlazeDocs.read(args) } }
+                ProjectDocs.TOOL_SEARCH -> { add(Role.STEP, "Checking the project's notes"); kotlinx.coroutines.withContext(Dispatchers.IO) { ProjectDocs.search(id, args) } }
+                ProjectDocs.TOOL_READ -> { add(Role.STEP, "Reading the project's notes"); kotlinx.coroutines.withContext(Dispatchers.IO) { ProjectDocs.read(id, args) } }
                 SelfKnowledge.TOOL -> { add(Role.STEP, "Checking my own setup"); kotlinx.coroutines.withContext(Dispatchers.IO) { SelfKnowledge.report(app, args.optString("section")) } }
                 com.blaze.assistant.ui.Views.TOOL -> {
                     val v = com.blaze.assistant.ui.Views.find(args.optString("view"))
@@ -2361,8 +2412,11 @@ When you finish, say what you did in one short sentence.
                     }
                 }
                 in com.blaze.assistant.phone.AndroidControl.names -> {
-                    add(Role.STEP, name.replace('_', ' ').replaceFirstChar { it.uppercase() })
-                    try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, args) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    add(Role.STEP, if (name == "blaze_camera") "Opening Blaze Camera" else name.replace('_', ' ').replaceFirstChar { it.uppercase() })
+                    // v0.28.x: Blaze Camera brings its capture back into this chat, as an answer to the user's last message.
+                    val a2 = if (name != "blaze_camera") args else JSONObject(args.toString()).put("_chat", id)
+                        .put("_asked", msgs.lastOrNull { it.role == Role.USER }?.text.orEmpty())
+                    try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, a2) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 in SkillPacks.names -> {
                     add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; "save_workflow" -> "Saving a workflow"; else -> "Reading a skill file" })

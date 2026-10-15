@@ -101,6 +101,7 @@ object Friendly {
             "flashcards" -> "Working on your flashcards"
             "brand_kit" -> "Checking your brand kit"
             "update_brief" -> "Updating the project brief"
+            "project_docs_search", "project_docs_read" -> "Checking the project's notes"
             "uninstall_app" -> "Uninstalling an app"
             "update_blaze" -> "Checking for a Blaze update"
             "ask_pc" -> "Asking your PC"

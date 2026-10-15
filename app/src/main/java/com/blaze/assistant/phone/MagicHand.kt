@@ -279,7 +279,7 @@ object MagicHand {
     private fun type() = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
 
     private fun screen(): Pair<Int, Int> {
-        val s = svc ?: return 1080 to 2340
+        val s = svc ?: return android.content.res.Resources.getSystem().displayMetrics.let { it.widthPixels to it.heightPixels }
         val w = wm
         return if (android.os.Build.VERSION.SDK_INT >= 30 && w != null) w.currentWindowMetrics.bounds.let { it.width() to it.height() }
         else s.resources.displayMetrics.let { it.widthPixels to it.heightPixels }
@@ -496,6 +496,12 @@ object MagicHand {
                 } else set { MagicHandState.review(it, teachLines(), MagicHandTeach.toWorkflow(steps, "", "").name) }
             }
             DockButton.DROP_CHAT -> dropInChat()
+            DockButton.CAMERA -> {
+                // The hand would sit over the shutter: close it, then open Blaze Camera (last mode used).
+                val c = svc?.applicationContext
+                stop()
+                if (c != null) com.blaze.assistant.device.BlazeCamera.open(c, null, com.blaze.assistant.device.CameraModes.Origin.MAGIC_HAND)
+            }
         }
     }
 

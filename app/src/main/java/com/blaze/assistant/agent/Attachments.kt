@@ -87,7 +87,15 @@ object Attachments {
         while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= max) sample *= 2
         val bmp = cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return null
         val s = minOf(1f, max.toFloat() / maxOf(bmp.width, bmp.height))
-        return if (s < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true) else bmp
+        val scaled = if (s < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt(), (bmp.height * s).toInt(), true) else bmp
+        // v0.28.x: BitmapFactory ignores EXIF, so a portrait photo from many phones (Samsung, Xiaomi…) reached the model sideways.
+        val o2 = try { cr.openInputStream(uri)?.use { android.media.ExifInterface(it).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1) } ?: 1 } catch (_: Exception) { 1 }
+        val deg = com.blaze.assistant.device.CameraFlow.exifDegrees(o2); val mirror = com.blaze.assistant.device.CameraFlow.exifMirrored(o2)
+        if (deg == 0 && !mirror) return scaled
+        return try {
+            val m = android.graphics.Matrix().apply { if (deg != 0) postRotate(deg.toFloat()); if (mirror) postScale(-1f, 1f) }
+            Bitmap.createBitmap(scaled, 0, 0, scaled.width, scaled.height, m, true)
+        } catch (_: Throwable) { scaled }
     }
 
     /** A small copy kept with the chat so your own photos show as pictures, not file names. */
