@@ -197,15 +197,17 @@ private fun SmallPill(text: String, primary: Boolean, enabled: Boolean = true, o
 
 /** v0.27.0: the dock's visible Grab toggle (blue while Grab mode is on). */
 @Composable
-private fun GrabToggle(on: Boolean, onClick: () -> Unit) {
+private fun GrabToggle(on: Boolean, withLabel: Boolean = true, onClick: () -> Unit) {
     val press = remember { MutableInteractionSource() }
     Row(Modifier.pressScale(press).height(36.dp).clip(Glass.pill).background(if (on) Glass.blue else Glass.raised)
         .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current,
             onClickLabel = if (on) "Stop grabbing" else DockButton.GRAB.desc, onClick = onClick)
         .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Rounded.Gesture, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(5.dp))
-        Text("Grab", style = sans.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White))
+        if (withLabel) {
+            Spacer(Modifier.width(5.dp))
+            Text("Grab", style = sans.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White))
+        }
     }
 }
 
@@ -220,16 +222,19 @@ private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (u.mode == MagicHandLogic.Mode.TEACH) "Teaching" else "Magic Hand", style = sans.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp))
+                    Text(if (u.mode == MagicHandLogic.Mode.TEACH) "Teaching" else "Magic Hand", maxLines = 1, softWrap = false,
+                        style = sans.copy(fontWeight = FontWeight.SemiBold, fontSize = 15.sp))
                     if (u.private) { Spacer(Modifier.width(6.dp)); Chip("Private", Glass.raised2, Glass.sub) }
                     if (u.carrying) { Spacer(Modifier.width(6.dp)); Chip("\u270b " + MagicHandLogic.preview(u.carried, 16), Glass.orange.copy(alpha = 0.18f), Glass.orange) }
                 }
                 Text(MagicHandState.statusLine(u), maxLines = 2, overflow = TextOverflow.Ellipsis,
                     style = sans.copy(fontSize = 12.sp, lineHeight = 16.sp, color = if (u.note.isNotBlank()) Glass.sub else Glass.cyan))
             }
-            MagicHandState.dockButtons(u).forEach { b ->
+            val buttons = MagicHandState.dockButtons(u)
+            buttons.forEach { b ->
                 Spacer(Modifier.width(4.dp))
-                if (b == DockButton.GRAB) { GrabToggle(u.grabMode) { calls.onButton(b) }; return@forEach }
+                // With four buttons (carrying adds Drop in chat) the toggle drops its word so the title keeps one line.
+                if (b == DockButton.GRAB) { GrabToggle(u.grabMode, withLabel = buttons.size <= 3) { calls.onButton(b) }; return@forEach }
                 GlassIconButton(when (b) {
                     DockButton.GRAB -> Icons.Rounded.Gesture
                     DockButton.TEACH -> Icons.Rounded.School; DockButton.DONE -> Icons.Rounded.Check
