@@ -2,6 +2,16 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.1: Blaze Music and Blaze Video
+
+- Two new apps inside Blaze, each full screen with its own **Player | Library | Store** pill: **Music** (/music, Views) and **Video** (/video, Views).
+- **Music player:** cover art that tints the screen, seek, play/pause/next/previous, shuffle, repeat one/all, queue (drag to reorder, remove), speed, sleep timer (minutes or end of song), synced lyrics (LRCLIB, saved for offline), liked songs. Keeps playing with Blaze closed, with the media notification, lock-screen and headset controls; pauses for calls and when headphones are unplugged; gapless. Picks up the last queue where you left it.
+- **Music library:** songs, liked, artists, albums, playlists (create, rename, delete, add, remove, reorder), recently played, search. Includes downloads and the audio already in Blaze's Gallery; everything plays offline. Mini-player on Library and Store.
+- **Video player:** swipe to seek, left side for brightness, right side for volume, double-tap ±10 s, full screen with rotation, picture-in-picture, speed, subtitles and audio track choice, resumes where you stopped; Continue watching row.
+- **Stores** (never a web page; a grid of pictures, titles, authors, lengths and the licence of each item): Music = Jamendo (Creative Commons; needs a Jamendo client_id, paste it in the Store) and Internet Archive audio (Creative Commons / public domain only); Video = Internet Archive public-domain feature films and the Blender open movies. Tap for details and quality, then Download or Play / Watch.
+- **YouTube** (Music and Video Stores) is a separate plug-in module (`youtube/`): included in this repo's builds, gone entirely when the folder is removed.
+- **Downloads:** a queue that survives network drops, closing Blaze and restarts (resumes from where it stopped), retries with backoff, pause / resume / cancel, progress notification, free-space check. Songs go to Music/Blaze/Music, videos to Movies/Blaze/Videos, visible to the Gallery and other apps. Separate YouTube video and audio streams are merged on the phone without re-encoding.
+
 ## v0.30.0: Gallery albums, music and videos
 
 - Gallery has a pill switcher like the rest of Blaze: **All · Albums · Images · Music · Videos**.

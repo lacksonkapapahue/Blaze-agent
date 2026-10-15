@@ -25,6 +25,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- v0.30.1 Blaze Music: background playback (media session foreground service). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- v0.30.1 Music / Video downloads into Music/Blaze/Music and Movies/Blaze/Videos: only Android 8–9 need this. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
@@ -143,6 +147,41 @@
             android:theme="@android:style/Theme.Black.NoTitleBar"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode"
             android:windowSoftInputMode="adjustResize|stateVisible" />
+
+        <!-- v0.30.1 Blaze Music and Blaze Video: their own apps inside Blaze (own task, like Terminal and Browser). -->
+        <activity
+            android:name=".mediaapps.MusicActivity"
+            android:exported="false"
+            android:label="Blaze Music"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.blaze.assistant.music"
+            android:theme="@style/Theme.Blaze"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".mediaapps.VideoActivity"
+            android:exported="false"
+            android:label="Blaze Video"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.blaze.assistant.video"
+            android:theme="@style/Theme.Blaze"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+        <service
+            android:name=".mediaapps.MusicService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+        <!-- WorkManager's foreground service runs the Music / Video download queue (dataSync). -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <activity
             android:name=".browser.BrowserActivity"

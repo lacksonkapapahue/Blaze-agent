@@ -40,6 +40,8 @@ object Commands {
         Command("design", "", "Design: live preview"),
         Command("jobs", "", "Jobs and the job log"),
         Command("terminal", "", "Open Blaze Terminal (Alpine or phone shell)"),
+        Command("music", "", "Open Blaze Music (player, library, store)"),
+        Command("video", "", "Open Blaze Video (player, library, store)"),
         Command("schedule", "", "Routines and timed tasks"),
         Command("accounts", "", "Connected apps"),
         Command("doctor", "", "Phone health and self-check"),
