@@ -30,22 +30,15 @@ fun UpdateCard() {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
     val st by Updater.state.collectAsState()
-    val (title, line, pct) = when (val s = st) {
-        is State.Idle -> Triple("Blaze update", "You're on v${Updater.installed(ctx)}.", -1)
-        is State.Checking -> Triple("Checking", "Looking for a newer Blaze…", -1)
-        is State.Downloading -> Triple("Downloading ${s.pct}%", "Blaze v${s.version}", s.pct)
-        is State.Installing -> Triple("Installing", "Confirm on the Android screen. Blaze restarts by itself, and your keys, settings and models stay.", 100)
-        is State.UpToDate -> Triple("Up to date", "You have the newest Blaze, v${s.version}.", -1)
-        is State.Ready -> Triple("Update available", "Blaze v${s.version} is ready to install.", -1)
-        is State.NeedsPermission -> Triple("One permission", "Turn on \"Allow from this source\" for Blaze, come back, then tap Retry.", -1)
-        is State.Done -> Triple("Updated", "Blaze v${s.version} is installed.", 100)
-        is State.Failed -> Triple("Update didn't work", s.message, -1)
-    }
+    val (title, line, pct) = UpdateCardText.of(st, Updater.installed(ctx))
     val busy = st is State.Checking || st is State.Downloading || st is State.Installing
     val bad = st is State.Failed
     Column(Modifier.widthIn(max = 330.dp).fillMaxWidth().background(c.paper, BlazeShapes.medium).hairline(if (bad) c.accent else c.hair).padding(14.dp)) {
+        // v0.28.1: sentence case (no shouty "UPDATE DIDN'T WORK"), plain words.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (busy) Shimmer(title, Modifier.weight(1f)) else Label(title, color = if (bad) c.accent else c.ink, size = 10.sp, modifier = Modifier.weight(1f))
+            if (busy) Shimmer(title, Modifier.weight(1f))
+            else Text(title, modifier = Modifier.weight(1f), maxLines = 1,
+                style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, color = if (bad) c.accent else c.ink))
         }
         Spacer(Modifier.height(6.dp))
         Text(line, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = c.body))
@@ -63,7 +56,22 @@ fun UpdateCard() {
         }
         if (action != null) {
             Spacer(Modifier.height(10.dp))
-            ActionText(action, color = c.accent, size = 10.sp, modifier = Modifier.hairline(c.accent).clickable { Updater.retry(ctx) }.padding(horizontal = 12.dp, vertical = 8.dp))
+            Text(action, color = c.accent, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium), modifier = Modifier.hairline(c.accent).clip(BlazeShapes.pill).clickable { Updater.retry(ctx) }.padding(horizontal = 12.dp, vertical = 8.dp))
         }
+    }
+}
+
+/** v0.28.1: the card's words, sentence case and plain (pure, tested in UpdateDownloadTest). Title, line, progress (-1 = none). */
+object UpdateCardText {
+    fun of(st: State, have: String): Triple<String, String, Int> = when (val s = st) {
+        is State.Idle -> Triple("Blaze update", "You're on v$have.", -1)
+        is State.Checking -> Triple("Checking for an update", "Looking for a newer Blaze\u2026", -1)
+        is State.Downloading -> Triple("Downloading ${s.pct}%", s.note.ifBlank { "Blaze v${s.version}. Works on mobile data too." }, s.pct)
+        is State.Installing -> Triple("Installing", "Confirm on the Android screen. Blaze restarts by itself, and your keys, settings and models stay.", 100)
+        is State.UpToDate -> Triple("Up to date", "You have the newest Blaze, v${s.version}.", -1)
+        is State.Ready -> Triple("Update available", "Blaze v${s.version} is ready to install.", -1)
+        is State.NeedsPermission -> Triple("One permission needed", "Turn on \"Allow from this source\" for Blaze, come back, then tap Retry.", -1)
+        is State.Done -> Triple("Updated", "Blaze v${s.version} is installed.", 100)
+        is State.Failed -> Triple("The update didn't finish", s.message, -1)
     }
 }

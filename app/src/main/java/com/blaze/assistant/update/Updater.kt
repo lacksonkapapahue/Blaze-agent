@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -38,7 +39,8 @@ object Updater {
     sealed class State {
         object Idle : State()
         object Checking : State()
-        data class Downloading(val version: String, val pct: Int) : State()
+        /** v0.28.1: [note] = a plain line while it retries or waits for a connection ("" = downloading normally). */
+        data class Downloading(val version: String, val pct: Int, val note: String = "") : State()
         data class Installing(val version: String) : State()
         data class UpToDate(val version: String) : State()
         data class Ready(val version: String) : State()   // newer build found, not installed (install=false)
@@ -120,10 +122,11 @@ object Updater {
     }
 
     init {
-        // The card disappears a moment after the update finishes (or when there was nothing to update).
         scope.launch {
-            _state.collect { st ->
-                if (finished(st)) { kotlinx.coroutines.delay(if (st is State.Done) 1500 else 4000); if (finished(_state.value)) Agent.removeCard(CARD) }
+            _state.collectLatest { st ->
+                val ms = ApkDownload.dismissAfterMs(st) ?: return@collectLatest
+                kotlinx.coroutines.delay(ms)
+                if (_state.value == st && job?.isActive != true) try { Agent.removeCard(CARD) } catch (_: Throwable) { }
             }
         }
     }
@@ -155,7 +158,8 @@ object Updater {
 
     private fun conn(url: String, token: String?, raw: Boolean): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 20_000; readTimeout = 60_000
+            // v0.28.1: long read timeout for slow mobile data (a stalled read is retried and resumed, not fatal).
+            connectTimeout = 20_000; readTimeout = 90_000
             // The repo is public: a GitHub connection only raises the rate limit, it isn't required.
             if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", if (raw) "application/vnd.github.raw" else "application/vnd.github+json")
@@ -165,6 +169,7 @@ object Updater {
     private fun fail(msg: String): String { _state.value = State.Failed(msg); return msg }
 
     @Volatile private var newestCode = -1L
+    private val blobShas = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** Checks and (optionally) installs. Returns a plain sentence for the model. */
     suspend fun run(ctx: Context, install: Boolean): String {
@@ -187,9 +192,10 @@ object Updater {
                 val re = Regex("^Blaze-v(\\d+(?:\\.\\d+)*)\\.apk$")
                 val bridge = files.mapNotNull { o -> bridgeRe.find(o.optString("name"))?.let { it.groupValues[1].toLong() to o } }.maxByOrNull { it.first }
                 val named = files.filter { bridgeRe.find(it.optString("name")) == null }
-                    .mapNotNull { o -> re.find(o.optString("name"))?.let { Triple(o.optString("name"), it.groupValues[1], o.optLong("size")) } }
+                    .mapNotNull { o -> re.find(o.optString("name"))?.let { blobShas[o.optString("name")] = o.optString("sha"); Triple(o.optString("name"), it.groupValues[1], o.optLong("size")) } }
                     .maxWithOrNull { a, b -> if (newer(a.second, b.second)) 1 else if (newer(b.second, a.second)) -1 else 0 }
                 newestCode = bridge?.first ?: -1L
+                bridge?.let { b -> blobShas[b.second.optString("name")] = b.second.optString("sha") }
                 named ?: bridge?.let { b -> Triple(b.second.optString("name"), "build ${b.first}", b.second.optLong("size")) }
                     ?: throw UpdateError("No Blaze builds are published yet.")
             }
@@ -204,23 +210,33 @@ object Updater {
             }
             _state.value = State.Downloading(version, 0)
             val apk = withContext(Dispatchers.IO) {
-                val dir = File(ctx.cacheDir, "update").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+                // v0.28.1: resumable, retried, mirrored download (ApkDownload). The partial file of this same build is kept
+                // between tries and between Retry taps; anything else in the folder is cleared.
+                val dir = File(ctx.cacheDir, "update").apply { mkdirs() }
                 val f = File(dir, name)
-                val c = conn("$API/$name?ref=apk", token, true)
-                if (c.responseCode !in 200..299) throw UpdateError("The download didn't start (${c.responseCode}). Check your connection and tap Retry.")
-                val total = c.contentLengthLong.takeIf { it > 0 } ?: size
-                var got = 0L; var last = -1
-                c.inputStream.use { inp -> f.outputStream().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        ensureActive()   // Stop cancels between chunks
-                        val n = inp.read(buf); if (n < 0) break
-                        out.write(buf, 0, n); got += n
-                        val pct = if (total > 0) (got * 100 / total).toInt().coerceIn(0, 100) else 0
-                        if (pct != last) { last = pct; _state.value = State.Downloading(version, pct) }
+                val part = File(dir, "$name.part")
+                dir.listFiles()?.forEach { if (it.name != part.name) it.delete() }
+                val me = coroutineContext[kotlinx.coroutines.Job]
+                val cancelled = { me?.isActive == false }
+                val sources = ApkDownload.sources(REPO, name, version.takeIf { it.firstOrNull()?.isDigit() == true }, "$API/$name?ref=apk")
+                var last = -1
+                try {
+                    ApkDownload.fetch(sources, httpIo(ctx, token), part, f, size, blobShas[name]?.takeIf { it.length == 40 }, cancelled) { ev ->
+                        when (ev) {
+                            is ApkDownload.Event.Progress -> {
+                                val total = if (ev.total > 0) ev.total else size
+                                val pct = if (total > 0) (ev.done * 100 / total).toInt().coerceIn(0, 100) else 0
+                                val cur = _state.value
+                                if (pct != last || (cur is State.Downloading && cur.note.isNotEmpty())) { last = pct; _state.value = State.Downloading(version, pct) }
+                            }
+                            is ApkDownload.Event.Retrying -> _state.value = State.Downloading(version, last.coerceAtLeast(0), ApkDownload.retryLine(ev))
+                            is ApkDownload.Event.Offline -> _state.value = State.Downloading(version, last.coerceAtLeast(0), ApkDownload.OFFLINE)
+                        }
                     }
-                } }
-                if (total > 0 && got < total) throw UpdateError("The download was cut off. Tap Retry.")
+                } catch (e: ApkDownload.Cancelled) { throw kotlinx.coroutines.CancellationException("Stopped") }
+                catch (e: ApkDownload.GaveUp) { com.blaze.assistant.device.CrashLog.error("Update download", e)
+                    throw UpdateError("The connection kept dropping, so I stopped for now. What's downloaded is kept: tap Retry and I'll carry on from there.") }
+                catch (e: ApkDownload.Damaged) { throw UpdateError("The download got damaged on the way, so I didn't install it. Tap Retry to get a fresh copy.") }
                 f
             }
             // Check it before Android sees it: same app, newer build, signed by the key this Blaze trusts.
@@ -231,15 +247,36 @@ object Updater {
         } catch (e: UpdateError) { fail(e.message ?: "Update failed.") }
         catch (e: java.net.UnknownHostException) { fail("No internet connection. Connect and tap Retry.") }
         catch (e: java.net.SocketTimeoutException) { fail("GitHub is taking too long to answer. Tap Retry.") }
+        catch (e: java.io.IOException) { com.blaze.assistant.device.CrashLog.error("Update", e); fail("The connection dropped while checking for the update. Tap Retry.") }
         catch (e: kotlinx.coroutines.CancellationException) {
             _state.value = State.Idle
             try { File(ctx.cacheDir, "update").listFiles()?.forEach { it.delete() } } catch (_: Exception) { }
             throw e
         }
-        catch (e: Exception) { fail("The update didn't work: ${e.message ?: e.javaClass.simpleName}. Tap Retry.") }
+        catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("Update", e); fail("Something went wrong with the update. Tap Retry and I'll try again.") }
     }
 
     private class UpdateError(msg: String) : Exception(msg)
+
+    /** v0.28.1: real HTTP for ApkDownload: Range from the partial file; the GitHub token only for api.github.com. */
+    private fun httpIo(ctx: Context, token: String?): ApkDownload.Io = object : ApkDownload.Io {
+        override fun open(url: String, from: Long): ApkDownload.Response {
+            val api = url.startsWith("https://api.github.com/")
+            val c = conn(url, if (api) token else null, raw = true)
+            if (!api) c.setRequestProperty("Accept", "application/octet-stream")
+            c.instanceFollowRedirects = true
+            if (from > 0) c.setRequestProperty("Range", "bytes=$from-")
+            c.setRequestProperty("Accept-Encoding", "identity")
+            val code = c.responseCode
+            val body = if (code in 200..299) c.inputStream else (c.errorStream ?: java.io.ByteArrayInputStream(ByteArray(0)))
+            return ApkDownload.Response(code, c.contentLengthLong, c.getHeaderField("Content-Range"), body)
+        }
+        override fun online(): Boolean = try {
+            val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+            caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        } catch (_: Exception) { true }
+    }
 
     /** Why a downloaded APK must not be installed (null = fine). */
     @Suppress("DEPRECATION")
