@@ -2,6 +2,11 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.28.9: "open it" fix + empty-reply fix
+- "open it for me" (about a gallery picture) opened the game "Juno: New Origins Complete Edition": the fast lane sent open_app "it", and "Ed-it-ion" contains "it". Commands that point back ("it", "that", "the picture", "again") now skip the fast lane and its cache, so the full agent uses the chat context. App names match on whole words only (`phone/AppMatch.kt`), and open_app refuses pronouns.
+- An empty provider reply showed the raw "End of input at character 0 of" error. It now counts as a provider hiccup (503) and goes through the normal retry / next-model path.
+- AppMatchTest covers the real failure, pronouns, real app names and mid-word matches.
+
 ## v0.28.8: proof for every action
 - **ActionProof** (`agent/ActionProof.kt`): a final reply that says Blaze sent, called, set an alarm/timer/reminder/event, changed a setting, saved to memory, wrote/exported a file, opened an app or page, installed, downloaded, changed a contact or played music must have a tool of that kind SUCCEED this turn. If not, Blaze is re-prompted once to really do it ("it has NOT happened"), and if it still hasn't, the claim is replaced with "I didn't actually …". Questions about earlier work, offers, questions back and honest failures are left alone.
 - **Stricter success test:** tool results starting "Not …", "No …", "Need …", "Can't", "I couldn't", "Permission denied" or "The user didn't …" no longer count as done. message_contact's failure lines all start "Couldn't send".

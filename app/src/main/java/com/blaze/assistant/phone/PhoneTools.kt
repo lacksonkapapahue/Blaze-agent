@@ -175,20 +175,10 @@ object PhoneTools {
         val pm = ctx.packageManager
         val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val apps = pm.queryIntentActivities(launcher, 0)
-        val q = name.lowercase().trim()
+        val q = AppMatch.clean(name)
+        if (q.isEmpty()) return "Couldn't tell which app '$name' means. Ask the user, or use the earlier context."
         val scored = apps.map { it to it.loadLabel(pm).toString() }
-            .map { (ri, label) ->
-                val l = label.lowercase()
-                val score = when {
-                    l == q -> 0
-                    l.startsWith(q) -> 1
-                    l.contains(q) -> 2
-                    q.contains(l) -> 3
-                    ri.activityInfo.packageName.lowercase().contains(q.replace(" ", "")) -> 4
-                    else -> 99
-                }
-                Triple(ri, label, score)
-            }
+            .map { (ri, label) -> Triple(ri, label, AppMatch.score(q, label, ri.activityInfo.packageName) ?: 99) }
             .filter { it.third < 99 }
             // "whatsapp settings" contains both "WhatsApp" and "Settings": never let the generic Settings app win a partial match.
             .filter { it.third == 0 || q == "settings" || it.second.lowercase() != "settings" }
