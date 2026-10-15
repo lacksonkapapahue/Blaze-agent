@@ -508,8 +508,8 @@ fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boo
                 BasicTextField(value = value, onValueChange = onValue,
                     textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 16.sp, lineHeight = 22.sp, color = c.ink),
                     cursorBrush = SolidColor(c.accent), maxLines = 6,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (canSend && !busy) onSend() }),
+                    // v0.28.1: Enter is a new line; only the send button sends (ComposerKeys).
+                    keyboardOptions = ComposerKeys.Message,
                     modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
                         .semantics { contentDescription = "Message Blaze" })
             }

@@ -72,8 +72,7 @@ fun AgentCard(id: String) {
                 if (text.isEmpty()) Text(if (bg.live) "Tell it something…" else "Follow-up…", style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.weak))
                 BasicTextField(text, { text = it }, textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink),
                     cursorBrush = SolidColor(c.accent), maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (text.isNotBlank()) { BgAgents.steer(bg.id, text); text = ""; steering = false } }),
+                    keyboardOptions = ComposerKeys.Message,   // v0.28.1: Enter = new line; "Send" sends
                     modifier = Modifier.fillMaxWidth())
             }
         }

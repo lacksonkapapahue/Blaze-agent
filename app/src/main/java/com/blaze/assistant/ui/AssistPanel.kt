@@ -242,8 +242,7 @@ private fun AssistPanelBody(autoListen: Boolean, onClose: () -> Unit, onPin: () 
                         BasicTextField(text, { text = it; touched = true },
                             textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.text),
                             cursorBrush = SolidColor(Glass.blue), maxLines = 3,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                            keyboardActions = KeyboardActions(onSend = { submit() }),
+                            keyboardOptions = ComposerKeys.Message,   // v0.28.1: Enter = new line
                             modifier = Modifier.fillMaxWidth())
                     }
                 }

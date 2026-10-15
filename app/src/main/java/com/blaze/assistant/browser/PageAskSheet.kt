@@ -222,8 +222,9 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.weak))
                     BasicTextField(input, { input = it; if (finding) find(it) }, singleLine = finding, maxLines = if (finding) 1 else 3,
                         cursorBrush = SolidColor(Glass.blue), textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.text),
-                        keyboardOptions = KeyboardOptions(imeAction = if (finding) ImeAction.Search else ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { ask(input) }, onSearch = { find(input, true) }),
+                        // v0.28.1: asking: Enter = new line, only the send button sends. Find mode keeps Search (it never sends).
+                        keyboardOptions = if (finding) KeyboardOptions(imeAction = ImeAction.Search) else com.blaze.assistant.ui.ComposerKeys.Message,
+                        keyboardActions = KeyboardActions(onSearch = { find(input, true) }),
                         modifier = Modifier.fillMaxWidth())
                 }
                 Spacer(Modifier.width(8.dp))
