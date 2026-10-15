@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.rememberScrollState
@@ -858,6 +859,67 @@ class ShotsTest {
             AgentCard("B3")
             Text("Game has it for K3,499 with free delivery to Ndola. Waiting on Jumia and the price check.", style = TextStyle(fontSize = 15.sp, color = LocalBlaze.current.ink))
             FollowupRow(listOf("Which one is cheaper?", "Add delivery to the total", "Remind me on payday", "Compare the A25 too")) { }
+        }
+    }
+
+    // ---------- v0.28.1 batch 1 ----------
+    // The grab card the instant the finger lifts: shimmer lines, actions already usable (Copy queued).
+    @Test fun magicHandGrabReading() = shot("65-magic-hand-grab-reading") {
+        FakeApp {
+            val r = com.blaze.assistant.phone.MagicHandState.reading(handState(), "Jumia")
+            com.blaze.assistant.phone.MagicHandDock(com.blaze.assistant.phone.MagicHandState.tapGrab(r,
+                com.blaze.assistant.phone.MagicHandState.GrabAction.COPY).first, com.blaze.assistant.phone.DockCalls())
+        }
+    }
+
+    // Luke's own message with Markdown: rendered, never raw "## App" / "**".
+    @Test fun userBubbleMarkdown() = shot("66-user-bubble-markdown") {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            UserBubble("## App\n1. **Offline mode**: works without data\n2. **Voice notes**: *quick* capture\n- Sync with `git`\n- See [the repo](https://github.com/lacksonkapapahue/Blaze-agent)")
+            BlazeReply(66, "## Plan\n1. **Offline mode** first: cache the last 50 chats.\n2. Then *voice notes*.", GroupPos.SINGLE)
+        }
+    }
+
+    // The update card: retrying on a dropped connection, and the plain failure line (sentence case).
+    @Test fun updateCard() = shot("67-update-card") {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            UpdateCard(com.blaze.assistant.update.Updater.State.Downloading("0.28.1", 46, "Connection dropped, I'll keep trying in 8 s."))
+            UpdateCard(com.blaze.assistant.update.Updater.State.Failed("The connection kept dropping, so I stopped for now. What's downloaded is kept: tap Retry and I'll carry on from there."))
+        }
+    }
+
+    // Three pictures in one sent message: the fanned stack, and the same stack half-way through a swipe.
+    @Test fun imageStack() = shot("68-image-stack") {
+        val pics = listOf(fakePicture(0), fakePicture(1), fakePicture(2))
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(22.dp)).background(LocalBlaze.current.ink).padding(4.dp)) {
+                ImageStackFrame(pics, top = 0, progress = 0f, onTap = {}, onExpand = {})
+            }
+            UserBubble("Which of these three looks best for the poster?")
+            Box(Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(22.dp)).background(LocalBlaze.current.ink).padding(4.dp)) {
+                ImageStackFrame(pics, top = 0, progress = -0.35f, onTap = {}, onExpand = {})
+            }
+        }
+    }
+
+    // The full-screen viewer mid-flip: the current picture tilts away on Y while the next swings in.
+    @Test fun imageViewerFlip() = shot("69-image-viewer-flip", dark = true) {
+        ImagePagerFrame(listOf(fakePicture(0), fakePicture(1), fakePicture(2)), index = 0, progress = -0.42f, onSave = {})
+    }
+
+    // The table card: bold title, divider, muted headers, wrapping cells, sticky first column, sideways scroll with fades.
+    @Test fun tableCard() = shot("70-table-card") {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            BlazeBubble(GroupPos.SINGLE) {
+                TableCardView(RichKit.TableCard("Airtel data bundles", listOf("Bundle", "Price", "Data", "Valid for", "Best for"), listOf(
+                    listOf("Daily", "K5", "1 GB", "24 hours", "A quick top-up"),
+                    listOf("Weekly", "K30", "5 GB", "7 days", "Light browsing and **WhatsApp**"),
+                    listOf("Monthly", "K100", "25 GB", "30 days", "Streaming lectures and YouTube"),
+                )))
+            }
+            BlazeBubble(GroupPos.SINGLE) {
+                TableCardView(RichKit.TableCard("Exam week", listOf("Day", "Course"), listOf(listOf("Mon", "CIT102 lab"), listOf("Wed", "NET103 quiz, room 4"))))
+            }
         }
     }
 }

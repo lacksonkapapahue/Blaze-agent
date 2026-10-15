@@ -26,10 +26,11 @@ import com.blaze.assistant.update.Updater.State
 
 /** Checking → Downloading N% → Installing, with a plain error and Retry. */
 @Composable
-fun UpdateCard() {
+fun UpdateCard(preview: State? = null) {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
-    val st by Updater.state.collectAsState()
+    val live by Updater.state.collectAsState()
+    val st = preview ?: live
     val (title, line, pct) = UpdateCardText.of(st, Updater.installed(ctx))
     val busy = st is State.Checking || st is State.Downloading || st is State.Installing
     val bad = st is State.Failed
