@@ -215,7 +215,7 @@ fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSky() {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomePane(onAsk: (String) -> Unit) {
+fun HomePane(onAsk: (String) -> Unit, onQuote: (String) -> Unit = {}) {
     val base = LocalBlaze.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -305,7 +305,10 @@ fun HomePane(onAsk: (String) -> Unit) {
                 }
             }
             if (toast.isNotBlank()) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp).navigationBarsPadding()) { HomeToast(toast) }
-            glassUrl?.let { u -> GlassWindow(u, onClose = { glassUrl = null }, onOpenOutside = { openHomeLink(ctx, it) }) }
+            glassUrl?.let { u -> GlassWindow(u, onClose = { glassUrl = null }, onOpenOutside = { openHomeLink(ctx, it) },
+                // v0.29.9: the selection pill on the page: Ask / Translate / Define go to Blaze, Quote goes into the chat box.
+                onAsk = { t -> onAsk(t); toast = "Asked Blaze. The answer is in Chat." },
+                onQuote = { t -> onQuote(t) }) }
 
             menuFor?.let { id ->
                 val w = widgets.firstOrNull { it.id == id }

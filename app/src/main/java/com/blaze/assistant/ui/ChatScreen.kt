@@ -470,7 +470,7 @@ fun ChatScreen() {
                     animationSpec = MotionTokens.medium(), label = "tab") { paneNow ->
                 if (paneNow == "home") {
                     // v0.29.0 Home board: plain-words asks go to Blaze in the main chat (home_widget_* tools).
-                    HomePane(onAsk = { t -> Agent.send(t) })
+                    HomePane(onAsk = { t -> Agent.send(t) }, onQuote = { t -> quote = t; go(navNow().switchTab(ChatNav.CHAT)) })
                 } else if (paneNow == "projects") {
                     val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
                     ProjectsPane(projects, allChats, busyChats, needs, nav.project,
@@ -612,7 +612,8 @@ fun ChatScreen() {
             }
         }
         // v0.29.5: the particles drift OVER the thread now, so they visibly pass through the see-through bubbles and text.
-        ParticleField(mood, overlay = true)
+        // v0.29.9: not on Home (they'd float over the glass page window and the board).
+        if (nav.tab != ChatNav.HOME || nav.inProjectChat) ParticleField(mood, overlay = true)
 
         // v0.27.2: the selection pill, swipe sideways for Search, Ask Blaze, Translate, Define, Read aloud, Share.
         tbRect?.let { r ->

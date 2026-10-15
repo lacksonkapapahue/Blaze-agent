@@ -2,6 +2,13 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.9: Page window grips, page selection pill, clearer bubbles
+
+- **The glass page window on Home moves only by its rim or title bar.** Hold the glass edge (an 18 dp rim) or the title bar to carry it around; it leans a little as it moves and springs back. The page in the middle is never a handle any more, so scrolling, selecting and copying there never drags the window. The two bottom corners resize it (small ticks show where; never smaller than 220 × 260 dp, never off-screen). Sliding on the dim area outside no longer tilts anything (`ui/GlassPaneGrip.kt`, GlassPaneGripTest).
+- **Selecting words on that page shows the chat's selection pill**: Copy, Quote, Select all, Search, Ask Blaze, Translate, Define (1–3 words), Read aloud, Share, swipeable like in chat. Quote drops the words into the chat box, Ask / Translate / Define go to Blaze (answer in Chat), Search opens in the window itself (Back returns), Copy uses the page's own copy. Back or a tap outside clears the selection (`ui/PageSelection.kt`: the WebView's action mode is routed to the pill; PageSelectionTextTest).
+- **Clearer chat glass:** no opaque backing inside bubbles any more (code and table cards are see-through too), and message text carries a soft page-coloured halo so it stays readable with particles drifting across it.
+- The particles that drift over the thread stay off Home, so they no longer float across the glass page window or the board.
+
 ## v0.29.8: Terminal that explains itself, phone shell fixed
 
 - **Phone shell starts again.** On phones like the Galaxy A12 the phone tab opened straight to "[Process completed (signal 31) - press Enter]". Signal 31 is SIGSYS: Android's app sandbox (seccomp) kills any app process that calls setgid/setuid, and the bundled BusyBox called both at the start of every tool (its `check_suid` privilege drop, a no-op for an app). Both BusyBox binaries now skip that drop (one instruction each, `tools/busybox/patch_setid.py`, README there).

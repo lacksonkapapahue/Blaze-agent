@@ -186,7 +186,9 @@ fun AnswerBody(key: Long, src: String) {
 private fun MdText(md: String) {
     val c = LocalBlaze.current
     val shown = remember(md, c.accent) { Md.render(md, c.accent, c.hair.copy(alpha = 0.35f)) }
-    SelectionContainer { Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 23.sp, color = c.body)) }
+    // v0.29.9: a soft page-coloured halo inside a bubble, so the words stay crisp with particles drifting across the glass.
+    val halo = if (LocalBubble.current != null) GlassBubble.halo(c) else null
+    SelectionContainer { Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 23.sp, color = c.body, shadow = halo)) }
 }
 
 @Composable
@@ -202,7 +204,7 @@ private fun CodeText(code: String) {
 @Composable
 private fun cardFill(): Color {
     val c = LocalBlaze.current
-    return if (LocalBubble.current != null) c.inset else c.faint
+    return if (LocalBubble.current != null) GlassBubble.cardFill(c) else c.faint
 }
 
 private val CardShape = RoundedCornerShape(12.dp)

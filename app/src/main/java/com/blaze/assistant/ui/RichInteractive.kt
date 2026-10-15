@@ -84,7 +84,7 @@ val chartColors = listOf(Color(0xFF4C7DFF), Color(0xFFFF9A3C), Color(0xFF2E9E6B)
     Color(0xFFE0B03A), Color(0xFFE0607E), Color(0xFF1FA6A6), Color(0xFF8A94A6))
 
 @Composable
-private fun richFill(): Color { val c = LocalBlaze.current; return if (LocalBubble.current != null) c.inset else c.faint }
+private fun richFill(): Color { val c = LocalBlaze.current; return if (LocalBubble.current != null) GlassBubble.cardFill(c) else c.faint }
 
 @Composable
 private fun CardTitle(text: String) {
