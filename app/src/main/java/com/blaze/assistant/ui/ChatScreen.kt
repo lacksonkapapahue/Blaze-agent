@@ -195,15 +195,11 @@ fun ChatScreen() {
     }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { addUris(it) }
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(5)) { addUris(it) }
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) cameraUri?.let { addUris(listOf(it)) } }
-    fun openCamera() {
-        val dir = File(ctx.cacheDir, "camera").apply { mkdirs() }
-        val f = File(dir, "photo_${System.currentTimeMillis()}.jpg")
-        val u = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
-        cameraUri = u
-        try { camera.launch(u) } catch (_: Exception) { Toast.makeText(ctx, "No camera app found.", Toast.LENGTH_SHORT).show() }
-    }
+    // v0.28.x camera-fix: permission → camera app (explicit grants) → Blaze's own camera → photo picker (ui/CameraCapture.kt).
+    val cameraCapture = rememberCameraCapture(onPhoto = { addUris(listOf(it), "image/jpeg") },
+        onPickPhoto = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+    val hasCamera = remember { com.blaze.assistant.device.CameraSupport.hasCamera(ctx) }
+    cameraCapture.dialogs()
 
     // An image on the clipboard shows a "Paste image" chip.
     val sysClip = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
@@ -578,10 +574,12 @@ fun ChatScreen() {
                 if (plusOpen) BackHandler { plusOpen = false }
                 AnimatedVisibility(plusOpen, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
                     val model = ""
-                    PlusMenu(plusItems(work, approval, model, clipHasImage, nav.inProjectChat)) { id ->
+                    PlusMenu(plusItems(work, approval, model, clipHasImage, nav.inProjectChat, hasCamera)) { id ->
                         plusOpen = false
                         when (id) {
-                            "camera" -> openCamera()
+                            "camera" -> cameraCapture.open()
+                            "blazecam" -> if (!com.blaze.assistant.device.BlazeCamera.open(ctx, null, com.blaze.assistant.device.CameraModes.Origin.CHAT_PLUS, Agent.chatId.value))
+                                Toast.makeText(ctx, "Blaze Camera couldn't open on this phone. Pick a photo instead.", Toast.LENGTH_SHORT).show() else Unit
                             "photos" -> photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             "files" -> files.launch(arrayOf("image/*", "application/pdf", "text/*"))
                             "atfile" -> { val t = input.text.let { if (it.isEmpty() || it.endsWith(" ")) it else "$it " } + "@"; input = TextFieldValue(t, TextRange(t.length)) }

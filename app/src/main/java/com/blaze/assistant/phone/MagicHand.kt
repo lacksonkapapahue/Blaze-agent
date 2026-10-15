@@ -496,6 +496,12 @@ object MagicHand {
                 } else set { MagicHandState.review(it, teachLines(), MagicHandTeach.toWorkflow(steps, "", "").name) }
             }
             DockButton.DROP_CHAT -> dropInChat()
+            DockButton.CAMERA -> {
+                // The hand would sit over the shutter: close it, then open Blaze Camera (last mode used).
+                val c = svc?.applicationContext
+                stop()
+                if (c != null) com.blaze.assistant.device.BlazeCamera.open(c, null, com.blaze.assistant.device.CameraModes.Origin.MAGIC_HAND)
+            }
         }
     }
 

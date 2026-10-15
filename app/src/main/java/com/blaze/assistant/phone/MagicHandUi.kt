@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Forum
@@ -234,11 +235,11 @@ private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar
             buttons.forEach { b ->
                 Spacer(Modifier.width(4.dp))
                 // With four buttons (carrying adds Drop in chat) the toggle drops its word so the title keeps one line.
-                if (b == DockButton.GRAB) { GrabToggle(u.grabMode, withLabel = buttons.size <= 3) { calls.onButton(b) }; return@forEach }
+                if (b == DockButton.GRAB) { GrabToggle(u.grabMode, withLabel = buttons.count { it != DockButton.CAMERA } <= 3) { calls.onButton(b) }; return@forEach }
                 GlassIconButton(when (b) {
                     DockButton.GRAB -> Icons.Rounded.Gesture
                     DockButton.TEACH -> Icons.Rounded.School; DockButton.DONE -> Icons.Rounded.Check
-                    DockButton.DROP_CHAT -> Icons.Rounded.Forum; DockButton.CLOSE -> Icons.Rounded.Close
+                    DockButton.DROP_CHAT -> Icons.Rounded.Forum; DockButton.CAMERA -> Icons.Rounded.PhotoCamera; DockButton.CLOSE -> Icons.Rounded.Close
                 }, b.desc, size = 36.dp, bg = if (b == DockButton.DONE) Glass.blue else Glass.raised) { calls.onButton(b) }
             }
         }

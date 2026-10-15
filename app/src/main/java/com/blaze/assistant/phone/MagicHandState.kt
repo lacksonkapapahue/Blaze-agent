@@ -169,13 +169,15 @@ object MagicHandState {
     fun endTeach(u: Ui, note: String): Ui = u.copy(mode = MagicHandLogic.Mode.POINT, panel = Panel.STATUS, teachSteps = emptyList(), teachName = "", note = note)
 
     /** Dock header buttons for the current state (pure, tested). Close is always last and always there. */
-    enum class DockButton(val desc: String) { GRAB("Grab: circle or drag over text"), TEACH("Teach Blaze a task"), DONE("Done teaching"), DROP_CHAT("Drop in chat"), CLOSE("Close Magic Hand") }
+    enum class DockButton(val desc: String) { GRAB("Grab: circle or drag over text"), TEACH("Teach Blaze a task"), DONE("Done teaching"), DROP_CHAT("Drop in chat"), CAMERA("Open Blaze Camera"), CLOSE("Close Magic Hand") }
     fun dockButtons(u: Ui): List<DockButton> = buildList {
         // v0.27.0: Grab is a visible button now, not only a hidden circle gesture.
         if (u.mode == MagicHandLogic.Mode.POINT && MagicHandGuard.canGrab(u.private) && u.panel != Panel.TEACH_INTRO && u.panel != Panel.TEACH_REVIEW) add(DockButton.GRAB)
         if (u.mode == MagicHandLogic.Mode.TEACH) { if (u.panel == Panel.TEACH) add(DockButton.DONE) }
         else if (!u.private && u.panel != Panel.TEACH_INTRO) add(DockButton.TEACH)
         if (u.carrying && !u.private && u.mode == MagicHandLogic.Mode.POINT) add(DockButton.DROP_CHAT)
+        // v0.28.x: Blaze Camera from the hand (not in Private, where nothing is captured, and not mid-teach).
+        if (!u.private && u.mode == MagicHandLogic.Mode.POINT && u.panel != Panel.TEACH_INTRO && u.panel != Panel.TEACH_REVIEW) add(DockButton.CAMERA)
         add(DockButton.CLOSE)
     }
 

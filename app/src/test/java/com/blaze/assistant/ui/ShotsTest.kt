@@ -986,4 +986,31 @@ class ShotsTest {
                 "[Blaze-cli](https://github.com/lacksonkapapahue/Blaze-cli).", GroupPos.SINGLE)
         }
     }
+
+    // ---------- v0.28.x Blaze Camera (fake preview: CameraX can't run in Robolectric) ----------
+    @Composable private fun FakePreview() {
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+            listOf(androidx.compose.ui.graphics.Color(0xFF3B4A5A), androidx.compose.ui.graphics.Color(0xFF8A7B63), androidx.compose.ui.graphics.Color(0xFF2E2A26))))) {
+            Box(Modifier.align(Alignment.Center).size(170.dp, 120.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                .background(androidx.compose.ui.graphics.Color(0xFFEDE6D6)))
+        }
+    }
+    // The mode bar (Ask selected), flash and flip shown.
+    @Test fun blazeCameraModes() = shot("80-blaze-camera-modes") {
+        CameraChrome(preview = { FakePreview() }, modes = com.blaze.assistant.device.CameraModes.bar,
+            mode = com.blaze.assistant.device.CameraModes.Mode.ASK, flash = "auto", canFlip = true, busy = false,
+            onClose = {}, onFlash = {}, onFlip = {}, onShutter = {})
+    }
+    // Scan mode on a single-camera, no-flash phone: no shutter, no flip, no flash, the code frame.
+    @Test fun blazeCameraScan() = shot("81-blaze-camera-scan", dark = true) {
+        CameraChrome(preview = { FakePreview() }, modes = com.blaze.assistant.device.CameraModes.bar,
+            mode = com.blaze.assistant.device.CameraModes.Mode.SCAN, flash = null, canFlip = false, busy = false,
+            onClose = {}, onFlash = {}, onFlip = {}, onShutter = {})
+    }
+    // + → Camera fallback when the phone's camera app can't be used: a plain camera, no mode bar.
+    @Test fun blazeCameraPlain() = shot("82-blaze-camera-plain") {
+        CameraChrome(preview = { FakePreview() }, modes = emptyList(),
+            mode = com.blaze.assistant.device.CameraModes.Mode.PHOTO, flash = "off", canFlip = true, busy = false,
+            onClose = {}, onFlash = {}, onFlip = {}, onShutter = {})
+    }
 }
