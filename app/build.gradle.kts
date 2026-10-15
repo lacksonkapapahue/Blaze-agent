@@ -58,6 +58,13 @@ android {
             it.systemProperty("robolectric.graphicsMode", "NATIVE")
             // The compose test rule needs ui-test-manifest, which only the debug build has.
             if (it.name.contains("Release")) it.exclude("**/ShotsTest*")
+            // A failing test prints its real message and causes in the CI log (not just "SQLException at Foo.kt:143").
+            it.testLogging {
+                events("failed")
+                exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+                showCauses = true
+                showStackTraces = true
+            }
         }
     }
 }
