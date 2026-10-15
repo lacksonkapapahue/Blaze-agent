@@ -169,7 +169,7 @@ object Projects {
     fun get(id: String): Project? = _all.value.firstOrNull { it.id == id }
 
     /** The pinned project block for the system prompt (v0.28.5: within [PIN_TOKENS] + a header and one lookup line). */
-    fun promptLine(chatId: String): String = pinned(of(chatId) ?: return "")
+    fun promptLine(chatId: String): String { val p = of(chatId) ?: return ""; return pinned(p) }
 
     const val LOOKUP_LINE = "Full instructions, full brief and older notes for this project are searchable: project_docs_search(query), then project_docs_read(id). Search them before asking the user for project details."
 
