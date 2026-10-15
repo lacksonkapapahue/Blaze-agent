@@ -389,6 +389,7 @@ object BrowserEngine {
     /** Host of the page in the current tab ("" when none). */
     fun host(): String = tab()?.url?.let { SecureInput.hostOf(it) }.orEmpty()
     fun url(): String = tab()?.url.orEmpty()
+    fun url(): String = tab()?.url.orEmpty()
 
     /** True when the current page says this account can't use a password. */
     suspend fun passwordRefused(): String? {
@@ -404,6 +405,7 @@ object BrowserEngine {
      */
     suspend fun fillSecret(f: SecureInput.Field, value: String): Boolean {
         val t = withContext(Dispatchers.Main) { tab() } ?: return false
+        if (!com.blaze.assistant.connect.UrlSafety.autofillAllowed(t.url)) return false   // v0.28.2: never on plain http (LAN excepted)
         val sel = f.target.toIntOrNull()?.let { "document.querySelector('[data-bz=\"$it\"]')" }
             ?: f.target.takeIf { it.isNotBlank() }?.let { "bzFind(${JSONObject.quote(it)}, true)" }
             ?: "bzFirst(${JSONObject.quote(SecureInput.autoSelector(f.kind))})"
@@ -432,6 +434,13 @@ object BrowserEngine {
         return "Submitted. Now on: ${t.title.take(80)} (${t.url})" + notesNow(t)
     }
 
+    /** v0.28.2: what [click] would press (its words), without pressing it; "" when not found. */
+    suspend fun labelOf(n: Int?, text: String?): String {
+        val t = withContext(Dispatchers.Main) { tab() } ?: return ""
+        val sel = if (n != null && n >= 0) "document.querySelector('[data-bz=\"$n\"]')" else "bzFind(${JSONObject.quote(text.orEmpty())})"
+        return (js(t, "(function(){$FIND_JS var e=$sel; if(!e) return ''; return (e.innerText||e.value||e.getAttribute('aria-label')||'').slice(0,80);})()") as? String).orEmpty()
+    }
+
     suspend fun click(ctx: Context, n: Int?, text: String?): String {
         val t = withContext(Dispatchers.Main) { tab() } ?: return "No page open."
         val sel = if (n != null && n >= 0) "document.querySelector('[data-bz=\"$n\"]')" else "bzFind(${JSONObject.quote(text.orEmpty())})"
@@ -446,6 +455,7 @@ object BrowserEngine {
         val t = withContext(Dispatchers.Main) { tab() } ?: return "No page open."
         // {{secret:name}} placeholders: swapped for the real value here, at the last moment; the model only ever saw the placeholder.
         val secret = SecureInput.hasPlaceholder(text0)
+        if (secret && !com.blaze.assistant.connect.UrlSafety.autofillAllowed(t.url)) return com.blaze.assistant.connect.UrlSafety.AUTOFILL_REFUSED
         val text = if (!secret) text0 else SecureInput.resolve(text0, SecureInput.hostOf(t.url)).let { (v, missing) ->
             v ?: return "No value for ${missing.joinToString { SecureInput.placeholder(it) }} yet. Ask the user with browser_secure_input (it shows a secure form in the chat)." }
         val sel = if (n != null && n >= 0) "document.querySelector('[data-bz=\"$n\"]')"

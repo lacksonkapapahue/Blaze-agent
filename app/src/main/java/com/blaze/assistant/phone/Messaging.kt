@@ -28,7 +28,10 @@ object Messaging {
 
     private fun appLabel(a: String) = when (a) { "sms" -> "Messages"; "telegram" -> "Telegram"; "whatsapp" -> "WhatsApp"; else -> "" }
 
-    /** [always]: the confirm card shows whatever the standing permissions or Autopilot say (sends asked for by the PC). [from]: who drafted it, shown on the card. */
+    /**
+     * [always]: kept for callers; since v0.28.2 every send in the user's name shows the confirm card whatever the
+     * standing permissions or Autopilot say. [from]: who drafted it, shown on the card.
+     */
     suspend fun run(ctx: Context, a: JSONObject, always: Boolean = false, from: String = ""): String {
         val by = if (from.isBlank()) "" else "Drafted on $from. "
         val to = a.optString("to").trim(); val text = a.optString("text").trim()
@@ -38,7 +41,7 @@ object Messaging {
         // 1) Live notification from them: reply in the background.
         val live = NotificationBrain.replyable(to, appLabel(app).ifBlank { null })
         if (live != null) {
-            if (!Agent.confirm("Reply to ${live.title}?", "$by\u201c$text\u201d (in ${live.app})", "Send", always)) return "The user declined. Nothing was sent."
+            if (!Agent.confirm("Reply to ${live.title}?", "$by\u201c$text\u201d (in ${live.app})", "Send", always = true)) return "The user declined. Nothing was sent."
             if (NotificationBrain.sendReply(ctx, live, text)) return "Sent to ${live.title} in ${live.app}, in the background."
         }
 
@@ -49,7 +52,7 @@ object Messaging {
         val contact = Skills.resolve(ctx, to) ?: return "I couldn't find one contact called \u201c$to\u201d. Give the number, or the full name as saved."
         val number = international(ctx, contact.second)
         val label = if (app == "telegram") "Telegram" else "WhatsApp"
-        if (!Agent.confirm("Message ${contact.first} on $label?", "$by\u201c$text\u201d", "Send", always)) return "The user declined. Nothing was sent."
+        if (!Agent.confirm("Message ${contact.first} on $label?", "$by\u201c$text\u201d", "Send", always = true)) return "The user declined. Nothing was sent."
         val intent = if (app == "telegram") Intent(Intent.ACTION_VIEW, Uri.parse("tg://msg?to=+$number&text=" + Uri.encode(text)))
             else Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$number&text=" + Uri.encode(text)))
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

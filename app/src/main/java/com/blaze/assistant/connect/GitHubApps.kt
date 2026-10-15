@@ -40,7 +40,7 @@ object GitHubApps {
         val name = a.optString("name").trim().replace(Regex("[^A-Za-z0-9._-]+"), "-").trim('-')
         if (name.isBlank()) return "Give the repo a name."
         val public = a.optBoolean("public", false)
-        if (!Agent.confirm("Create a ${if (public) "public" else "private"} GitHub repo \u201c$name\u201d?", a.optString("description"), "Create")) return "The user declined."
+        if (!Agent.confirm("Create a ${if (public) "public" else "private"} GitHub repo \u201c$name\u201d?", a.optString("description"), "Create", always = true)) return "The user declined."
         val (c, b) = Http.req("POST", "$API/user/repos", JSONObject().put("name", name).put("description", a.optString("description"))
             .put("private", !public).put("auto_init", false).toString(), h(t))
         if (c == 422 && b.contains("already exists")) return "A repo called $name already exists on this account. Pick another name, or clone that one if it's the same project."
@@ -114,6 +114,9 @@ object GitHubApps {
         val assets = rel.optJSONArray("assets") ?: JSONArray()
         val asset = (0 until assets.length()).map { assets.getJSONObject(it) }.firstOrNull { it.optString("name").endsWith(".apk") }
             ?: return "The latest release (${rel.optString("tag_name")}) has no .apk file."
+        // v0.28.2: installing an app always asks first (Android's installer asks again).
+        if (!Agent.confirm("Install ${repo.substringAfter('/')} ${rel.optString("tag_name")}?", "Download ${asset.optString("name")} from github.com/$repo and open Android's installer.", "Install", always = true))
+            return "The user declined. Nothing was downloaded or installed."
         val dir = File(com.blaze.assistant.terminal.Terminal.home(), "apps").apply { mkdirs() }
         val out = File(dir, repo.substringAfter('/') + ".apk")
         // The asset API redirects to a signed download URL that must not get the token.

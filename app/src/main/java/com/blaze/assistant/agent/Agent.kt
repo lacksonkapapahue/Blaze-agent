@@ -128,14 +128,20 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
      * Ask the user to approve something risky. Shows a card in the chat and the orb panel,
      * plus a notification with Allow / Don't when Blaze isn't on screen. Times out as "no".
      */
-    suspend fun confirm(title0: String, detail: String, action: String, always: Boolean = false): Boolean {
+    suspend fun confirm(title0: String, detail0: String, action: String, always: Boolean = false): Boolean {
         val tag = kotlin.coroutines.coroutineContext[BgAgents.Tag]
         val title = if (tag != null) "${tag.id} · $title0" else title0
-        // [always] (v0.17.0, sends the PC asked for): the card is shown even with a standing OK or Autopilot.
-        if (!always && Autonomy.preApproved(title0, detail)) { cur.note("Standing OK: $title", false); return true }
-        // Autopilot: the user is away, so ordinary confirms pass. Destructive ones (delete, money,
-        // messages and calls in their name) still wait for their tap.
-        if (!always && Modes.autopilot && !Modes.destructive(title0, detail)) { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
+        // v0.28.2 (ConfirmGate): [always] = outbound in the user's name (texts, calls, messages, email, posts, money,
+        // deletes, installs, phone settings): the card always shows. A turn that read untrusted content (web, messages,
+        // notifications, the screen, shared files…) also loses standing OKs and Autopilot for destructive actions.
+        val source = kotlin.coroutines.coroutineContext[ConfirmGate.Taint]?.source
+        when (ConfirmGate.decide(always, Modes.destructive(title0, detail0), !always && Autonomy.preApproved(title0, detail0), Modes.autopilot, source != null)) {
+            ConfirmGate.Decision.STANDING_OK -> { cur.note("Standing OK: $title", false); return true }
+            // Autopilot: the user is away, so ordinary confirms pass. Destructive ones still wait for their tap.
+            ConfirmGate.Decision.AUTOPILOT_OK -> { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
+            ConfirmGate.Decision.SHOW -> { }
+        }
+        val detail = ConfirmGate.detail(detail0, source)
         val d = kotlinx.coroutines.CompletableDeferred<Boolean>()
         tag?.let { BgAgents.setWaiting(it.id, true) }
         _confirm.value = PendingConfirm(title, detail, action, d)
@@ -337,7 +343,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Retry the newest answer. */
     fun retryLast() { cur.msgs.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.let { retry(it.id) } }
 
-    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
+    /** [untrusted]: where outside content in [text] came from (Magic Hand's screen text), see ConfirmGate. */
+    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), untrusted: String? = null) {
         // "Shut down", "stop", "be quiet"… are handled on-device, even mid-task.
         val self = if (attachments.isEmpty()) SelfControl.match(text) else null
         if (self != null) {
@@ -353,7 +360,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         }
         // Typing or speaking while Blaze waits on a question answers it.
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
-        cur.send(text, byVoice, attachments)
+        cur.send(text, byVoice, attachments, untrusted = untrusted)
     }
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
@@ -847,6 +854,8 @@ When you finish, say what you did in one short sentence.
         var ctxTag: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext
         /** Instructions the user (or the lead) sent while this chat works; read at the next step. */
         val steer = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        /** v0.28.2: what untrusted content this turn has read (ConfirmGate); rides in the turn's coroutine context. */
+        val taint = ConfirmGate.Taint()
         /** Agent results waiting for the turn in progress to end. */
         val wakes = java.util.concurrent.ConcurrentLinkedQueue<String>()
         /** Speed plan step 11: text of the current step already handed to TTS while it streamed. */
@@ -1065,8 +1074,12 @@ When you finish, say what you did in one short sentence.
             persist()
         }
 
-        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), notificationContext: String? = null) {
+        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), notificationContext: String? = null,
+                 untrusted: String? = null) {
             if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
+            // v0.28.2: a new turn starts clean; what came with the message (a shared file, Magic Hand's screen text) counts as read.
+            taint.clear()
+            taint.mark(untrusted ?: if (attachments.isNotEmpty()) ConfirmGate.SHARED_FILE else null)
             Voice.lastTurnByVoice = byVoice
             val shown = text.trim().ifEmpty { "Take a look at this." }
             LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
@@ -1109,7 +1122,7 @@ When you finish, say what you did in one short sentence.
                     if (step.isNotBlank() && step != said && Voice.state.value == Voice.State.IDLE) { said = step; Voice.say(step) }
                 }
             }
-            job = scope.launch(ctxTag) {
+            job = scope.launch(ctxTag + taint) {
                 // v0.27.x: "show me your memories" / "what do you know about me" is answered straight from the memory table:
                 // grouped, with how to change or delete a line. No model call, no tool loop, no Design.
                 if (attachments.isEmpty() && !routine && agentId == null && notificationContext.isNullOrBlank() && MemoryIntent.isListRequest(shown)) {
@@ -1130,7 +1143,7 @@ When you finish, say what you did in one short sentence.
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
                 if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
                     mood = Mood.THINKING
-                    val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                    val fast = try { kotlinx.coroutines.withContext(ConfirmGate.Direct) { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
                     val pic = if (fast == null && !offline && !Settings.lowData) com.blaze.assistant.media.Media.directPrompt(shown) else null
                     if (pic != null) {
@@ -1181,7 +1194,7 @@ When you finish, say what you did in one short sentence.
             list.drop(userIdx + 1).forEach { historyMark.remove(it.id) }
             msgs = list.take(userIdx + 1)
             Voice.lastTurnByVoice = false
-            job = scope.launch(ctxTag) { runLoop() }
+            job = scope.launch(ctxTag + taint) { runLoop() }
         }
 
         /**
@@ -1191,9 +1204,10 @@ When you finish, say what you did in one short sentence.
         fun wake(text: String) {
             if (job?.isActive == true) { wakes.add(text); return }
             history.put(JSONObject().put("role", "user").put("content", text))
+            taint.clear(); taint.mark(ConfirmGate.AGENT_REPORT)
             mood = Mood.THINKING
             Voice.lastTurnByVoice = false
-            job = scope.launch(ctxTag) { runLoop() }
+            job = scope.launch(ctxTag + taint) { runLoop() }
         }
 
         /** Only the newest screenshot is sent as an image; older ones become a note. */
@@ -1916,6 +1930,9 @@ When you finish, say what you did in one short sentence.
             val V = com.blaze.assistant.browser.Vault
             val host = kotlinx.coroutines.withContext(Dispatchers.Main) { B.host() }
             if (host.isBlank()) return "No page is open in Blaze's browser. Open the sign-in page with browser_open first, then call this again."
+            // v0.28.2: no secure form or saved login on a plain-http page (except this phone / the LAN).
+            val pageUrl = kotlinx.coroutines.withContext(Dispatchers.Main) { B.url() }
+            if (!com.blaze.assistant.connect.UrlSafety.autofillAllowed(pageUrl)) return com.blaze.assistant.connect.UrlSafety.AUTOFILL_REFUSED
             val fields = S.parseFields(args.optJSONArray("fields"))
             if (fields.isEmpty()) return "Error: give fields, e.g. [{\"name\":\"email\",\"kind\":\"email\"},{\"name\":\"password\",\"kind\":\"password\"}]."
             if (fields.any { S.isCardField(it) }) return "Card details are never collected in the chat. Show the live browser with browser_show so the user types them on the page, or stop before paying."
@@ -1960,6 +1977,8 @@ When you finish, say what you did in one short sentence.
             val r = try { runToolRaw(name, args, shots) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
+            // v0.28.2: outside content is now in the context: later sends / deletes this turn always ask (ConfirmGate).
+            ConfirmGate.sourceOf(name)?.let { taint.mark(it) }
             if (name in Orient.looking && !r.startsWith("Phone control")) com.blaze.assistant.phone.BlazeAccessibilityService.instance?.let { orient.saw(it.currentPkg()) }
             return if (r.isBlank()) ToolGuide.empty(name) else glance + r
         }
@@ -2114,7 +2133,7 @@ When you finish, say what you did in one short sentence.
                         }
                         "save" -> M.find(args.optString("path"))?.let { add(Role.STEP, "Saving ${it.name} to your phone"); M.saveToPhone(it) } ?: "Not in the gallery: ${args.optString("path")}. Call gallery list."
                         "share" -> M.find(args.optString("path"))?.let { app.startActivity(M.shareIntent(it)); "Opened the share sheet for ${it.name}." } ?: "Not in the gallery."
-                        "delete" -> M.find(args.optString("path"))?.let { f -> if (confirm("Delete from Gallery?", f.name, "Delete")) { M.delete(f); "Deleted ${f.name}." } else "The user did NOT approve deleting it." } ?: "Not in the gallery."
+                        "delete" -> M.find(args.optString("path"))?.let { f -> if (confirm("Delete from Gallery?", f.name, "Delete", always = true)) { M.delete(f); "Deleted ${f.name}." } else "The user did NOT approve deleting it." } ?: "Not in the gallery."
                         else -> M.list()
                     }
                 }
@@ -2179,7 +2198,7 @@ When you finish, say what you did in one short sentence.
                 "run_ussd" -> {
                     val code = args.optString("code")
                     add(Role.STEP, "Dialling $code")
-                    if (com.blaze.assistant.phone.Ussd.risky(code) && !confirm("Dial $code?", "This looks like a mobile money or multi-step code.", "Dial"))
+                    if (com.blaze.assistant.phone.Ussd.risky(code) && !confirm("Dial $code?", "This looks like a mobile money or multi-step code.", "Dial", always = true))
                         "The user did NOT approve dialling $code."
                     else com.blaze.assistant.phone.Ussd.run(app, code)
                 }
@@ -2192,14 +2211,14 @@ When you finish, say what you did in one short sentence.
                         "download_file" -> "Downloading ${args.optString("url").substringAfterLast('/').take(50)}"
                         else -> name.replace('_', ' ')
                     })
-                    if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete")) "The user did NOT approve deleting that."
+                    if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete", always = true)) "The user did NOT approve deleting that."
                     else if (name == "run_code") withMediaScan { com.blaze.assistant.terminal.DevTools.run(app, name, args) }
                     else com.blaze.assistant.terminal.DevTools.run(app, name, args)
                 }
                 in com.blaze.assistant.phone.PimEdit.names -> {
                     val (title, detail) = com.blaze.assistant.phone.PimEdit.describe(name, args)
                     add(Role.STEP, title.removeSuffix("?"))
-                    if (!confirm(title, detail.take(200), if (name == "delete_event") "Delete" else "Save")) "The user did NOT approve that change."
+                    if (!confirm(title, detail.take(200), if (name == "delete_event") "Delete" else "Save", always = name.startsWith("delete"))) "The user did NOT approve that change."
                     else kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.phone.PimEdit.run(app, name, args) }
                 }
                 com.blaze.assistant.terminal.Git.NAME -> {
@@ -2343,7 +2362,7 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, PhoneTools.describe(name, args))
                     val label = args.optString("text").ifBlank { svc?.labelOf(args.optInt("element")).orEmpty() }
                     if (Settings.confirmRisky && risky.containsMatchIn(label) &&
-                        !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap"))
+                        !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap", always = true))
                         "The user did NOT approve tapping \"$label\". Don't retry; tell them it's ready for them to finish."
                     else PhoneTools.run(app, name, args)
                 }
@@ -2418,7 +2437,7 @@ When you finish, say what you did in one short sentence.
                             else {
                                 val label = svc.labelOf(id)
                                 if (Settings.confirmRisky && risky.containsMatchIn(label) &&
-                                    !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc.currentApp() ?: "the app"}.", "Tap"))
+                                    !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc.currentApp() ?: "the app"}.", "Tap", always = true))
                                     return "The user did NOT approve tapping \"$label\" (step ${i + 1}). Don't retry; tell them it's ready for them to finish."
                                 svc.flash(id)
                                 val r = svc.tap(id, st.optString("do") == "long_press")

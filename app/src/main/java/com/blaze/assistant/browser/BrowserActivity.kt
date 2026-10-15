@@ -241,9 +241,12 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
             Row(Modifier.weight(1f).height(42.dp).clip(Glass.pill).background(if (priv) Color(0xFF2A2433) else Glass.raised)
                 .border(1.dp, if (editing) Glass.blue.copy(alpha = 0.7f) else Glass.border, Glass.pill)
                 .padding(start = 12.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(when { priv -> Icons.Rounded.VisibilityOff; tab?.url.orEmpty().startsWith("https") -> Icons.Rounded.Lock; else -> Icons.Rounded.Search },
-                    null, tint = Glass.weak, modifier = Modifier.size(16.dp))
+                // v0.28.2: a plain-http page says "Not secure" (secure forms and saved logins won't fill it unless it's on the LAN).
+                val insecure = com.blaze.assistant.connect.UrlSafety.notSecure(tab?.url.orEmpty())
+                Icon(when { priv -> Icons.Rounded.VisibilityOff; insecure -> Icons.Rounded.ErrorOutline; tab?.url.orEmpty().startsWith("https") -> Icons.Rounded.Lock; else -> Icons.Rounded.Search },
+                    if (insecure) "Not secure" else null, tint = if (insecure) Glass.orange else Glass.weak, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(8.dp))
+                if (insecure && !editing) { Text("Not secure", Glass.orange, 12, maxLines = 1); Spacer(Modifier.width(6.dp)) }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                     if (bar.isEmpty()) Text(if (priv) "Private: search or type a web address" else "Search or type a web address", Glass.weak, 14, maxLines = 1)
                     BasicTextField(bar, { bar = it }, singleLine = true, cursorBrush = SolidColor(Glass.blue),

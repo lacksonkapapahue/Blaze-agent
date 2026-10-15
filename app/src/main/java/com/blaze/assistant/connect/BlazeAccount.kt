@@ -108,7 +108,8 @@ object BlazeAccount {
     // ---------------- HTTP ----------------
 
     private fun call(method: String, path: String, bearer: String = "", body: JSONObject? = null): JSONObject {
-        val c = try { URL(base() + path).openConnection() as HttpURLConnection } catch (e: Exception) { throw Unreachable(e) }
+        UrlSafety.check(base() + path)   // v0.28.2: a self-hosted account server on http:// must be on the LAN
+        val c = try { UrlSafety.open(base() + path) } catch (e: Exception) { throw Unreachable(e) }
         try {
             c.requestMethod = method
             c.connectTimeout = 15_000; c.readTimeout = 30_000

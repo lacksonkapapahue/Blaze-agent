@@ -273,7 +273,7 @@ object ProviderCatalog {
     }
 
     private fun get(url: String, headers: Map<String, String>): String {
-        val c = URL(url).openConnection() as HttpURLConnection
+        val c = com.blaze.assistant.connect.UrlSafety.open(url)
         c.connectTimeout = 10_000; c.readTimeout = 20_000
         headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
         val code = c.responseCode
