@@ -199,6 +199,21 @@ class ShotsTest {
         SelectionPill(androidx.compose.ui.geometry.Rect(60f, 700f, 420f, 760f), SelectionActions.forUnknown(likelyShort = true),
             ink = LocalBlaze.current.ink, paper = LocalBlaze.current.paper, nudge = false) { }
     }
+    // v0.28.0: My voice setup (download in progress, recording with the level meter) and a finished test.
+    @Test fun myVoiceSetup() = shot("63-my-voice-setup") {
+        androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 20.dp)) {
+            MyVoiceCard(MyVoiceUi(chosen = false, pack = com.blaze.assistant.voice.myvoice.VoicePack.State.Working(
+                com.blaze.assistant.voice.myvoice.VoicePack.Step.MODEL, 41_000_000, 98_336_520), metered = true, downloadMb = 107,
+                recording = true, seconds = 7.4f, level = 0.62f), setupOpen = true)
+        }
+    }
+    @Test fun myVoiceTested() = shot("64-my-voice-tested", dark = true) {
+        androidx.compose.foundation.layout.Column(Modifier.padding(horizontal = 20.dp)) {
+            MyVoiceCard(MyVoiceUi(chosen = false, pack = com.blaze.assistant.voice.myvoice.VoicePack.State.Ready, metered = false, downloadMb = 107,
+                recorded = com.blaze.assistant.voice.myvoice.AudioClip.Prepared(FloatArray(240_000), 24_000, 9.1f, com.blaze.assistant.voice.myvoice.AudioClip.Verdict.OK),
+                test = com.blaze.assistant.voice.myvoice.MyVoice.TestResult(true, 1.4f, 6_200, 4.4f, 9_000), message = "Sounds good."), setupOpen = true)
+        }
+    }
     @Test fun selectionPillDark() = shot("62-selection-pill-dark", dark = true) {
         Chat(busy = false)
         SelectionPill(androidx.compose.ui.geometry.Rect(60f, 700f, 420f, 760f), SelectionActions.forUnknown(likelyShort = false),

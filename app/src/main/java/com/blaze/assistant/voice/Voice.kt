@@ -10,8 +10,15 @@ import android.speech.tts.TextToSpeech
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
+import com.blaze.assistant.voice.myvoice.MyVoice
+import com.blaze.assistant.voice.myvoice.VoiceRoute
 
-/** Speech in (Android's recognizer) and speech out (TextToSpeech). Main thread only. */
+/**
+ * Speech in (Android's recognizer) and speech out. Main thread only.
+ * v0.28.0: speech out goes through one route ([out]): the phone's TextToSpeech, or "My voice" (the user's own voice,
+ * cloned on the phone by [MyVoice]) when they chose it. Every caller (voice replies, calls, Read aloud, proactive
+ * notices) still just calls speak / speakPart / say, so all of Blaze's speech follows the choice.
+ */
 object Voice {
     enum class State { IDLE, LISTENING, SPEAKING }
 
@@ -45,33 +52,68 @@ object Voice {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    fun ttsOk() = ttsReady
+    /** Something can speak: the phone's TTS, or My voice. */
+    fun ttsOk() = ttsReady || MyVoice.route().first == VoiceRoute.Route.MINE
 
     fun init(ctx: Context) {
         app = ctx.applicationContext
+        MyVoice.init(app)
+        MyVoice.events = object : MyVoice.Events {
+            override fun started(id: String) = utteranceStarted()
+            override fun done(id: String) = utteranceDone(id)
+            override fun handoff(text: String, id: String) {
+                if (!ttsReady) { utteranceDone(id); return }
+                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, id)
+            }
+        }
         tts = TextToSpeech(app) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
             if (ttsReady) {
                 tts?.language = Locale.getDefault()
                 applyPrefs()
                 tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                    override fun onStart(id: String?) { _state.value = State.SPEAKING }
-                    override fun onDone(id: String?) {
-                        // A streamed sentence finished: the rest of the reply is still coming, so keep the mic paused.
-                        if (id?.startsWith("part-") == true) { if (tts?.isSpeaking != true) _state.value = State.IDLE; return }
-                        _state.value = State.IDLE
-                        // Hands-free: after answering a spoken question, listen again for the follow-up.
-                        if (id?.startsWith("end-") == true && inCall) { callEnded.value = callEnded.value + 1; return }
-                        if (inCall && !callMuted && id?.startsWith("blaze-") == true) {
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (inCall && !callMuted) conversationListen() }, 250)
-                        } else if (com.blaze.assistant.agent.Settings.bool("voice_loop", true) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
-                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 200)
-                        } else WakeWordService.resume(app)
-                    }
+                    override fun onStart(id: String?) = utteranceStarted()
+                    override fun onDone(id: String?) = utteranceDone(id)
                     @Deprecated("old api") override fun onError(id: String?) { _state.value = State.IDLE; WakeWordService.resume(app) }
                 })
             }
         }
+    }
+
+    private fun utteranceStarted() { _state.value = State.SPEAKING }
+
+    /** Shared by the phone's TTS and My voice: what happens when an utterance finishes playing. */
+    private fun utteranceDone(id: String?) {
+        // A streamed sentence finished: the rest of the reply is still coming, so keep the mic paused.
+        if (id?.startsWith("part-") == true) { if (!speakingNow()) _state.value = State.IDLE; return }
+        _state.value = State.IDLE
+        // Hands-free: after answering a spoken question, listen again for the follow-up.
+        if (id?.startsWith("end-") == true && inCall) { callEnded.value = callEnded.value + 1; return }
+        if (inCall && !callMuted && id?.startsWith("blaze-") == true) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (inCall && !callMuted) conversationListen() }, 250)
+        } else if (com.blaze.assistant.agent.Settings.bool("voice_loop", true) && lastTurnByVoice && id?.startsWith("blaze-") == true) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ conversationListen() }, 200)
+        } else WakeWordService.resume(app)
+    }
+
+    private fun speakingNow() = tts?.isSpeaking == true || MyVoice.busy()
+
+    /**
+     * The one place speech goes out (VoiceOut). My voice when chosen and ready; otherwise the phone's TTS, and when
+     * My voice was chosen but can't speak (slow phone, model missing/failed) the user is told why, once.
+     */
+    private fun out(text: String, flush: Boolean, id: String): Boolean {
+        val (route, reason) = MyVoice.route()
+        if (route == VoiceRoute.Route.MINE) {
+            if (flush) tts?.stop()
+            MyVoice.speak(text, id, flush)
+            return true
+        }
+        if (MyVoice.chosen()) MyVoice.tellOnce(reason)
+        if (!ttsReady) return false
+        if (flush) MyVoice.stop()
+        tts?.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, id)
+        return true
     }
 
     fun available() = SpeechRecognizer.isRecognitionAvailable(app)
@@ -100,15 +142,14 @@ object Voice {
     }
 
     private fun speakEnd(text: String) {
-        if (!ttsReady) return
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "end-${System.currentTimeMillis()}")
+        out(text, true, "end-${System.currentTimeMillis()}")
     }
 
     /** Short spoken status for a voice turn (acknowledgement, progress). Never interrupts speech. */
     fun say(text: String) {
-        if (!ttsReady || tts?.isSpeaking == true || _state.value == State.LISTENING) return
+        if (!ttsOk() || speakingNow() || _state.value == State.LISTENING) return
         WakeWordService.pause(app)
-        tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "part-${System.currentTimeMillis()}")
+        out(text, false, "part-${System.currentTimeMillis()}")
     }
 
     /** Listen once. [onText] gets the final words (blank when nothing was heard). */
@@ -116,6 +157,7 @@ object Voice {
         stopSpeaking()
         cancelListening()
         if (!available()) { onError("Speech recognition isn't available on this phone."); return }
+        MyVoice.prewarm()   // a reply is coming: have My voice loaded by then (no-op when it isn't in use)
         WakeWordService.pause(app)  // only one app can hold the mic
         val r = SpeechRecognizer.createSpeechRecognizer(app)
         recognizer = r
@@ -165,19 +207,19 @@ object Voice {
     }
 
     fun speak(text: String, queue: Boolean = false) {
-        if (!ttsReady) return
+        if (!ttsOk()) return
         WakeWordService.pause(app)
         val clean = com.blaze.assistant.ui.Md.plain(text).replace(Regex("[*_`#>•]"), "").take(3900)
-        tts?.speak(clean, if (queue) TextToSpeech.QUEUE_ADD else TextToSpeech.QUEUE_FLUSH, null, "blaze-${System.currentTimeMillis()}")
+        out(clean, !queue, "blaze-${System.currentTimeMillis()}")
     }
 
     /** A sentence spoken while the reply is still streaming (queued; the final part follows via speak(queue = true)). */
     fun speakPart(text: String) {
-        if (!ttsReady) return
+        if (!ttsOk()) return
         WakeWordService.pause(app)
         val clean = com.blaze.assistant.ui.Md.plain(text).replace(Regex("[*_`#>•]"), "").trim().take(3900)
         if (clean.isBlank()) return
-        tts?.speak(clean, TextToSpeech.QUEUE_ADD, null, "part-${System.currentTimeMillis()}")
+        out(clean, false, "part-${System.currentTimeMillis()}")
     }
 
     /** Phone-call style: earpiece instead of loudspeaker. */
@@ -187,6 +229,7 @@ object Voice {
             val usage = if (on) android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION else android.media.AudioAttributes.USAGE_ASSISTANT
             tts?.setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(usage)
                 .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            MyVoice.setUsage(usage)
             am.mode = if (on) android.media.AudioManager.MODE_IN_COMMUNICATION else android.media.AudioManager.MODE_NORMAL
             @Suppress("DEPRECATION") am.isSpeakerphoneOn = !on
         } catch (_: Exception) { }
@@ -223,14 +266,17 @@ object Voice {
             .sortedWith(compareBy({ it.locale.language != lang }, { it.locale.displayName }, { it.isNetworkConnectionRequired }, { it.name }))
     } catch (_: Exception) { emptyList() }
 
+    /** "Hear it" in Settings → Voice: always the phone's voice (that's what those settings tune). */
     fun preview(text: String = "Hi Luke, this is how I sound.") {
         if (!ttsReady) return
         applyPrefs()
+        MyVoice.stop()
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "preview-${System.currentTimeMillis()}")
     }
 
     fun stopSpeaking() {
         tts?.stop()
+        MyVoice.stop()
         if (_state.value == State.SPEAKING) { _state.value = State.IDLE; WakeWordService.resume(app) }
     }
 }

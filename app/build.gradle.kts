@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 95
-        versionName = "0.27.3"
+        versionCode = 96
+        versionName = "0.28.0"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -92,6 +92,10 @@ dependencies {
     implementation("com.google.mlkit:text-recognition:16.0.1")   // v0.24.7 Magic Hand: circle to grab, on-device OCR (bundled model, no network)
     implementation("com.alphacephei:vosk-android:0.3.47") { exclude(group = "net.java.dev.jna") }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
+    // v0.28.0 My voice: bzip2 for the downloaded PocketTTS model archive (pure Java; R8 keeps only the bzip2 reader).
+    // The sherpa-onnx runtime itself is NOT a dependency: its Kotlin API is vendored (com.k2fsa.sherpa.onnx) and the
+    // native library is downloaded on demand, so the APK only grows by a few hundred KB.
+    implementation("org.apache.commons:commons-compress:1.21")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")   // the real org.json (android.jar only has stubs)
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")   // v0.26.3: blaze.db tests on a JVM SQLite with FTS5 (store/JdbcSql)
