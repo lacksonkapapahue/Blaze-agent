@@ -4,7 +4,8 @@ package com.blaze.assistant.ui
  * v0.24.9 rich replies (ChatGPT-style), pure part (RichRepliesTest): turns the Markdown of a Blaze reply into rich
  * blocks on top of [AnswerCards]: step-flow cards, a section image beside its text, image groups (up to 3 side by
  * side, 4 or more as a tilted deck you swipe through with a card flip) and inline diagrams drawn by free, keyless
- * renderers (mermaid.ink for Mermaid, kroki.io for Graphviz / PlantUML / D2). v0.26.1 adds interactive blocks
+ * renderers (mermaid.ink for Mermaid, kroki.io for Graphviz / PlantUML / D2; since v0.26.3 Mermaid is drawn on the phone first,
+ * see DiagramRender). v0.26.1 adds interactive blocks
  * (```chart, ```choices, ```form, ```tool, ```compare; parsed in [RichKit]) and a prompt that picks formats on its own.
  */
 object RichReplies {
@@ -18,7 +19,8 @@ object RichReplies {
         /** A section picture beside its paragraph (picture on the left). */
         data class ImageText(val img: Img, val md: String) : Block()
         data class Images(val imgs: List<Img>) : Block()
-        data class Diagram(val kind: String, val code: String, val url: String) : Block()
+        /** [url] is the web renderer (the fallback); [private] = a private chat: drawn on the phone only (v0.26.3). */
+        data class Diagram(val kind: String, val code: String, val url: String, val private: Boolean = false) : Block()
         // v0.26.1 visual answers (RichKit): interactive blocks drawn natively, offline (so they show in Private too).
         data class Chart(val chart: RichKit.Chart) : Block()
         data class Choices(val choices: RichKit.Choices) : Block()
@@ -75,7 +77,10 @@ object RichReplies {
 
     fun image(line: String): Img? = imgLine.matchEntire(line)?.let { Img(it.groupValues[2], it.groupValues[1].trim()) }
 
-    /** Splits AnswerCards' segments into rich blocks. Code blocks in a diagram language become diagrams (not in Private). */
+    /**
+     * Splits AnswerCards' segments into rich blocks. Code blocks in a diagram language become diagrams. v0.26.3: also in
+     * Private, since Mermaid is drawn on the phone (nothing leaves it); other kinds show a plain line there ([DiagramRender.plan]).
+     */
     fun expand(segs: List<AnswerCards.Seg>, private: Boolean = false): List<Block> = segs.flatMap { s ->
         when (s) {
             is AnswerCards.Seg.Text -> text(s.md)
@@ -83,9 +88,9 @@ object RichReplies {
             is AnswerCards.Seg.Code -> {
                 val lang = s.lang.trim().lowercase()
                 val kind = diagramLangs[lang]
-                if (kind != null && !private && s.code.isNotBlank()) {
+                if (kind != null && s.code.isNotBlank()) {
                     // v0.26.1: a diagram is drawn once its fence closes (no broken half-diagram fetches mid-stream).
-                    val d = Block.Diagram(kind, s.code, diagramUrl(kind, s.code))
+                    val d = Block.Diagram(kind, s.code, diagramUrl(kind, s.code), private)
                     listOf(if (open(s)) Block.Pending("diagram", s, d) else d)
                 }
                 else RichKit.LANGS[lang]?.let { listOf(interactive(it, s)) } ?: listOf(Block.Plain(s))
@@ -183,7 +188,7 @@ object RichReplies {
         return out
     }
 
-    // ---------- diagrams (free, keyless renderers) ----------
+    // ---------- diagrams: the web renderers (v0.26.3: the fallback; Mermaid is drawn on the phone first) ----------
     fun diagramUrl(kind: String, code: String): String = when (kind) {
         "mermaid" -> "https://mermaid.ink/img/" + b64url(code.trim().toByteArray()) + "?type=png&bgColor=!white"
         else -> "https://kroki.io/$kind/png/" + b64url(deflate(code.trim().toByteArray()))

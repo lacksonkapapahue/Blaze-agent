@@ -28,7 +28,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.phone.Watchers.init(this)
         com.blaze.assistant.agent.Autonomy.init(this)
         com.blaze.assistant.agent.Processes.init(this)
-        // One mind (v0.18.0): mind.db first; Memory is now a view of its memories table.
+        // One mind (v0.18.0): blaze.db first (mind.db until it is copied); Memory is now a view of its memories table.
         com.blaze.assistant.agent.Mind.init(this)
         com.blaze.assistant.agent.Memory.init(this)
         com.blaze.assistant.agent.Usage.init(this)

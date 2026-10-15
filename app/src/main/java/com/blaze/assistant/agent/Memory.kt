@@ -10,10 +10,10 @@ import org.json.JSONObject
 /**
  * Long-term facts Blaze keeps about the user, across chats.
  *
- * Since v0.18.0 (one mind) the memories table in mind.db is the source of truth and this object is a view of it:
+ * Since v0.18.0 (one mind) the memories table (blaze.db since v0.26.3, mind.db before) is the source of truth and this object is a view of it:
  * the Memory screen, remember / recall_memory / forget and the learning review all go through [Mind]. The old
  * prefs list ("memory") is imported once and then kept as a mirror of the table's lines, so a downgrade or a
- * backup export still carries every fact. If mind.db can't open, everything works on the old list as before.
+ * backup export still carries every fact. If the memory store can't open, everything works on the old list as before.
  */
 object Memory {
     private lateinit var prefs: SharedPreferences
@@ -121,7 +121,7 @@ object Memory {
 
     /**
      * Memory for the prompt. With one mind: the pinned core and the subject index only (everything else is looked
-     * up). Without mind.db: the old list (small memories whole, big ones only what fits the request).
+     * up). Without the memory store: the old list (small memories whole, big ones only what fits the request).
      */
     fun promptBlock(query: String = ""): String {
         if (Mind.ready) return Mind.promptBlock()

@@ -69,8 +69,10 @@ class RichRepliesTest {
         val raw = java.util.Base64.getUrlDecoder().decode(g.url.substringAfterLast('/'))
         val inf = java.util.zip.Inflater(); inf.setInput(raw); val out = ByteArray(200); val n = inf.inflate(out)
         assertEquals("digraph { a -> b }", String(out, 0, n))
-        // Private chat: nothing goes to a renderer; the code shows as code.
-        assertTrue(blocks("```mermaid\ngraph TD\nA-->B\n```", private = true).single() is Block.Plain)
+        // v0.26.3 private chat: still a diagram (drawn on the phone; DiagramRender.plan keeps it off the web renderers).
+        val p = blocks("```mermaid\ngraph TD\nA-->B\n```", private = true).single() as Block.Diagram
+        assertTrue(p.private)
+        assertEquals(listOf(DiagramRender.Source.LOCAL), DiagramRender.plan(p.kind, p.private))
         // Other code stays code.
         assertTrue(blocks("```kotlin\nval a = 1\n```").single() is Block.Plain)
     }

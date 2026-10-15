@@ -17,7 +17,9 @@ import org.json.JSONObject
  *  - The prompt carries only [MIND_RULE], the pinned core and the subject index ([promptBlock]); everything else is looked up.
  *  - Context ladder ([rung]): recent turns, then the rolling summary, then lookup (core + index + last [LOOKUP_TAIL] messages).
  *
- * Storage is filesDir/mind.db with Android's built-in SQLite and FTS4 (like longchat.db; FTS5 isn't on every Android).
+ * Storage (v0.26.3): filesDir/blaze.db, the same SQLite file format as Blaze Desktop and Blaze CLI (schema v1, FTS5) on a
+ * bundled modern SQLite ([MindStore], store/BlazeDb.kt). The old databases/mind.db (Android's SQLite, FTS4, [Db]) is
+ * backed up and copied over once, kept as it was, and used again only if blaze.db can't be opened.
  * The pure parts (dedupe, core, index, ladder, extraction parsing) are unit-tested on the JVM.
  */
 object Mind {
@@ -75,7 +77,7 @@ object Mind {
         return (x intersect y).size.toDouble() / (x union y).size
     }
 
-    private fun squash(s: String) = s.trim().split(Regex("\\s+")).joinToString(" ")
+    fun squash(s: String) = s.trim().split(Regex("\\s+")).joinToString(" ")
 
     /** One clean line; "(inferred)" added once when [inferred]. */
     fun clean(text: String, inferred: Boolean = false): String {
@@ -217,10 +219,49 @@ object Mind {
         }
     }
 
-    // ---------------- the database ----------------
+    // ---------------- the store ----------------
 
-    class Db(ctx: Context, name: String? = "mind.db") : SQLiteOpenHelper(ctx, name, null, 1) {
-        @Volatile var fts = true
+    /** What Mind keeps: memories, the journal and its logs, meta. [MindStore] (blaze.db) or the old [Db] (mind.db). */
+    interface Store {
+        val fts: Boolean
+        fun meta(key: String): String
+        fun setMeta(key: String, v: String)
+        /**
+         * Adds (or updates, after a retry) the turns of [conv]. Only the last stretch is re-checked each time, so a long
+         * main thread costs little. [full] re-checks every turn (the migration). Returns how many rows were added.
+         */
+        fun journal(conv: String, h: JSONArray, at: Long = System.currentTimeMillis() / 1000, full: Boolean = false): Int
+        fun unreviewedCount(): Int
+        fun unreviewed(limit: Int = 200): List<Turn>
+        fun markReviewed(ids: List<Long>)
+        fun turn(id: Long): Turn?
+        fun searchJournal(query: String, conv: String?, limit: Int): List<Hit>
+        fun all(): List<Mem>
+        fun mem(id: Long): Mem?
+        /** Insert or rewrite through [decide]. Returns (outcome, id); outcome is "saved", "updated" or "same". Times in ms. */
+        fun save(kind: String, subject: String, text: String, related: String = "", sourceTurn: Long = 0, now: Long = System.currentTimeMillis()): Pair<String, Long>
+        fun update(id: Long, text: String, kind: String? = null, subject: String? = null, now: Long = System.currentTimeMillis()): Boolean
+        fun delete(id: Long)
+        fun search(query: String, kind: String? = null, limit: Int = 12): List<Mem>
+        // v0.19.0 logs (MindLogs): journal rows that aren't chat turns.
+        fun logAppend(conv: String, role: String, content: String, at: Long, kind: String): Long
+        fun logRecent(conv: String, limit: Int): List<Turn>
+        fun logSince(conv: String, sinceSec: Long): List<Turn>
+        fun logCount(kind: String): Int
+        fun logDeleteKind(kind: String): Int
+        fun close()
+    }
+
+    // ---------------- the old database (mind.db) ----------------
+
+    /**
+     * mind.db (v0.18.0–v0.26.2). Since v0.26.3 it is only read for the one-time copy into blaze.db, and used as the
+     * store when blaze.db can't open. Once copied, [retired] points at blaze.db and every call that still reaches
+     * this object (a caller that took it before the switch) goes there instead, so nothing is written to the old file.
+     */
+    class Db(ctx: Context, name: String? = "mind.db") : SQLiteOpenHelper(ctx, name, null, 1), Store, MindStore.Source {
+        @Volatile override var fts = true
+        @Volatile var retired: Store? = null
 
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL("CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY AUTOINCREMENT, conv TEXT NOT NULL, turn INTEGER NOT NULL, " +
@@ -253,9 +294,10 @@ object Mind {
         override fun onUpgrade(db: SQLiteDatabase, o: Int, n: Int) { }
 
         // ---- meta ----
-        fun meta(key: String): String = readableDatabase.rawQuery("SELECT value FROM meta WHERE key=?", arrayOf(key)).use { c ->
+        override fun meta(key: String): String = retired?.meta(key) ?: readableDatabase.rawQuery("SELECT value FROM meta WHERE key=?", arrayOf(key)).use { c ->
             if (c.moveToFirst()) c.getString(0) else "" }
-        fun setMeta(key: String, v: String) {
+        @Synchronized override fun setMeta(key: String, v: String) {
+            retired?.let { it.setMeta(key, v); return }
             writableDatabase.insertWithOnConflict("meta", null, ContentValues().apply { put("key", key); put("value", v) }, SQLiteDatabase.CONFLICT_REPLACE)
         }
 
@@ -265,11 +307,8 @@ object Mind {
         private fun maxTurn(conv: String): Int = readableDatabase.rawQuery("SELECT MAX(turn) FROM journal WHERE conv=?", arrayOf(conv)).use { c ->
             if (c.moveToFirst() && !c.isNull(0)) c.getInt(0) + 1 else 0 }
 
-        /**
-         * Adds (or updates, after a retry) the turns of [conv]. Only the last stretch is re-checked each time, so a long
-         * main thread costs little. [full] re-checks every turn (the migration). Returns how many rows were added.
-         */
-        @Synchronized fun journal(conv: String, h: JSONArray, at: Long = System.currentTimeMillis() / 1000, full: Boolean = false): Int {
+        @Synchronized override fun journal(conv: String, h: JSONArray, at: Long, full: Boolean): Int {
+            retired?.let { return it.journal(conv, h, at, full) }
             if (PrivateChat.isPrivateId(conv)) return 0   // v0.24.4: private chats never reach the journal
             val n = h.length(); if (n == 0) return 0
             val known = if (full) 0 else (synced[conv] ?: maxTurn(conv))
@@ -311,16 +350,17 @@ object Mind {
 
         fun count(where: String = "1=1"): Int = readableDatabase.rawQuery("SELECT count(*) FROM journal WHERE $where", null).use { c ->
             if (c.moveToFirst()) c.getInt(0) else 0 }
-        fun unreviewedCount(): Int = count("reviewed=0")
+        override fun unreviewedCount(): Int = retired?.unreviewedCount() ?: count("reviewed=0")
 
         private fun turnOf(c: android.database.Cursor) = Turn(c.getLong(0), c.getString(1), c.getInt(2), c.getString(3), c.getString(4), c.getLong(5))
         private val turnCols = "id, conv, turn, role, content, at"
 
-        fun unreviewed(limit: Int = 200): List<Turn> = readableDatabase.rawQuery(
+        override fun unreviewed(limit: Int): List<Turn> = retired?.unreviewed(limit) ?: readableDatabase.rawQuery(
             "SELECT $turnCols FROM journal WHERE reviewed=0 ORDER BY id LIMIT ?", arrayOf(limit.toString())).use { c ->
             val out = ArrayList<Turn>(); while (c.moveToNext()) out += turnOf(c); out }
 
-        fun markReviewed(ids: List<Long>) {
+        @Synchronized override fun markReviewed(ids: List<Long>) {
+            retired?.let { it.markReviewed(ids); return }
             if (ids.isEmpty()) return
             val db = writableDatabase
             db.beginTransaction()
@@ -328,10 +368,14 @@ object Mind {
             finally { db.endTransaction() }
         }
 
-        fun turn(id: Long): Turn? = readableDatabase.rawQuery("SELECT $turnCols FROM journal WHERE id=?", arrayOf(id.toString())).use { c ->
-            if (c.moveToFirst()) turnOf(c) else null }
+        override fun turn(id: Long): Turn? {
+            retired?.let { return it.turn(id) }
+            return readableDatabase.rawQuery("SELECT $turnCols FROM journal WHERE id=?", arrayOf(id.toString())).use { c ->
+                if (c.moveToFirst()) turnOf(c) else null }
+        }
 
-        fun searchJournal(query: String, conv: String?, limit: Int): List<Hit> {
+        override fun searchJournal(query: String, conv: String?, limit: Int): List<Hit> {
+            retired?.let { return it.searchJournal(query, conv, limit) }
             val ws = words(query).toList().take(8); if (ws.isEmpty()) return emptyList()
             val rows = ArrayList<Turn>()
             val q = LongChat.ftsQuery(query)
@@ -357,11 +401,14 @@ object Mind {
         private fun memOf(c: android.database.Cursor) = Mem(c.getLong(0), c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getLong(5), c.getLong(6), c.getLong(7))
         private val memCols = "id, kind, subject, text, related, source_turn, created, updated"
 
-        fun all(): List<Mem> = readableDatabase.rawQuery("SELECT $memCols FROM memories ORDER BY created, id", null).use { c ->
+        override fun all(): List<Mem> = retired?.all() ?: readableDatabase.rawQuery("SELECT $memCols FROM memories ORDER BY created, id", null).use { c ->
             val out = ArrayList<Mem>(); while (c.moveToNext()) out += memOf(c); out }
 
-        fun mem(id: Long): Mem? = readableDatabase.rawQuery("SELECT $memCols FROM memories WHERE id=?", arrayOf(id.toString())).use { c ->
-            if (c.moveToFirst()) memOf(c) else null }
+        override fun mem(id: Long): Mem? {
+            retired?.let { return it.mem(id) }
+            return readableDatabase.rawQuery("SELECT $memCols FROM memories WHERE id=?", arrayOf(id.toString())).use { c ->
+                if (c.moveToFirst()) memOf(c) else null }
+        }
 
         private fun ftsPut(db: SQLiteDatabase, id: Long, subject: String, text: String, replace: Boolean) {
             if (!fts) return
@@ -372,7 +419,8 @@ object Mind {
         }
 
         /** Insert or rewrite through [decide]. Returns (outcome, id); outcome is "saved", "updated" or "same". */
-        @Synchronized fun save(kind: String, subject: String, text: String, related: String = "", sourceTurn: Long = 0, now: Long = System.currentTimeMillis()): Pair<String, Long> {
+        @Synchronized override fun save(kind: String, subject: String, text: String, related: String, sourceTurn: Long, now: Long): Pair<String, Long> {
+            retired?.let { return it.save(kind, subject, text, related, sourceTurn, now) }
             val k = normKind(kind); val s = squash(subject).ifBlank { "You" }.take(60); val t = clean(text)
             val db = writableDatabase
             return when (val d = decide(all(), k, s, t)) {
@@ -390,7 +438,8 @@ object Mind {
             }
         }
 
-        @Synchronized fun update(id: Long, text: String, kind: String? = null, subject: String? = null, now: Long = System.currentTimeMillis()): Boolean {
+        @Synchronized override fun update(id: Long, text: String, kind: String?, subject: String?, now: Long): Boolean {
+            retired?.let { return it.update(id, text, kind, subject, now) }
             val old = mem(id) ?: return false
             val t = clean(text).ifBlank { old.text }
             val s = subject?.let { squash(it).take(60) }?.ifBlank { null } ?: old.subject
@@ -401,12 +450,14 @@ object Mind {
             return true
         }
 
-        @Synchronized fun delete(id: Long) {
+        @Synchronized override fun delete(id: Long) {
+            retired?.let { it.delete(id); return }
             writableDatabase.delete("memories", "id=?", arrayOf(id.toString()))
             if (fts) try { writableDatabase.delete("memories_fts", "docid=?", arrayOf(id.toString())) } catch (_: Exception) { }
         }
 
-        fun search(query: String, kind: String? = null, limit: Int = 12): List<Mem> {
+        override fun search(query: String, kind: String?, limit: Int): List<Mem> {
+            retired?.let { return it.search(query, kind, limit) }
             val ws = words(query).toList().take(8)
             val k = kind?.trim()?.lowercase()?.takeIf { it in KINDS }
             if (ws.isEmpty()) return all().filter { k == null || it.kind == k }.sortedByDescending { it.updated }.take(limit)
@@ -423,6 +474,42 @@ object Mind {
                 .sortedWith(compareByDescending<Pair<Mem, Int>> { it.second }.thenByDescending { it.first.updated })
                 .take(limit).map { it.first }
         }
+
+        // ---- logs (MindLogs, v0.19.0) ----
+        @Synchronized override fun logAppend(conv: String, role: String, content: String, at: Long, kind: String): Long {
+            retired?.let { return it.logAppend(conv, role, content, at, kind) }
+            return MindLogs.appendOld(this, conv, role, content, at, kind)
+        }
+        override fun logRecent(conv: String, limit: Int): List<Turn> = retired?.logRecent(conv, limit) ?: MindLogs.recentOld(this, conv, limit)
+        override fun logSince(conv: String, sinceSec: Long): List<Turn> = retired?.logSince(conv, sinceSec) ?: MindLogs.sinceOld(this, conv, sinceSec)
+        override fun logCount(kind: String): Int = retired?.logCount(kind) ?: MindLogs.countOld(this, kind)
+        @Synchronized override fun logDeleteKind(kind: String): Int {
+            retired?.let { return it.logDeleteKind(kind) }
+            return MindLogs.deleteKindOld(this, kind)
+        }
+
+        // ---- the v0.26.3 copy into blaze.db (MindStore.Source) ----
+        override fun metaAll(): Map<String, String> = readableDatabase.rawQuery("SELECT key, value FROM meta", null).use { c ->
+            val out = LinkedHashMap<String, String>(); while (c.moveToNext()) out[c.getString(0)] = c.getString(1) ?: ""; out }
+
+        override fun oldMemories(): List<MindStore.OldMem> = readableDatabase.rawQuery(
+            "SELECT id, kind, subject, text, related, source_turn, created, updated FROM memories ORDER BY id", null).use { c ->
+            val out = ArrayList<MindStore.OldMem>()
+            while (c.moveToNext()) out += MindStore.OldMem(c.getLong(0), c.getString(1) ?: "", c.getString(2) ?: "", c.getString(3) ?: "",
+                c.getString(4) ?: "", c.getLong(5), c.getLong(6), c.getLong(7))
+            out }
+
+        override fun oldTurns(afterId: Long, limit: Int): List<MindStore.OldTurn> {
+            MindLogs.ensureKind(this)
+            return readableDatabase.rawQuery("SELECT id, conv, turn, role, content, at, reviewed, kind FROM journal WHERE id>? ORDER BY id LIMIT ?",
+                arrayOf(afterId.toString(), limit.toString())).use { c ->
+                val out = ArrayList<MindStore.OldTurn>()
+                while (c.moveToNext()) out += MindStore.OldTurn(c.getLong(0), c.getString(1) ?: "", c.getInt(2), c.getString(3) ?: "user",
+                    c.getString(4) ?: "", c.getLong(5), c.getInt(6), c.getString(7) ?: "chat")
+                out }
+        }
+
+        override fun oldTurnCount(): Int = count()
     }
 
     fun snippet(s: String, ws: List<String>, n: Int = 220): String {
@@ -434,21 +521,97 @@ object Mind {
 
     // ---------------- the app-wide instance ----------------
 
-    @Volatile private var db: Db? = null
+    @Volatile private var db: Store? = null
     val ready: Boolean get() = db != null
-    fun db(): Db? = db
+    fun db(): Store? = db
+
+    /** Which file the mind is in now: "blaze.db", "mind.db" (blaze.db couldn't open, or the copy is still running) or "". */
+    val storeName: String get() = when (db) { is MindStore -> "blaze.db"; is Db -> "mind.db"; else -> "" }
+
+    /** A plain line for the Memory screen when blaze.db couldn't be used (null when all is well). */
+    @Volatile var notice: String? = null
 
     /** Called after any memory change (the Memory screen refreshes from it). */
     @Volatile var onChange: (() -> Unit)? = null
     private fun changed() { try { onChange?.invoke() } catch (_: Throwable) { } }
 
+    private val initLock = Any()
+
+    /** How blaze.db is opened: the bundled SQLite on the phone; tests swap in sqlite-jdbc. */
+    @Volatile var openBlaze: (java.io.File) -> com.blaze.assistant.store.Sql = { com.blaze.assistant.store.AndroidSql(it.path) }
+
+    /**
+     * Opens the mind. v0.26.3: blaze.db (filesDir) on the bundled SQLite is the store. The first launch after the
+     * update finds the old databases/mind.db: the app keeps working on it while a background thread backs it up
+     * (filesDir/backup/mind-<time>.db) and copies it into blaze.db ([MindStore.importFrom]); then blaze.db takes
+     * over. mind.db is never deleted. If blaze.db can't open (or was written by a newer Blaze), mind.db stays the
+     * store and [notice] says why in one line.
+     */
     fun init(ctx: Context) {
         if (db != null) return
-        db = try { Db(ctx.applicationContext).also { it.writableDatabase } } catch (_: Throwable) { null }
+        synchronized(initLock) {
+            if (db != null) return
+            val app = ctx.applicationContext
+            val oldFile = app.getDatabasePath("mind.db")
+            val hadOld = oldFile.exists()
+            val blaze: MindStore? = try {
+                val sql = openBlaze(java.io.File(app.filesDir, "blaze.db"))
+                try { MindStore(com.blaze.assistant.store.BlazeDb(sql), sql) } catch (e: Throwable) { try { sql.close() } catch (_: Throwable) { }; throw e }
+            } catch (e: com.blaze.assistant.store.BlazeDb.NewerSchema) {
+                notice = NEWER; null
+            } catch (_: Throwable) {
+                notice = if (hadOld) UNAVAILABLE else null; null
+            }
+            if (blaze != null && (blaze.imported() || !hadOld)) {
+                try { blaze.markFresh() } catch (_: Throwable) { }
+                db = blaze; return
+            }
+            val old = try { Db(app).also { it.writableDatabase } } catch (_: Throwable) { null }
+            if (blaze == null) { db = old; return }
+            if (old == null) { db = blaze; return }   // mind.db there but unreadable: start on blaze.db, leave the file alone
+            db = old
+            Thread({ upgrade(app, old, blaze) }, "blaze-mind-copy").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }.start()
+        }
     }
 
-    /** For tests: use this database. */
-    fun use(d: Db?) { db = d }
+    const val NEWER = "Your memory file was saved by a newer version of Blaze. Update Blaze to see everything; until then Blaze uses the copy it kept on this phone."
+    const val UNAVAILABLE = "Blaze couldn't open its new memory file, so it's using the copy it kept on this phone. Nothing was lost."
+
+    /**
+     * The one-time copy mind.db → blaze.db. Holds mind.db's lock for the whole copy, so nothing is written to it
+     * meanwhile (writers wait, then go to blaze.db through [Db.retired]). A failure leaves mind.db as the store and
+     * the copy runs again on the next launch.
+     */
+    private fun upgrade(ctx: Context, old: Db, blaze: MindStore) {
+        try {
+            synchronized(old) {
+                blaze.importFrom(old, backup = { backupOld(ctx, old) })
+                old.retired = blaze
+                db = blaze
+            }
+            changed()
+        } catch (_: Throwable) {
+            notice = null   // stays on mind.db silently; retried next launch
+        }
+    }
+
+    /** Copies databases/mind.db (and its WAL) to filesDir/backup/mind-<time>.db. Returns the copy's path. */
+    fun backupOld(ctx: Context, old: Db, now: Long = System.currentTimeMillis()): String {
+        try { old.writableDatabase.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() } } catch (_: Throwable) { }
+        val src = ctx.getDatabasePath("mind.db")
+        val dir = java.io.File(ctx.filesDir, "backup").apply { mkdirs() }
+        val out = java.io.File(dir, "mind-$now.db")
+        src.copyTo(out, overwrite = true)
+        for (sfx in listOf("-wal", "-journal")) java.io.File(src.path + sfx).takeIf { it.isFile && it.length() > 0 }?.copyTo(java.io.File(out.path + sfx), overwrite = true)
+        if (out.length() != src.length()) throw java.io.IOException("backup is incomplete")
+        return out.path
+    }
+
+    /** For tests: use this store. */
+    fun use(d: Store?) { db = d }
+
+    /** For tests: forget the open store and the notice (the next [init] opens again). */
+    fun resetForTests() { db = null; notice = null }
 
     fun all(): List<Mem> = try { db?.all() ?: emptyList() } catch (_: Exception) { emptyList() }
 
@@ -480,7 +643,7 @@ object Mind {
      * re-run add nothing) and the old memory list into the memories table. Each step sets its meta flag only after it
      * finishes, so a failure retries next launch. Chat files are never changed or deleted.
      */
-    fun migrate(d: Db, chats: List<String>, load: (String) -> JSONObject?, oldFacts: List<String>): Pair<Int, Int> {
+    fun migrate(d: Store, chats: List<String>, load: (String) -> JSONObject?, oldFacts: List<String>): Pair<Int, Int> {
         var turns = 0; var mems = 0
         if (d.meta("mig_chats") != "1") {
             for (id in chats) {
@@ -500,7 +663,7 @@ object Mind {
     }
 
     /** Plain old facts → memories (dedupe makes this safe to repeat). Returns how many rows were added. */
-    fun importFacts(d: Db, facts: List<String>): Int {
+    fun importFacts(d: Store, facts: List<String>): Int {
         var n = 0
         for (f in facts) {
             val t = clean(f); if (t.length < 3 || Learn.secret(t)) continue

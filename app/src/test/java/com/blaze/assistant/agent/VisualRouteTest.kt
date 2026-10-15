@@ -86,9 +86,12 @@ class VisualRouteTest {
     @Test fun mermaidPageIsAPictureNotSource() {
         val src = "flowchart TD\n Sun[Sunlight] --> Cell[\"<script>x</script>\"]"
         val html = DesignServe.mermaidHtml(src, "solar-panels")
+        // v0.26.3: drawn by the bundled mermaid.js (same origin), mermaid.ink only as the fallback.
+        assertTrue(html.contains("https://appassets.androidplatform.net/diagram/mermaid.min.js"))
         assertTrue(html.contains("https://mermaid.ink/img/"))
-        assertTrue(html.contains("mermaid.min.js"))   // fallback renderer
-        assertTrue(html.contains("#src{display:none}"))
+        assertFalse(html.contains("cdn.jsdelivr.net"))
+        assertEquals(DesignServe.Target.Asset("diagram/mermaid.min.js", "text/javascript"),
+            DesignServe.resolve("https://appassets.androidplatform.net/diagram/mermaid.min.js", null))
         // The source is only in the hidden, escaped element: no live <script>x</script> and no visible "flowchart TD" text.
         assertFalse(html.contains("<script>x</script>"))
         val visible = html.replace(Regex("""<script[\s\S]*?</script>"""), "").replace(Regex("""<style[\s\S]*?</style>"""), "")

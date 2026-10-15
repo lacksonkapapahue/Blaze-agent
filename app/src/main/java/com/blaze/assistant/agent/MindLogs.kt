@@ -11,6 +11,9 @@ import android.database.sqlite.SQLiteDatabase
  *
  * The journal gets a `kind` column ('chat' for every existing row). It is added in place with ALTER TABLE, without
  * bumping the database version, so an older Blaze still opens mind.db and simply ignores the column.
+ *
+ * v0.26.3: the journal is in blaze.db ([MindStore], mind_journal, which has `kind` from the start); these calls go
+ * through [Mind.Store]. The *Old functions are the mind.db versions, used by [Mind.Db].
  */
 object MindLogs {
     const val NOTIF = "notif"
@@ -47,7 +50,22 @@ object MindLogs {
      * Appends one entry to [conv]. [at] is in seconds. The identical entry (same conv, time, role and text) is
      * added only once, so re-posted notifications and retries add nothing. Returns the new id, or 0 when skipped.
      */
-    fun append(d: Mind.Db, conv: String, role: String, content: String, at: Long, kind: String): Long {
+    fun append(d: Mind.Store, conv: String, role: String, content: String, at: Long, kind: String): Long = d.logAppend(conv, role, content, at, kind)
+
+    /** The newest [limit] entries of [conv], oldest first. */
+    fun recent(d: Mind.Store, conv: String, limit: Int): List<Mind.Turn> = d.logRecent(conv, limit)
+
+    /** Entries of [conv] since [sinceSec], oldest first. */
+    fun since(d: Mind.Store, conv: String, sinceSec: Long): List<Mind.Turn> = d.logSince(conv, sinceSec)
+
+    fun count(d: Mind.Store, kind: String): Int = d.logCount(kind)
+
+    /** Deletes every entry of [kind] (and its search index rows). Memories already learned from them stay. */
+    fun deleteKind(d: Mind.Store, kind: String): Int = d.logDeleteKind(kind)
+
+    // ---------------- mind.db (Mind.Db) ----------------
+
+    internal fun appendOld(d: Mind.Db, conv: String, role: String, content: String, at: Long, kind: String): Long {
         val text = content.trim().take(8000)
         if (text.isBlank()) return 0
         ensureKind(d)
@@ -66,8 +84,7 @@ object MindLogs {
         }
     }
 
-    /** The newest [limit] entries of [conv], oldest first. */
-    fun recent(d: Mind.Db, conv: String, limit: Int): List<Mind.Turn> =
+    internal fun recentOld(d: Mind.Db, conv: String, limit: Int): List<Mind.Turn> =
         d.readableDatabase.rawQuery("SELECT id, conv, turn, role, content, at FROM journal WHERE conv=? ORDER BY turn DESC LIMIT ?",
             arrayOf(conv, limit.toString())).use { c ->
             val out = ArrayList<Mind.Turn>()
@@ -75,8 +92,7 @@ object MindLogs {
             out.reversed()
         }
 
-    /** Entries of [conv] since [sinceSec], oldest first. */
-    fun since(d: Mind.Db, conv: String, sinceSec: Long): List<Mind.Turn> =
+    internal fun sinceOld(d: Mind.Db, conv: String, sinceSec: Long): List<Mind.Turn> =
         d.readableDatabase.rawQuery("SELECT id, conv, turn, role, content, at FROM journal WHERE conv=? AND at>=? ORDER BY turn",
             arrayOf(conv, sinceSec.toString())).use { c ->
             val out = ArrayList<Mind.Turn>()
@@ -84,13 +100,12 @@ object MindLogs {
             out
         }
 
-    fun count(d: Mind.Db, kind: String): Int {
+    internal fun countOld(d: Mind.Db, kind: String): Int {
         ensureKind(d)
         return d.readableDatabase.rawQuery("SELECT count(*) FROM journal WHERE kind=?", arrayOf(kind)).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
     }
 
-    /** Deletes every entry of [kind] (and its search index rows). Memories already learned from them stay. */
-    fun deleteKind(d: Mind.Db, kind: String): Int {
+    internal fun deleteKindOld(d: Mind.Db, kind: String): Int {
         ensureKind(d)
         return synchronized(d) {
             val db = d.writableDatabase
