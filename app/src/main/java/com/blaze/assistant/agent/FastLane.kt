@@ -161,6 +161,8 @@ object FastLane {
      */
     suspend fun tryHandle(ctx: Context, text: String, offline: Boolean, confirm: suspend (String, String, String) -> Boolean): Result? {
         if (text.length > 160 || text.contains('\n')) return null
+        // "open it for me", "send that": only the full agent knows what "it" is (v0.28.9).
+        if (com.blaze.assistant.phone.AppMatch.refersBack(text)) { IntentCache.drop(text); return null }
         val t0 = System.currentTimeMillis()
         // Intent cache: a command that worked before runs again with no model at all.
         IntentCache.get(text)?.let { (n, a) ->

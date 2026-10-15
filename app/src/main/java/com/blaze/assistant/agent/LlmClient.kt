@@ -301,9 +301,12 @@ object LlmClient {
                 throw LlmException("$who rejected its key ($code). Check the $who key in Settings → AI: ${msg.take(160)}", code)
             throw LlmException("$who · ${t.model} said ($code): ${msg.take(300)}", code, retry)
         }
-        val json = JSONObject(text)
+        // v0.28.9: an empty or broken 200 body showed the raw "End of input at character 0 of" error. Treat it as a
+        // provider hiccup (503) so the normal retry / next-model path takes over.
+        val json = try { JSONObject(text) } catch (_: Exception) { null }
+        val m = json?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+            ?: throw LlmException("$who · ${t.model} sent an empty reply. Trying again.", 503)
         lastUsage = json.optJSONObject("usage")
-        val m = json.getJSONArray("choices").getJSONObject(0).getJSONObject("message")
         val r = m.optString("reasoning_content").ifBlank { m.optString("reasoning") }
         m.remove("reasoning_content"); m.remove("reasoning"); m.remove("reasoning_details")
         if (r.isNotBlank() && r != "null") m.put("_reasoning", r)
