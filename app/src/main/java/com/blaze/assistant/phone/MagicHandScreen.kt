@@ -158,13 +158,56 @@ object MagicHandScreen {
         return "data:image/jpeg;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
     }
 
-    /** On-device OCR of [bmp] (ML Kit's bundled Latin model). Empty on failure. */
-    suspend fun ocr(bmp: Bitmap): String = suspendCancellableCoroutine { cont ->
-        try {
-            val rec = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
-            rec.process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0))
-                .addOnSuccessListener { r -> rec.close(); if (cont.isActive) cont.resume(r.text.orEmpty()) }
-                .addOnFailureListener { rec.close(); if (cont.isActive) cont.resume("") }
-        } catch (_: Throwable) { if (cont.isActive) cont.resume("") }
+    /**
+     * v0.28.1: one warm ML Kit recogniser for the whole Magic Hand session (creating a client per grab cost a model
+     * load every time). [warm] is called when Magic Hand starts, [release] when it stops.
+     */
+    @Volatile private var recognizer: com.google.mlkit.vision.text.TextRecognizer? = null
+    private val recLock = Any()
+    private fun rec(): com.google.mlkit.vision.text.TextRecognizer = recognizer ?: synchronized(recLock) {
+        recognizer ?: com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS).also { recognizer = it }
     }
+
+    /** Creates the recogniser and runs it once on a tiny bitmap so the model is loaded before the first grab. */
+    suspend fun warm() {
+        try {
+            val b = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+            kotlinx.coroutines.withTimeoutOrNull(4_000) { lines(b) }
+        } catch (_: Throwable) { }
+    }
+
+    fun release() {
+        synchronized(recLock) { try { recognizer?.close() } catch (_: Throwable) { }; recognizer = null }
+    }
+
+    /** On-device OCR of [bmp] as lines with their boxes (bitmap pixels). Empty on failure. */
+    suspend fun lines(bmp: Bitmap): List<MagicHandOcr.Line> = suspendCancellableCoroutine { cont ->
+        try {
+            rec().process(com.google.mlkit.vision.common.InputImage.fromBitmap(bmp, 0))
+                .addOnSuccessListener { r ->
+                    val out = r.textBlocks.flatMap { blk -> blk.lines.mapNotNull { ln ->
+                        val bb = ln.boundingBox ?: return@mapNotNull null
+                        MagicHandOcr.Line(MagicHandLogic.Box(bb.left, bb.top, bb.right, bb.bottom), ln.text.orEmpty())
+                    } }
+                    if (cont.isActive) cont.resume(out)
+                }
+                .addOnFailureListener { if (cont.isActive) cont.resume(emptyList()) }
+        } catch (_: Throwable) { if (cont.isActive) cont.resume(emptyList()) }
+    }
+
+    /**
+     * v0.28.1: the words of [region] (screen pixels) from a full screenshot: crop with a margin, downscale, OCR on
+     * the warm recogniser, keep only lines mostly inside [region]. Call off the main thread.
+     */
+    suspend fun readRegion(full: Bitmap, region: MagicHandLogic.Box, marginPx: Int): String {
+        val cropBox = MagicHandOcr.cropFor(region, marginPx, full.width, full.height)
+        val c = crop(full, cropBox) ?: return ""
+        val sc = MagicHandOcr.scaleFor(c.width, c.height)
+        val img = if (sc < 1f) Bitmap.createScaledBitmap(c, (c.width * sc).toInt().coerceAtLeast(1), (c.height * sc).toInt().coerceAtLeast(1), true) else c
+        val ls = lines(img)
+        return MagicHandOcr.keep(ls, MagicHandOcr.regionIn(cropBox, region, sc))
+    }
+
+    /** On-device OCR of [bmp] (ML Kit's bundled Latin model), all lines. Empty on failure. */
+    suspend fun ocr(bmp: Bitmap): String = lines(bmp).joinToString("\n") { it.text }
 }

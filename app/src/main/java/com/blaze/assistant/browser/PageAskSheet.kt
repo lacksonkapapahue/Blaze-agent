@@ -202,7 +202,7 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
                                 // A pasted link is a compact chip, never a giant URL bubble.
                                 line.link?.let { LinkChip(PageQuestion.chip(it)) }
                                 if (line.text.isNotBlank()) SelectionContainer {
-                                    Text(line.text, modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp))
+                                    Text(com.blaze.assistant.ui.Md.render(line.text, Glass.cyan, Glass.raised2), modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp))
                                         .background(if (me) Glass.blue else Glass.raised).padding(horizontal = 12.dp, vertical = 9.dp),
                                         style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = Glass.text))
                                 }
@@ -222,8 +222,9 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.weak))
                     BasicTextField(input, { input = it; if (finding) find(it) }, singleLine = finding, maxLines = if (finding) 1 else 3,
                         cursorBrush = SolidColor(Glass.blue), textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.text),
-                        keyboardOptions = KeyboardOptions(imeAction = if (finding) ImeAction.Search else ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { ask(input) }, onSearch = { find(input, true) }),
+                        // v0.28.1: asking: Enter = new line, only the send button sends. Find mode keeps Search (it never sends).
+                        keyboardOptions = if (finding) KeyboardOptions(imeAction = ImeAction.Search) else com.blaze.assistant.ui.ComposerKeys.Message,
+                        keyboardActions = KeyboardActions(onSearch = { find(input, true) }),
                         modifier = Modifier.fillMaxWidth())
                 }
                 Spacer(Modifier.width(8.dp))

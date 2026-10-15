@@ -243,8 +243,13 @@ private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar
             }
         }
         // v0.27.0: panels cross-fade and the card resizes smoothly (instant with Remove animations on).
-        AnimatedContent(u.panel, modifier = Modifier.fillMaxWidth().animateContentSize(MotionTokens.medium()),
-            transitionSpec = { MotionTokens.fade() togetherWith MotionTokens.fadeAway() }, label = "dock-panel") { panel ->
+        // v0.28.1: the grab card appears at once (no fade, no resize animation): it must be up < 150 ms after release.
+        val instant = u.panel == Panel.GRAB
+        AnimatedContent(u.panel, modifier = Modifier.fillMaxWidth().animateContentSize(if (instant) androidx.compose.animation.core.snap<androidx.compose.ui.unit.IntSize>() else MotionTokens.medium<androidx.compose.ui.unit.IntSize>()),
+            transitionSpec = {
+                if (targetState == Panel.GRAB || initialState == Panel.GRAB) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                else MotionTokens.fade() togetherWith MotionTokens.fadeAway()
+            }, label = "dock-panel") { panel ->
         Column(Modifier.fillMaxWidth()) {
         when (panel) {
             Panel.STATUS -> Unit
@@ -306,7 +311,7 @@ private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Grabbed" + if (u.grabSource.isNotBlank()) " \u00b7 ${u.grabSource}" else "", modifier = Modifier.weight(1f),
                 style = sans.copy(fontSize = 11.5.sp, color = Glass.orange, fontWeight = FontWeight.Medium))
-            if (u.grabBusy) Text("Reading\u2026", style = sans.copy(fontSize = 11.5.sp, color = Glass.sub))
+            if (u.grabBusy) Text(u.queued?.let { "${it.label} when ready" } ?: "Reading\u2026", style = sans.copy(fontSize = 11.5.sp, color = Glass.sub))
         }
         // v0.27.0: a short coach mark on the first few grabs (the old long hint after that is gone).
         if (u.coach) {
@@ -321,7 +326,7 @@ private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = 
         LaunchedEffect(u.grabbed) { if (scroll.value != 0) scroll.animateScrollTo(0, MotionTokens.medium()) }
         Column(Modifier.heightIn(max = 120.dp).verticalScroll(scroll)) {
             // v0.27.0: shimmer lines while the new area is read, instead of a bare "Reading…".
-            if (u.grabbed.isBlank() && u.grabBusy) Column {
+            if (u.grabbed.isBlank() && u.grabBusy) Column(Modifier.padding(top = 2.dp)) {
                 listOf(1f, 0.82f, 0.6f).forEach { f ->
                     Box(Modifier.fillMaxWidth(f).height(12.dp).shimmer(Glass.raised2, Color.White.copy(alpha = 0.12f), Glass.pill))
                     Spacer(Modifier.height(8.dp))
@@ -332,7 +337,8 @@ private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = 
             else androidx.compose.runtime.key(u.grabbed) { SelectionContainer { Text(u.grabbed, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp)) } }
         }
     }
-    val enabled = u.grabbed.isNotBlank() && !u.grabBusy
+    // v0.28.1: usable while reading (a tap waits for the text, shown as "Copy when ready").
+    val enabled = MagicHandState.grabActionsEnabled(u)
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
         MagicHandState.grabActions(u.private).forEach { g ->
             val press = remember { MutableInteractionSource() }
@@ -340,7 +346,7 @@ private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = 
                 .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, onClickLabel = g.label) { calls.onGrab(g) }
                 .padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(42.dp).clip(CircleShape).background(if (!enabled) Glass.raised else if (g == GrabAction.COPY) Glass.blue else Glass.raised2), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(42.dp).clip(CircleShape).background(if (!enabled) Glass.raised else if (g == GrabAction.COPY || g == u.queued) Glass.blue else Glass.raised2), contentAlignment = Alignment.Center) {
                     Icon(MagicHandIcons.of(g), contentDescription = null, tint = if (enabled) Color.White else Glass.weak, modifier = Modifier.size(21.dp))
                 }
                 Spacer(Modifier.height(4.dp))

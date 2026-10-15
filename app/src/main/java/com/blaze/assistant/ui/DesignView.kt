@@ -259,10 +259,9 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
             Box(Modifier.weight(1f).clip(BlazeShapes.pill).background(c.field, BlazeShapes.pill).hairline(c.fieldLine, BlazeShapes.pill).padding(horizontal = 16.dp, vertical = 11.dp)) {
                 if (ask.isEmpty()) Text(if (busy) status.ifBlank { "Working…" } else "Ask for a change to this design", maxLines = 1,
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = if (busy) c.accent else c.weak))
-                BasicTextField(ask, { ask = it }, singleLine = true, cursorBrush = SolidColor(c.accent),
+                BasicTextField(ask, { ask = it }, maxLines = 4, cursorBrush = SolidColor(c.accent),
                     textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { if (ask.isNotBlank() && !busy) { onAsk(ask); ask = "" } }),
+                    keyboardOptions = ComposerKeys.Message,   // v0.28.1: Enter = new line; Send sends
                     modifier = Modifier.fillMaxWidth())
             }
             Spacer(Modifier.width(8.dp))

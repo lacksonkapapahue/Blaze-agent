@@ -834,7 +834,7 @@ private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, o
     if (chipOnly && chip.isBlank()) return
     if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }
     val acts = buildList<Pair<String, (() -> Unit)?>> {
-        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(RichKit.readable(m.text)) else m.text)); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
+        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(RichKit.readable(m.text)) else Md.plain(splitQuote(m.text).second))); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
         if (allowQuote) add("Quote" to { onQuote(m.text) })
         add("Retry" to (if (canAct) ({ Agent.retry(m.id) }) else null))
     }

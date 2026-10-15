@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -159,8 +160,10 @@ fun UserBubble(text: String, quoted: String = "", pos: GroupPos = GroupPos.SINGL
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.paper.copy(alpha = 0.7f)))
                 }
             }
+            // v0.28.1: your own message renders its markdown too (## App, 1. **Offline mode**), never raw symbols.
+            val shown = remember(text, c.paper) { Md.render(text, c.paper, c.paper.copy(alpha = 0.16f)) }
             SelectionContainer {
-                Text(text, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.paper))
+                Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.paper))
             }
         }
     }

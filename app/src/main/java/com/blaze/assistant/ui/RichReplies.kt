@@ -27,6 +27,8 @@ object RichReplies {
         data class Form(val form: RichKit.Form) : Block()
         data class Tool(val tool: RichKit.Tool) : Block()
         data class Compare(val compare: RichKit.Compare) : Block()
+        /** v0.28.1: a table card (```table, or a Markdown pipe table). */
+        data class Table(val table: RichKit.TableCard, val raw: String) : Block()
         /**
          * A visual still streaming in (its fence isn't closed and it can't be drawn yet). Shown as a quiet placeholder
          * while the reply streams; [fallback] once the reply is done (a reply that never closed its fence).
@@ -49,6 +51,7 @@ object RichReplies {
         "yourself, without being asked, the way a great teacher would. Keep the text short when a visual carries the answer (2-4 sentences around it). " +
         "Plain text is right for simple facts, quick answers, opinions, feelings and chit-chat: never force a visual there, and use at most two visual blocks per answer. " +
         "Choose: how something works or a process -> a ```mermaid flowchart plus 2-3 sentences; a comparison of 2-3 things -> a ```compare block; " +
+        "rows of facts with several columns (plans, prices, schedules, specs of 4+ items, results) -> a ```table card; " +
         "numbers, shares or a trend -> a ```chart; anything with an amount the user could change (splitting, tips, loans, savings, unit or recipe scaling) -> a ```tool; " +
         "a choice the user must make next -> a ```choices block; several details you need from the user at once -> a ```form; a how-to -> numbered steps with **bold titles**. " +
         "IN CHAT, INLINE: a diagram, chart or visual the user asks for (\"draw\", \"flowchart\", \"diagram\", \"chart\", \"graph\", \"map out\", \"visualise\") goes straight in your reply as a ```mermaid or ```chart block, drawn in the chat. " +
@@ -57,6 +60,7 @@ object RichReplies {
         "```chart {\"type\":\"bar|line|pie|scatter\",\"title\":\"..\",\"labels\":[\"Jan\",\"Feb\"],\"series\":[{\"name\":\"Sales\",\"values\":[12,19]}],\"unit\":\"K\"} " +
         "(pie: one series; scatter: \"points\":[[x,y],..] with \"xLabel\"/\"yLabel\"). Use real numbers you know or found; if they're estimates, say so in the text. " +
         "```compare {\"title\":\"..\",\"columns\":[\"iPhone 16\",\"Galaxy S25\"],\"rows\":[{\"label\":\"Screen\",\"values\":[\"6.1 in\",\"6.2 in\"]}],\"verdict\":\"one line\"} (2-3 columns, up to 10 rows). " +
+        "```table {\"title\":\"..\",\"columns\":[\"Plan\",\"Price\",\"Data\"],\"rows\":[[\"Basic\",\"K50\",\"2 GB\"]]} (a bold title, up to 8 columns; the first column stays in view when it scrolls; a Markdown pipe table is drawn the same way). " +
         "```tool {\"title\":\"Bill splitter\",\"inputs\":[{\"id\":\"bill\",\"label\":\"Bill\",\"type\":\"number\",\"default\":450,\"prefix\":\"K\"},{\"id\":\"people\",\"label\":\"People\",\"type\":\"slider\",\"min\":1,\"max\":12,\"step\":1,\"default\":3},{\"id\":\"tip\",\"label\":\"Tip\",\"type\":\"slider\",\"min\":0,\"max\":25,\"default\":10,\"suffix\":\"%\"}]," +
         "\"outputs\":[{\"label\":\"Tip\",\"formula\":\"bill*tip/100\",\"prefix\":\"K\"},{\"label\":\"Each pays\",\"formula\":\"bill*(1+tip/100)/people\",\"prefix\":\"K\"}]} " +
         "(input types number, slider, select with \"options\":[{\"label\":\"Monthly\",\"value\":12}]; formulas use input ids, numbers, + - * / ^ ( ), < > <= >= ==, min, max, round(x,2), ceil, floor, abs, sqrt, pow, if(cond,a,b); the last output is the headline; fill defaults from the user's numbers and also state the answer in the text). " +
@@ -85,6 +89,8 @@ object RichReplies {
         when (s) {
             is AnswerCards.Seg.Text -> text(s.md)
             is AnswerCards.Seg.Lists -> text(s.md, list = s)
+            // v0.28.1: a Markdown pipe table is drawn as a table card too.
+            is AnswerCards.Seg.Table -> RichKit.tableFromMd(s.rows)?.let { listOf(Block.Table(it, s.raw)) } ?: listOf(Block.Plain(s))
             is AnswerCards.Seg.Code -> {
                 val lang = s.lang.trim().lowercase()
                 val kind = diagramLangs[lang]
@@ -117,6 +123,7 @@ object RichReplies {
                 "form" -> RichKit.form(s.code)?.let { Block.Form(it) }
                 "tool" -> RichKit.tool(s.code)?.let { Block.Tool(it) }
                 "compare" -> RichKit.compare(s.code)?.let { Block.Compare(it) }
+                "table" -> RichKit.table(s.code)?.let { Block.Table(it, s.raw) }
                 else -> null
             }
         } catch (_: Exception) { null } catch (_: StackOverflowError) { null }
@@ -127,6 +134,7 @@ object RichReplies {
     fun pendingLabel(kind: String): String = when (kind) {
         "chart" -> "Drawing a chart\u2026"
         "compare" -> "Lining up the comparison\u2026"
+        "table" -> "Setting out the table\u2026"
         "tool" -> "Building a calculator\u2026"
         "form" -> "Making a quick form\u2026"
         "diagram" -> "Drawing a diagram\u2026"

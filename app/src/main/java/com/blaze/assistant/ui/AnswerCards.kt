@@ -154,6 +154,7 @@ fun AnswerBody(key: Long, src: String) {
                     is RichReplies.Block.Form -> RichForm(b.form)
                     is RichReplies.Block.Tool -> RichTool(b.tool)
                     is RichReplies.Block.Compare -> RichCompare(b.compare)
+                    is RichReplies.Block.Table -> TableCardView(b.table)
                     is RichReplies.Block.Pending -> if (streaming) RichPending(b.kind) else when (val f = b.fallback) {
                         is RichReplies.Block.Diagram -> RichDiagram(f)
                         else -> { val n = b.seg.code.lines().size; PlainCard((b.seg.lang.ifBlank { "Code" }) + " · $n lines", b.seg.raw) { CodeText(b.seg.code) } }

@@ -42,10 +42,12 @@ object ReplyParts {
 
     data class Parts(val text: String, val thinking: String, val followups: List<String>)
 
-    fun split(raw0: String, final: Boolean = false): Parts {
+    fun split(raw0: String, final: Boolean = false, keepCalls: Boolean = false): Parts {
         // v0.23.2: leaked channel / template tokens and reasoning leads go first (shared with streaming and storage).
         val clean = ReplyClean.clean(raw0, final)
-        val raw = clean.text
+        // v0.28.1: tool calls written as text ("[/find_tool need=…]") never reach the screen, speech or history;
+        // only the gatekeeper reads them (keepCalls) to run them as real calls.
+        val raw = if (keepCalls) clean.text else ToolLeak.strip(clean.text, final)
         val thinking = (listOf(clean.thinking) + thinkRe.findAll(raw).map { it.groupValues[2].trim() }).filter { it.isNotBlank() }.joinToString("\n\n")
         var text = thinkRe.replace(raw, "")
         val fu = fuRe.find(text)
@@ -690,6 +692,8 @@ When you finish, say what you did in one short sentence.
             append("\nYou can also read and send texts, check calls, read and add calendar events, look up contacts, toggle the flashlight and volume, and schedule routines with your tools. Sending a text or placing a call asks the user for approval automatically.")
             if (Settings.followups) append("\nAt the very end of each final answer (never when calling tools), add one line exactly like <<follow-ups: first | second | third>> with three short next requests (max 6 words each) written as the user would say them. Skip it for routines.")
             append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
+            // v0.28.1: models sometimes wrote "[/find_tool need=…]" as the reply instead of calling the tool.
+            append("\n" + ToolLeak.PROMPT_RULE)
             append("\nEverything you create that keeps running (alarms, timers, routines, triggers, calendar events, jobs) gets an ID like R4. To change, stop or delete one, call processes to find the ID, then process(id, action). Only use action=details when the user asks for specifics.")
             // v0.24.3: the core skills' pinned rules (voice, task workflow, views, specialists, workflows, coding), every turn,
             // read from the shipped assets and static, so they stay in the cached prefix.
@@ -1374,6 +1378,7 @@ When you finish, say what you did in one short sentence.
                 turnOk.clear()
                 var claimNudged = false
                 var emptyNudged = false
+                var leakNudged = false
                 var lastOkStep = ""
                 turnView?.let { groupsOn += it.groups }
                 turnSkills = SkillMatch.forTurn(userNow)
@@ -1507,9 +1512,24 @@ When you finish, say what you did in one short sentence.
                     try {
                         if ((reply.optJSONArray("tool_calls")?.length() ?: 0) == 0) {
                             val txt = reply.opt("content") as? String
-                            if (txt != null) ToolCalls.fromText(ReplyParts.split(txt).text, allTools)?.let { (c, rest) ->
-                                reply.put("tool_calls", c); reply.put("content", if (rest.isBlank()) JSONObject.NULL else rest)
+                            val seen = if (txt != null) ReplyParts.split(txt, keepCalls = true).text else ""
+                            if (txt != null) (ToolCalls.fromText(seen, allTools) ?: ToolLeak.toCalls(seen, allTools))?.let { (c, rest) ->
+                                reply.put("tool_calls", c); reply.put("content", if (rest.isBlank()) JSONObject.NULL else ToolLeak.strip(rest))
                                 for (k in 0 until c.length()) ToolStats.add(c.getJSONObject(k).getJSONObject("function").getString("name"), "text_call")
+                            }
+                            // v0.28.1: tool syntax that maps to no real tool: strip it and ask the model once to answer properly
+                            // (native tool call or plain words); after that, an honest plain line, never the raw syntax.
+                            if (txt != null && (reply.optJSONArray("tool_calls")?.length() ?: 0) == 0 && ToolLeak.has(seen)) {
+                                val left = ReplyParts.split(txt, final = true).text
+                                if (!leakNudged && step < maxSteps - 2) {
+                                    leakNudged = true
+                                    if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                                    add(Role.STEP, "Getting a proper answer")
+                                    if (left.isNotBlank()) history.put(JSONObject().put("role", "assistant").put("content", left))
+                                    history.put(JSONObject().put("role", "user").put("content", RetryGuard.anchor(ToolLeak.NUDGE, lastUserText())))
+                                    continue
+                                }
+                                reply.put("content", left.ifBlank { ToolLeak.HONEST })
                             }
                         }
                         val rep = ToolCalls.normalize(reply, allTools)
@@ -1819,7 +1839,7 @@ When you finish, say what you did in one short sentence.
                 try { Usage.record(msgs, reply, LlmClient.lastUsage) } catch (_: Exception) { }
                 val unknown = try {
                     if ((reply.optJSONArray("tool_calls")?.length() ?: 0) == 0) (reply.opt("content") as? String)?.let { txt ->
-                        ToolCalls.fromText(txt, all)?.let { (c, rest) -> reply.put("tool_calls", c); reply.put("content", if (rest.isBlank()) JSONObject.NULL else rest) } }
+                        (ToolCalls.fromText(txt, all) ?: ToolLeak.toCalls(txt, all))?.let { (c, rest) -> reply.put("tool_calls", c); reply.put("content", if (rest.isBlank()) JSONObject.NULL else ToolLeak.strip(rest)) } }
                     ToolCalls.normalize(reply, all).unknown
                 } catch (_: Exception) { emptySet() }
                 msgs.put(reply)
