@@ -5,6 +5,9 @@ Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has
 ## v0.29.3: Glass Home
 - Home's new default background is a light daytime sky (drawn, nothing to download): blue to a pale horizon, a soft sun glow and clouds.
 - Over the sky or your own photo (Customise → Background → Image), cards, stacks, buttons and chips turn to frosted glass with a bright edge. Text uses dark ink on the sky in both app themes.
+- Card icons are real rounded icons on a soft accent tile (the old ones looked like keyboard emoji).
+- News and video cards show preview pictures: a wide picture for the top story, small ones beside the rest (feed pictures, Bing News pictures matched to Google News stories, YouTube thumbnails). Cached and downscaled for low-RAM phones.
+- Tapping a story or picture opens it in a glass window on Home that looks like a small screen: the page scrolls and its links open inside. × (or Back) closes it, tapping outside does nothing, and sliding on the glass tilts it a little in that direction before it springs back. ↗ opens the page in the browser.
 - Your photo now shows in full behind the glass instead of faded. Solid and Gradient backgrounds keep the old solid cards. Anyone who already picked a background keeps it.
 
 ## v0.29.2: Blaze Terminal

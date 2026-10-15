@@ -22,6 +22,19 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.SportsSoccer
+import androidx.compose.material.icons.rounded.ShowChart
+import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -217,6 +230,7 @@ fun HomePane(onAsk: (String) -> Unit) {
     var customise by rememberSaveable { mutableStateOf(false) }
     var create by rememberSaveable { mutableStateOf(false) }
     var cityFor by remember { mutableStateOf<String?>(null) }
+    var glassUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var askChange by remember { mutableStateOf<Widget?>(null) }
     var toast by remember { mutableStateOf("") }
     var look by remember { mutableIntStateOf(0) }   // bumps when the look changes
@@ -243,7 +257,8 @@ fun HomePane(onAsk: (String) -> Unit) {
 
     fun open(url: String, w: Widget?) {
         if (w != null) { HomeBoard.tapped(w.id); if (w.type == WidgetTypes.CREATORS) HomeBoard.markSeen(w.id) }
-        openHomeLink(ctx, url)
+        // v0.29.3: web links open in the glass window on Home; app, calendar and other links go where they always did.
+        if (url.startsWith("https://") || url.startsWith("http://")) glassUrl = url else openHomeLink(ctx, url)
     }
 
     fun action(w: Widget, a: String) {
@@ -290,6 +305,7 @@ fun HomePane(onAsk: (String) -> Unit) {
                 }
             }
             if (toast.isNotBlank()) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp).navigationBarsPadding()) { HomeToast(toast) }
+            glassUrl?.let { u -> GlassWindow(u, onClose = { glassUrl = null }, onOpenOutside = { openHomeLink(ctx, it) }) }
 
             menuFor?.let { id ->
                 val w = widgets.firstOrNull { it.id == id }
@@ -593,10 +609,23 @@ fun StackItem(
 }
 
 /** A type's small mark colour (on the accent). */
-private fun typeGlyph(type: String): String = when (type) {
-    WidgetTypes.WEATHER -> "\u2600"; WidgetTypes.NEWS -> "\u25A4"; WidgetTypes.CREATORS -> "\u25B6"; WidgetTypes.SPORTS -> "\u26BD"
-    WidgetTypes.PRICES -> "\u2197"; WidgetTypes.CALENDAR -> "\u25F7"; WidgetTypes.ROUTINES -> "\u21BB"; WidgetTypes.DEADLINES -> "\u2691"
-    WidgetTypes.GITHUB -> "\u2325"; WidgetTypes.APPS -> "\u25A6"; WidgetTypes.INTO -> "\u2726"; else -> "\u270E"
+/** v0.29.3: real rounded icons (the 0.29.0 glyphs looked like keyboard emoji). */
+fun typeIcon(type: String): androidx.compose.ui.graphics.vector.ImageVector = when (type) {
+    WidgetTypes.WEATHER -> Icons.Rounded.WbSunny; WidgetTypes.NEWS -> Icons.Rounded.Newspaper; WidgetTypes.CREATORS -> Icons.Rounded.SmartDisplay
+    WidgetTypes.SPORTS -> Icons.Rounded.SportsSoccer; WidgetTypes.PRICES -> Icons.Rounded.ShowChart; WidgetTypes.CALENDAR -> Icons.Rounded.Event
+    WidgetTypes.ROUTINES -> Icons.Rounded.Autorenew; WidgetTypes.DEADLINES -> Icons.Rounded.Flag; WidgetTypes.GITHUB -> Icons.Rounded.Code
+    WidgetTypes.APPS -> Icons.Rounded.Apps; WidgetTypes.INTO -> Icons.Rounded.AutoAwesome; else -> Icons.Rounded.Edit
+}
+
+/** The icon tile at the top of a card: a small rounded square in a soft accent gradient with a crisp white icon. */
+@Composable
+fun TypeTile(type: String, size: Int = 28) {
+    val c = LocalBlaze.current
+    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.36f).dp))
+        .background(Brush.linearGradient(listOf(c.accent.copy(alpha = 0.95f), c.accent.copy(alpha = 0.70f))))
+        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape((size * 0.36f).dp)), contentAlignment = Alignment.Center) {
+        Icon(typeIcon(type), contentDescription = null, tint = Color.White, modifier = Modifier.size((size * 0.58f).dp))
+    }
 }
 
 /** One widget card. */
@@ -629,10 +658,8 @@ fun WidgetCard(
         }
         .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(24.dp).clip(CircleShape).background(c.accentSoft), contentAlignment = Alignment.Center) {
-                Text(typeGlyph(w.type), style = TextStyle(fontSize = 12.sp, color = c.accent))
-            }
-            Spacer(Modifier.width(8.dp))
+            TypeTile(w.type)
+            Spacer(Modifier.width(10.dp))
             Text(w.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = c.ink))
             if (stackCount > 1 && !stackOpen) { Tag("+${stackCount - 1}", on = true); Spacer(Modifier.width(2.dp)) }
@@ -704,12 +731,30 @@ private fun WidgetBody(w: Widget, d: WidgetData, size: String, onLine: (WidgetLi
     val n = WidgetSize.lines(size).let { if (size == WidgetSize.S) 0 else it }
     if (n > 0 && d.lines.isNotEmpty()) {
         Spacer(Modifier.height(6.dp))
+        val hero = d.lines.firstOrNull()?.takeIf { it.image.isNotBlank() && size != WidgetSize.S }
+        if (hero != null) {
+            val img = rememberHomeImage(hero.image)
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(BlazeShapes.medium).background(c.faint)
+                .border(1.dp, Color.White.copy(alpha = 0.35f), BlazeShapes.medium)
+                .clickable(onClickLabel = "Preview ${hero.title}") { onLine(hero) }) {
+                if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+            Spacer(Modifier.height(4.dp))
+        }
         d.lines.take(n).forEachIndexed { i, l ->
             Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).let { if (l.url.isNotBlank()) it.clickable(onClickLabel = "Open ${l.title}") { onLine(l) } else it }
                 .let { if (i > 0) it.hairlineTopInset(c.hair, 0.dp) else it }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(l.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.5.sp, lineHeight = 18.sp, color = c.ink))
                     if (l.sub.isNotBlank()) Text(l.sub, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 11.5.sp, color = c.sub))
+                }
+                if (l.image.isNotBlank() && l !== hero) {
+                    Spacer(Modifier.width(10.dp))
+                    val img = rememberHomeImage(l.image)
+                    Box(Modifier.size(width = 68.dp, height = 50.dp).clip(BlazeShapes.small).background(c.faint)
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), BlazeShapes.small)) {
+                        if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    }
                 }
                 if (l.note.isNotBlank()) {
                     Spacer(Modifier.width(8.dp))

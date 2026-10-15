@@ -102,8 +102,13 @@ object HomeSources {
         val url = if (feed.isNotBlank()) feed.let { if (it.startsWith("http")) it else "https://$it" } else newsUrl(w.opt("query"),
             w.opt("locale").takeIf { it.isNotBlank() }?.let { Locale.forLanguageTag(it.replace('_', '-')) } ?: Locale.getDefault())
         val xml = get(url, "that feed")
-        val entries = Rss.parse(xml, 20)
+        var entries = Rss.parse(xml, 20)
         if (entries.isEmpty()) throw SourceError("No stories right now.")
+        // v0.29.3: Google News has no pictures; Bing News' feed for the same query does. Borrow them for matching stories.
+        if (entries.none { it.image.isNotBlank() }) entries = try {
+            val q = w.opt("query").ifBlank { if (feed.isBlank()) "top stories" else "" }
+            if (q.isBlank()) entries else Rss.borrowImages(entries, Rss.parse(get("https://www.bing.com/news/search?format=rss&q=" + Http.enc(q), "pictures"), 30))
+        } catch (_: Exception) { entries }
         val head = if (feed.isNotBlank()) Rss.feedTitle(xml).ifBlank { w.title } else w.title
         return Rss.toData(entries, head, now)
     }

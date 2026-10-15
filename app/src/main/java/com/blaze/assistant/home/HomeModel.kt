@@ -37,10 +37,10 @@ object WidgetSize {
 }
 
 /** One line of a widget: a title, an optional second line, an optional link (or "app:<package>"), an optional right-hand note. */
-data class WidgetLine(val title: String, val sub: String = "", val url: String = "", val note: String = "") {
-    fun toJson(): JSONObject = JSONObject().put("t", title).put("s", sub).put("u", url).put("n", note)
+data class WidgetLine(val title: String, val sub: String = "", val url: String = "", val note: String = "", val image: String = "") {
+    fun toJson(): JSONObject = JSONObject().put("t", title).put("s", sub).put("u", url).put("n", note).also { if (image.isNotBlank()) it.put("i", image) }
     companion object {
-        fun from(o: JSONObject): WidgetLine = WidgetLine(o.optString("t"), o.optString("s"), o.optString("u"), o.optString("n"))
+        fun from(o: JSONObject): WidgetLine = WidgetLine(o.optString("t"), o.optString("s"), o.optString("u"), o.optString("n"), o.optString("i"))
     }
 }
 
