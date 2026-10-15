@@ -1,5 +1,13 @@
 # Blaze Gateway status
 
+- **2026-10-15, v0.3.0 (branch `gateway-waitlist-v030`, PR open, not merged / not deployed):**
+  waiting list (403 `waitlisted` / `access_rejected`, /admin › Waiting list, "Require approval"
+  on by default) and the plan-assignment fix (explicit rows for every plan, dropdown rebuilt on
+  every load, grouped list, visible errors). Needs migration `0003_waitlist.sql` applied before
+  the Worker is deployed (merging to `main` does both through CI). The 4 accounts currently on pro
+  keep access through the migration. App side: PlainError / Cloud show the waiting-list wording
+  instead of "sign in again" (ships with the next app release).
+
 - **2026-10-14, v0.2.1:** picker / naming polish after the first live discovery (gemini 29,
   mistral 27, workers-ai 35 free chat models found via "Find models", Workers AI from the binding
   catalogue). Next: add Groq / Cerebras / OpenRouter keys (discovery runs on add), then press

@@ -10,9 +10,27 @@ object PlainError {
     /** After automatic compaction and a retry, the request still didn't fit (v0.26.0). */
     const val CONTEXT = "That was too much for this model even after I condensed the older messages. Tap Retry, or pick a model with a bigger context in Settings \u2192 AI."
 
+    /** Blaze Gateway 0.3.0: the account is on the waiting list (403 `waitlisted`). */
+    const val WAITLISTED = "You're on the Blaze waiting list. You'll get access as soon as you're approved."
+
+    /** Blaze Gateway 0.3.0: an admin turned the account down (403 `access_rejected`). */
+    const val REJECTED = "Your Blaze account hasn't been approved for Blaze AI yet. Contact the Blaze team if you think this is a mistake."
+
+    /** The waiting-list wording when [raw] is the gateway's `waitlisted` / `access_rejected` 403, else null. */
+    fun access(raw: String?): String? {
+        val low = raw.orEmpty().lowercase()
+        return when {
+            "access_rejected" in low || "hasn't been approved for blaze" in low -> REJECTED
+            "waitlisted" in low || "blaze waiting list" in low -> WAITLISTED
+            else -> null
+        }
+    }
+
     fun of(raw: String): String {
         val t = raw.trim()
         if (t.isEmpty()) return "Something went wrong. Tap Retry."
+        // Checked first: these are 403s, which would otherwise read as an expired sign-in.
+        access(t)?.let { return it }
         val looksRaw = t.contains('{') || t.contains("\"error\"") || t.contains("http", true) || t.length > 220 || t.contains("Exception")
         if (!looksRaw) return t
         try { com.blaze.assistant.device.CrashLog.error("chat error", RuntimeException(t.take(1500))) } catch (_: Throwable) { }

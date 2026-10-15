@@ -32,7 +32,8 @@ Content-Type: application/json
 - Response headers say what answered: `X-Blaze-Task` (`;inferred` when guessed),
   `X-Blaze-Provider`, `X-Blaze-Model`, `X-RateLimit-Remaining-Requests`.
 - Errors use the OpenAI shape `{"error":{"message","type","code"}}`:
-  `401 invalid_api_key` (sign in again), `429 quota_exceeded` (daily plan allowance; `Retry-After`
+  `401 invalid_api_key` (sign in again), `403 waitlisted` (account on the waiting list, not approved yet),
+  `403 access_rejected` (an admin rejected the account), `429 quota_exceeded` (daily plan allowance; `Retry-After`
   = seconds to 00:00 UTC), `503 blaze_models_busy` (every model cooling; `Retry-After` = when the
   first frees up), `400 invalid_request_error` (two models in a row rejected the request itself).
 
@@ -72,7 +73,18 @@ Plans (editable in `/admin › Plans`; billing isn't wired yet, prices are label
 
 Counted per Blaze account per UTC day in D1 `usage` (one atomic upsert per request). Tokens are
 added when the provider reports `total_tokens`. Assign a plan to an account's email in
-`/admin › Plans`; everyone else is on basic.
+`/admin › Plans` (any plan, basic included; this also approves the account); everyone else is on basic.
+
+## Waiting list (0.3.0)
+
+With "Require approval for new accounts" on (the default; D1 `settings.require_approval`), a
+Blaze account whose email isn't approved gets `403 waitlisted` ("You're on the Blaze waiting
+list. You'll get access as soon as you're approved.") and is listed in `/admin › Waiting list`
+with its name, first/last request and number of tries. Approve (picking a plan, basic by default)
+or Reject; approved and rejected accounts can be moved back to pending. Rejected accounts get
+`403 access_rejected`, even with approval off. `ADMIN_EMAILS` accounts are always allowed.
+Migration `0003_waitlist.sql` approves every account that had a plan assignment, and every
+account with usage history (by user id; it gets its email row on its next request).
 
 ## Privacy
 
@@ -138,7 +150,8 @@ length, free flag) plus one `discovery` row per provider (when, how many, source
   (`*/30 * * * *`, but each provider is refreshed only when its list is ~20 h old, failed ones
   after 6 h), so it's effectively daily. Routing never depends on the catalogue: routes whose
   model isn't in `models` keep working exactly as before.
-- **Plans**: price label, messages/day, tokens/day; assign plans by email.
+- **Plans**: price label, messages/day, tokens/day; assign plans by email (grouped by plan).
+- **Waiting list**: pending / approved / rejected accounts, the "Require approval" switch.
 
 Keys: AES-256-GCM, key derived with HKDF-SHA256 from the `KEY_ENCRYPTION_SECRET` Worker secret,
 fresh 12-byte nonce, provider id bound in as AAD; stored as `v1.<base64>`. Shown only as `••••` +
@@ -158,7 +171,9 @@ says so; add them again.
 | POST | `/admin/api/providers`, PUT/DELETE `/admin/api/providers/:id` | admin |
 | POST | `/admin/api/providers/:id/keys`, PATCH/DELETE `/admin/api/keys/:id`, POST `/admin/api/keys/:id/test` | admin |
 | PUT | `/admin/api/routes/:task`, POST `/admin/api/routes/reset` | admin |
-| PUT | `/admin/api/plans/:id`, PUT `/admin/api/assignments` | admin |
+| PUT | `/admin/api/plans/:id`, PUT `/admin/api/assignments` `{email, plan}` (`plan: ""` removes) | admin |
+| POST | `/admin/api/access` `{email, status: approved\|rejected\|pending, plan?}` (waiting list) | admin |
+| PUT | `/admin/api/settings` `{require_approval: boolean}` | admin |
 | POST | `/admin/api/test-model`, `/admin/api/cooldowns/clear`, `/admin/api/seed`, `/admin/api/logout` | admin |
 | GET | `/admin/api/models` (free discovered models + discovery status) | admin |
 | POST | `/admin/api/providers/:id/discover`, `/admin/api/discover` (all) | admin |
@@ -192,4 +207,5 @@ plan, classify (pure) · `src/providers.ts` OpenAI-compatible + Workers AI adapt
 `src/quota.ts` plans · `src/auth.ts` Blaze tokens, admins · `src/crypto.ts` AES-GCM ·
 `src/db.ts` D1 · `src/admin.ts` admin API · `src/admin-page.ts` the page ·
 `src/defaults.ts` seed providers / routes / plans · `src/catalog.ts` model discovery, capabilities,
-free-only rule, suggested lineups · `migrations/0001_init.sql` schema, `0002_models.sql` catalogue.
+free-only rule, suggested lineups · `migrations/0001_init.sql` schema, `0002_models.sql` catalogue, `0003_waitlist.sql`
+waiting list · `src/access.ts` waiting-list check.

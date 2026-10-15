@@ -1,11 +1,13 @@
 // Blaze Gateway: the Worker entry point.
-//   GET  /health                    {"ok":true,"service":"blaze-gateway","version":"0.2.1"}
+//   GET  /health                    {"ok":true,"service":"blaze-gateway","version":"0.3.0"}
 //   GET  /v1/models                 the task-tagged virtual models (Blaze account token)
 //   POST /v1/chat/completions       OpenAI-compatible, streaming or not (Blaze account token)
+//                                   Accounts not approved get 403 waitlisted / access_rejected (src/access.ts)
 //   GET  /admin                     the admin dashboard; /admin/api/* behind ADMIN_EMAILS / ADMIN_TOKEN
 
 import { handleAdminApi } from "./admin";
 import { adminPage } from "./admin-page";
+import { requireAccess } from "./access";
 import { requireUser } from "./auth";
 import { discoverAll } from "./catalog";
 import { chatCompletions } from "./chat";
@@ -42,7 +44,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   if (m === "OPTIONS" && (path.startsWith("/v1/") || path === "/v1")) return new Response(null, { status: 204, headers: { ...CORS, "Access-Control-Max-Age": "86400" } });
   if (path === "/" || path === "/health") return json({ ok: true, service: "blaze-gateway", version: VERSION });
-  if (path === "/v1/models" && m === "GET") { await requireUser(env, req); return models(); }
+  if (path === "/v1/models" && m === "GET") { await requireAccess(env, await requireUser(env, req)); return models(); }
   if (path === "/v1/chat/completions" && m === "POST") return chatCompletions(req, env, ctx);
   if (path === "/admin" && m === "GET") {
     const n = nonce();

@@ -151,3 +151,19 @@ describe("quota", () => {
     expect(judge(pro, 1, 10 ** 9, t).ok).toBe(true); // 0 = no token cap
   });
 });
+
+describe("waiting list decision (0.3.0)", () => {
+  it("admins, approved and grandfathered accounts are let in; rejected never; pending only with approval off", async () => {
+    const { decide } = await import("../src/access");
+    const c = (status: any, legacy = false, requireApproval = true) => ({ status, legacy, requireApproval });
+    expect(decide(c(null), true)).toBe("allow");
+    expect(decide(c("rejected"), true)).toBe("allow");
+    expect(decide(c("approved"), false)).toBe("allow");
+    expect(decide(c("rejected", true, false), false)).toBe("rejected");
+    expect(decide(c(null, true), false)).toBe("allow_legacy");
+    expect(decide(c("pending"), false)).toBe("waitlisted");
+    expect(decide(c(null), false)).toBe("waitlisted");
+    expect(decide(c(null, false, false), false)).toBe("allow");
+    expect(decide(c("pending", false, false), false)).toBe("allow");
+  });
+});

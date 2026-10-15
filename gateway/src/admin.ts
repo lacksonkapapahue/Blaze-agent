@@ -1,7 +1,8 @@
 // /admin/api/*: providers, keys, task routes, plans, health. Every route needs requireAdmin.
 // Keys go in once and come back only as "••••" + last 4.
 
-import { adminEmails, requireAdmin } from "./auth";
+import { loadAccess, setStatusStmt, type AccessStatus } from "./access";
+import { adminEmails, requireAdmin, type Admin } from "./auth";
 import { discoverAll, discoverProvider, isRoutable, loadModels, suggestLineup, TASK_INFO } from "./catalog";
 import { encryptKey, last4, masked, MIN_SECRET_LEN, decryptKey } from "./crypto";
 import { ensureSeeded, invalidateConfig, loadConfig, loadMarks, saveMarkStmt, seed } from "./db";
@@ -110,12 +111,22 @@ async function state(env: Env): Promise<Response> {
   if (!env.AUTH_KV && !env.AUTH && !env.BLAZE_AUTH_URL) warnings.push("No way to check Blaze accounts (AUTH_KV / AUTH): every app request will fail.");
   if (!adminEmails(env).length) warnings.push("ADMIN_EMAILS is empty: only the admin token can sign in.");
   void marks;
+  const access = await loadAccess(env.DB);
+  if (!access.ok) warnings.push("D1 migration 0003_waitlist.sql isn't applied: the waiting list is off and every Blaze account can use the gateway.");
   return json({
     version: VERSION, now, day, warnings,
     providers, routes: cfg.routes, tasks: TASKS, task_info: TASK_INFO,
     discovery: disc.results,
     plans: cfg.plans, default_plan: DEFAULT_PLAN,
-    assignments: [...cfg.assignments.entries()].map(([email, plan]) => ({ email, plan })),
+    assignments: [...cfg.assignments.entries()].map(([email, plan]) => ({ email, plan })).sort((a, b) => a.email.localeCompare(b.email)),
+    access: {
+      available: access.ok,
+      require_approval: access.require_approval,
+      legacy_pending_email: access.legacy,
+      pending: access.rows.filter(r => r.status === "pending"),
+      approved: access.rows.filter(r => r.status === "approved"),
+      rejected: access.rows.filter(r => r.status === "rejected"),
+    },
     health, usage_today: (usage!.results as any[])[0] ?? { users: 0, requests: 0, tokens: 0 },
   });
 }
@@ -347,21 +358,78 @@ async function putPlan(req: Request, env: Env, id: string): Promise<Response> {
   return json({ ok: true });
 }
 
-async function putAssignment(req: Request, env: Env): Promise<Response> {
+async function planExists(env: Env, plan: string): Promise<void> {
+  const p = await env.DB.prepare("SELECT id FROM plans WHERE id = ?1").bind(plan).first();
+  if (!p) throw new HttpError(400, "no_plan", `No plan called '${plan}'`);
+}
+
+function emailOf(v: unknown): string {
+  const email = str(v, 254).toLowerCase();
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", "Enter a valid email address");
+  return email;
+}
+
+/**
+ * PUT /admin/api/assignments {email, plan}: puts the account on [plan] (an explicit row for every
+ * plan, the default one included) and approves it. {plan: ""} removes the assignment (the account
+ * falls back to the default plan; its approval is unchanged).
+ * 0.2.x deleted the row when the plan was the default, so a "basic" assignment never showed up.
+ */
+async function putAssignment(req: Request, env: Env, admin: Admin): Promise<Response> {
   const b = await readJSON(req, 16_384);
-  const email = str(b.email, 254).toLowerCase();
+  const email = emailOf(b.email);
   const plan = str(b.plan, 32);
-  if (!EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", "Email");
-  if (!plan || plan === DEFAULT_PLAN) {
+  if (!plan) {
     await env.DB.prepare("DELETE FROM plan_assignments WHERE email = ?1").bind(email).run();
-  } else {
-    const p = await env.DB.prepare("SELECT id FROM plans WHERE id = ?1").bind(plan).first();
-    if (!p) throw new HttpError(400, "no_plan", "No such plan");
-    await env.DB.prepare("INSERT INTO plan_assignments (email, plan, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET plan = ?2, updated_at = ?3")
-      .bind(email, plan, Date.now()).run();
+    invalidateConfig();
+    return json({ ok: true, email, plan: null });
   }
+  await planExists(env, plan);
+  const now = Date.now();
+  const stmts = [
+    env.DB.prepare("INSERT INTO plan_assignments (email, plan, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET plan = ?2, updated_at = ?3").bind(email, plan, now),
+  ];
+  const acc = await loadAccess(env.DB);
+  if (acc.ok) stmts.push(setStatusStmt(env.DB, email, "approved", admin.email, now));
+  await env.DB.batch(stmts);
   invalidateConfig();
-  return json({ ok: true });
+  return json({ ok: true, email, plan, approved: acc.ok });
+}
+
+/**
+ * POST /admin/api/access {email, status: approved|rejected|pending, plan?}: the waiting list.
+ * Approving also assigns [plan] (default: the account's current plan, else the default plan).
+ */
+async function postAccess(req: Request, env: Env, admin: Admin): Promise<Response> {
+  const b = await readJSON(req, 16_384);
+  const email = emailOf(b.email);
+  const status = str(b.status, 16) as AccessStatus;
+  if (status !== "approved" && status !== "rejected" && status !== "pending") throw new HttpError(400, "bad_status", "status: approved, rejected or pending");
+  const acc = await loadAccess(env.DB);
+  if (!acc.ok) throw new HttpError(503, "no_migration", "Apply D1 migration 0003_waitlist.sql first");
+  const now = Date.now();
+  const stmts = [setStatusStmt(env.DB, email, status, admin.email, now)];
+  let plan: string | null = null;
+  if (status === "approved") {
+    const cur = await env.DB.prepare("SELECT plan FROM plan_assignments WHERE email = ?1").bind(email).first<{ plan: string }>();
+    plan = str(b.plan, 32) || cur?.plan || DEFAULT_PLAN;
+    await planExists(env, plan);
+    stmts.push(env.DB.prepare("INSERT INTO plan_assignments (email, plan, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET plan = ?2, updated_at = ?3").bind(email, plan, now));
+  }
+  await env.DB.batch(stmts);
+  invalidateConfig();
+  return json({ ok: true, email, status, plan });
+}
+
+/** PUT /admin/api/settings {require_approval: boolean} */
+async function putSettings(req: Request, env: Env): Promise<Response> {
+  const b = await readJSON(req, 16_384);
+  if (typeof b.require_approval !== "boolean") throw new HttpError(400, "bad_value", "require_approval: true or false");
+  const acc = await loadAccess(env.DB);
+  if (!acc.ok) throw new HttpError(503, "no_migration", "Apply D1 migration 0003_waitlist.sql first");
+  await env.DB.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('require_approval', ?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?1, updated_at = ?2")
+    .bind(b.require_approval ? "1" : "0", Date.now()).run();
+  return json({ ok: true, require_approval: b.require_approval });
 }
 
 export async function handleAdminApi(req: Request, env: Env, path: string): Promise<Response> {
@@ -380,7 +448,9 @@ export async function handleAdminApi(req: Request, env: Env, path: string): Prom
   if (path === "/admin/api/routes/suggest" && m === "POST") return suggestRoutes(req, env);
   if (path === "/admin/api/models" && m === "GET") return listModels(env);
   if (path === "/admin/api/discover" && m === "POST") return discoverEvery(env);
-  if (path === "/admin/api/assignments" && m === "PUT") return putAssignment(req, env);
+  if (path === "/admin/api/assignments" && m === "PUT") return putAssignment(req, env, admin);
+  if (path === "/admin/api/access" && m === "POST") return postAccess(req, env, admin);
+  if (path === "/admin/api/settings" && m === "PUT") return putSettings(req, env);
   let x: RegExpExecArray | null;
   if ((x = /^\/admin\/api\/providers\/([a-z0-9_-]{1,32})$/.exec(path))) {
     if (m === "PUT") return upsertProvider(req, env, x[1]);

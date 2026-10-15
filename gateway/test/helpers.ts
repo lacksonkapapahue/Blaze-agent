@@ -32,9 +32,18 @@ class FakeStmt {
 
 export class FakeD1 {
   sqlite = new DatabaseSync(":memory:");
-  constructor() {
+  private pending: string[];
+  /** [before]: stop before the migration whose file name starts with it (apply the rest with migrate()). */
+  constructor(opts: { before?: string } = {}) {
     const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-    for (const f of readdirSync(dir).filter(f => f.endsWith(".sql")).sort()) this.sqlite.exec(readFileSync(join(dir, f), "utf8"));
+    const files = readdirSync(dir).filter(f => f.endsWith(".sql")).sort().map(f => join(dir, f));
+    const cut = opts.before ? files.findIndex(f => f.split("/").pop()!.startsWith(opts.before!)) : -1;
+    this.pending = cut < 0 ? [] : files.slice(cut);
+    for (const f of cut < 0 ? files : files.slice(0, cut)) this.sqlite.exec(readFileSync(f, "utf8"));
+  }
+  /** Applies the migrations held back by [before]. */
+  migrate() {
+    for (const f of this.pending.splice(0)) this.sqlite.exec(readFileSync(f, "utf8"));
   }
   prepare(sql: string) {
     return new FakeStmt(this.sqlite, sql);
@@ -50,6 +59,10 @@ export class FakeD1 {
       this.sqlite.exec("ROLLBACK");
       throw e;
     }
+  }
+  /** Approves [email] on the waiting list (as an admin would). */
+  approve(email: string) {
+    this.sqlite.prepare("INSERT INTO access (email, status, decided_by) VALUES (?, 'approved', 'test') ON CONFLICT (email) DO UPDATE SET status = 'approved'").run(email);
   }
   rows(sql: string): any[] {
     return this.sqlite.prepare(sql).all().map(r => ({ ...(r as object) }));
@@ -131,8 +144,8 @@ export async function makeSession(kv: FakeKV, id: string, email: string): Promis
   return token;
 }
 
-export function makeEnv(over: Partial<Env> = {}): { env: Env; db: FakeD1; kv: FakeKV; ai: FakeAI } {
-  const db = new FakeD1();
+export function makeEnv(over: Partial<Env> = {}, dbOpts: { before?: string } = {}): { env: Env; db: FakeD1; kv: FakeKV; ai: FakeAI } {
+  const db = new FakeD1(dbOpts);
   const kv = new FakeKV();
   const ai = new FakeAI();
   const env = {

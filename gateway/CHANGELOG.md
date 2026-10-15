@@ -1,5 +1,28 @@
 # Blaze Gateway changelog
 
+## 0.3.0 (2026-10-15)
+
+- **Waiting list.** A Blaze account whose email isn't approved is recorded (email, name, first /
+  last seen, tries) and refused with `403 waitlisted`: "You're on the Blaze waiting list. You'll
+  get access as soon as you're approved." Rejected accounts get `403 access_rejected`. Applies to
+  `/v1/chat/completions` and `/v1/models`, before the quota (refused requests aren't counted).
+  `ADMIN_EMAILS` accounts are always allowed.
+- `/admin › Waiting list`: pending accounts with Approve (choose a plan, basic by default) /
+  Reject; approved and rejected lists with Undo (back to pending); "Require approval for new
+  accounts" switch (on by default; off lets new and pending accounts in, rejected stay blocked).
+  Assigning a plan in Plans also approves the account.
+- Migration `0003_waitlist.sql` (`settings`, `access`, `access_legacy`): grandfathers every account
+  with a plan assignment, and every account with usage history (kept by user id, turned into an
+  approved row on its next request). Without the migration the gateway behaves like 0.2.x and
+  /admin warns.
+- Fix: plans other than the one shown could look impossible to assign. Assigning the default plan
+  (basic) deleted the row, so the account never appeared; the plan dropdown was filled only once,
+  so a plan added later never showed up; and a failure only flashed a toast. Now every plan,
+  basic included, is stored as an explicit row; the dropdown is rebuilt on every load; the list is
+  grouped by plan with a plan picker and Remove per account; success and errors show in the card.
+- New admin API: `POST /admin/api/access`, `PUT /admin/api/settings`; `PUT /admin/api/assignments`
+  with `plan: ""` removes an assignment.
+
 ## 0.2.2 (2026-10-14)
 
 - `blaze_avoid` (app v0.26.2): up to 8 "provider/model" routes the app just got an empty (reasoning-only)

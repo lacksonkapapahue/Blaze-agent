@@ -28,4 +28,4 @@ export interface Env {
   ADMIN_TOKEN?: string;
 }
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.3.0";

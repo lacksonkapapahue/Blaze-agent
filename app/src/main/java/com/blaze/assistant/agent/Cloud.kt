@@ -85,7 +85,7 @@ object Cloud {
     fun friendly(code: Int, text: String): String {
         val t = text.lowercase()
         return when {
-            code == 401 || code == 403 -> EXPIRED
+            code == 401 || code == 403 -> PlainError.access(text) ?: EXPIRED
             code == 429 && ("allowance" in t || "quota_exceeded" in t) -> "You've used today's free messages. They come back tomorrow."
             code == 429 || code in 500..599 || gone(t) || code == 404 -> BUSY
             else -> UNREACHABLE
@@ -125,7 +125,7 @@ object Cloud {
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: LlmClient.LlmException) {
                 if (trim(e)) continue
-                if (e.code == 401 || e.code == 403) throw LlmClient.LlmException(EXPIRED, e.code)
+                if (e.code == 401 || e.code == 403) throw LlmClient.LlmException(PlainError.access(e.message) ?: EXPIRED, e.code) // gateway 0.3.0 waiting list
                 if (!retryable(e.code, e.message.orEmpty())) {
                     if (ToolCalls.isShapeError(e)) throw e
                     throw LlmClient.LlmException(friendly(e.code, e.message.orEmpty()), e.code, e.retryAfterSec)

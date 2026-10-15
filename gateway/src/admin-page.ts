@@ -53,6 +53,9 @@ details.adv>summary{cursor:pointer;font:12px var(--mono);color:#c9c9c3;margin-to
 .res .empty{padding:8px 10px;color:var(--muted);font-size:13px}
 input::placeholder{color:#8e8e88}.task{scroll-margin-top:70px}
 .dirty{color:var(--fire);font:11px var(--mono)}
+.badge{display:inline-block;margin-left:6px;min-width:18px;padding:0 5px;border-radius:999px;background:var(--accent);color:#1c1c1f;font:11px var(--mono);text-align:center}
+.grp{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--fire);padding:12px 8px 4px}
+h4{margin:14px 0 6px;font-size:14px;font-weight:600}.sw{display:flex;gap:8px;align-items:center;cursor:pointer}
 </style></head><body>
 <div id="login" class="login hidden">
   <div class="lbl">Blaze Gateway</div><h2 style="margin:6px 0 18px;font-weight:600">Admin sign-in</h2>
@@ -67,7 +70,7 @@ input::placeholder{color:#8e8e88}.task{scroll-margin-top:70px}
 </div>
 <div id="app" class="hidden">
 <header><b>BLAZE GATEWAY</b><span class="v" id="ver"></span><nav id="nav">
-<button data-t="health" class="on">Health</button><button data-t="routes">Routes</button><button data-t="providers">Providers</button><button data-t="plans">Plans</button></nav>
+<button data-t="health" class="on">Health</button><button data-t="routes">Routes</button><button data-t="providers">Providers</button><button data-t="plans">Plans</button><button data-t="access">Waiting list<span id="wl-badge"></span></button></nav>
 <span class="sp"></span><span class="v" id="who"></span><button class="b" id="out">Sign out</button></header>
 <main>
 <div id="warns"></div>
@@ -98,9 +101,17 @@ input::placeholder{color:#8e8e88}.task{scroll-margin-top:70px}
 <section id="t-plans" class="hidden">
   <div class="card"><div class="lbl" style="margin-bottom:8px">Plans · new accounts start on <span id="defplan"></span> · billing isn't wired yet</div>
   <table><thead><tr><th>Plan</th><th>Price / month (USD)</th><th>Messages / day</th><th>Tokens / day (0 = no cap)</th><th></th></tr></thead><tbody id="plans"></tbody></table></div>
-  <div class="card"><div class="lbl" style="margin-bottom:8px">Assign a plan to an account</div>
+  <div class="card"><div class="lbl" style="margin-bottom:8px">Assign a plan to an account · also approves it</div>
   <div class="row"><input id="as-email" type="email" placeholder="account email" class="grow"><select id="as-plan"></select><button class="b p" id="as-save">Save</button></div>
+  <div id="as-note"></div>
   <table style="margin-top:10px"><tbody id="assign"></tbody></table></div>
+</section>
+<section id="t-access" class="hidden">
+  <div class="card"><div class="row"><div class="grow"><div class="lbl">Waiting list</div><div class="muted" style="font-size:13px;margin-top:4px">Blaze accounts that aren't approved get "You're on the Blaze waiting list" and show up here. Admins are always allowed.</div></div>
+  <label class="sw"><input type="checkbox" id="wl-req"> Require approval for new accounts</label></div><div id="wl-note"></div></div>
+  <div class="card"><div class="lbl">Pending · <span id="wl-np">0</span></div><table><tbody id="wl-pending"></tbody></table></div>
+  <div class="card"><div class="lbl">Approved · <span id="wl-na">0</span></div><div id="wl-legacy" class="muted" style="font-size:12px;margin-top:4px"></div><table><tbody id="wl-approved"></tbody></table></div>
+  <div class="card"><div class="lbl">Rejected · <span id="wl-nr">0</span></div><table><tbody id="wl-rejected"></tbody></table></div>
 </section>
 </main></div>
 <div id="toast"></div>
@@ -117,7 +128,7 @@ async function api(method,path,body){const r=await fetch("/admin/api/"+path,{met
  const j=await r.json().catch(()=>({}));if(r.status===401){signOut(true);throw new Error("signed out");}if(!r.ok)throw new Error((j.error&&j.error.message)||j.message||("HTTP "+r.status));return j;}
 function ago(t){if(!t)return "–";const s=Math.round((Date.now()-t)/1000);if(s<60)return s+"s ago";if(s<3600)return Math.round(s/60)+"m ago";if(s<86400)return Math.round(s/3600)+"h ago";return Math.round(s/86400)+"d ago";}
 function inS(t){const s=Math.max(0,Math.round((t-Date.now())/1000));return s<60?s+"s":s<3600?Math.round(s/60)+"m":Math.round(s/3600)+"h";}
-function show(id){for(const s of ["health","routes","providers","plans"])$("#t-"+s).classList.toggle("hidden",s!==id);for(const b of document.querySelectorAll("#nav button"))b.classList.toggle("on",b.dataset.t===id);tab=id;if(id==="routes")loadModels().catch(e=>toast(e.message));}
+function show(id){for(const s of ["health","routes","providers","plans","access"])$("#t-"+s).classList.toggle("hidden",s!==id);for(const b of document.querySelectorAll("#nav button"))b.classList.toggle("on",b.dataset.t===id);tab=id;if(id==="routes")loadModels().catch(e=>toast(e.message));}
 function signOut(silent){if(!silent&&TOKEN)fetch("/admin/api/logout",{method:"POST",headers:{Authorization:"Bearer "+TOKEN}}).catch(()=>{});TOKEN="";sessionStorage.removeItem("bz_admin");$("#app").classList.add("hidden");$("#login").classList.remove("hidden");}
 async function signIn(body){$("#lerr").textContent="";try{const r=await fetch("/admin/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||"Sign-in failed");TOKEN=j.token;
  const me=await fetch("/admin/api/me",{headers:{Authorization:"Bearer "+TOKEN}});if(!me.ok)throw new Error("Not an admin");sessionStorage.setItem("bz_admin",TOKEN);$("#pw").value="";$("#tk").value="";start();}catch(e){TOKEN="";$("#lerr").textContent=e.message;}}
@@ -127,10 +138,10 @@ for(const b of document.querySelectorAll("#nav button"))b.onclick=()=>show(b.dat
 /* force=true after the admin's own actions (always re-render); the 15 s refresh passes false so it never wipes what's being typed. */
 async function load(force){S=await api("GET","state");render(force!==false);}
 async function loadModels(){CAT=await api("GET","models");MI=new Map(CAT.models.map(m=>[m.provider+"|"+m.id,m]));renderRoutes();}
-function editing(){const a=document.activeElement;return !!(a&&a.closest&&a.closest("#t-routes,#t-providers,#t-plans")&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"||a.tagName==="SELECT"));}
+function editing(){const a=document.activeElement;return !!(a&&a.closest&&a.closest("#t-routes,#t-providers,#t-plans,#t-access")&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"||a.tagName==="SELECT"));}
 function render(force){$("#ver").textContent="v"+S.version;const w=$("#warns");w.replaceChildren(...S.warnings.map(x=>el("div",{class:"card warnbox"},"! "+x)));
  $("#s-req").textContent=S.usage_today.requests;$("#s-users").textContent=S.usage_today.users;$("#s-tok").textContent=Number(S.usage_today.tokens).toLocaleString();
- $("#s-cool").textContent=S.health.filter(h=>h.cooling_until).length;renderHealth();if(force||!editing()){renderRoutes();renderProviders();renderPlans();}}
+ $("#s-cool").textContent=S.health.filter(h=>h.cooling_until).length;renderHealth();renderBadge();if(force||!editing()){renderRoutes();renderProviders();renderPlans();renderAccess();}}
 function renderHealth(){$("#health").replaceChildren(...S.health.map(h=>{const st=h.cooling_until?"warn":(h.last_fail_at>h.last_ok_at?"bad":(h.last_ok_at?"ok":""));
  const btn=el("button",{class:"b",onclick:async e=>{e.target.textContent="…";try{const r=await api("POST","test-model",{provider:h.provider,model:h.model});toast(r.ok?("ok · "+r.ms+" ms"):("fail "+r.status+" · "+(r.kind||"")+" "+(r.error||"")).slice(0,160));}catch(x){toast(x.message);}load();}},"test");
  const clr=h.cooling_until?el("button",{class:"b",onclick:async()=>{await api("POST","cooldowns/clear",{provider:h.provider,model:h.model});load();}},"clear"):null;
@@ -214,11 +225,46 @@ $("#np-add").onclick=async()=>{try{await api("POST","providers",{id:$("#np-id").
 function renderPlans(){$("#defplan").textContent=S.default_plan;$("#plans").replaceChildren(...S.plans.map(p=>{const pr=el("input",{type:"number",min:"0",step:"1",value:p.price_usd,size:"6"});
  const r=el("input",{type:"number",min:"0",value:p.daily_requests,size:"8"});const t=el("input",{type:"number",min:"0",value:p.daily_tokens,size:"12"});
  return el("tr",{},el("td",{class:"m"},p.id+(p.id===S.default_plan?" (default)":"")),el("td",{},pr),el("td",{},r),el("td",{},t),el("td",{},el("button",{class:"b p",onclick:async()=>{try{await api("PUT","plans/"+p.id,{price_usd:+pr.value,daily_requests:+r.value,daily_tokens:+t.value});toast(p.id+" saved");load(true);}catch(e){toast(e.message);}}},"Save")));}));
- const sel=$("#as-plan");if(!sel.options.length)for(const p of S.plans)sel.append(el("option",{value:p.id},p.id));
- $("#assign").replaceChildren(...S.assignments.map(a=>el("tr",{},el("td",{class:"m"},a.email),el("td",{class:"m"},a.plan),el("td",{},el("button",{class:"b",onclick:async()=>{await api("PUT","assignments",{email:a.email,plan:S.default_plan});load(true);}},"back to "+S.default_plan)))));}
-$("#as-save").onclick=async()=>{try{await api("PUT","assignments",{email:$("#as-email").value,plan:$("#as-plan").value});$("#as-email").value="";toast("saved");load(true);}catch(e){toast(e.message);}};
+ /* 0.3.0: the dropdown is rebuilt on every load (0.2.x filled it once, so plans added later never showed), keeping the choice. */
+ const sel=$("#as-plan");const keep=sel.value;sel.replaceChildren(...S.plans.map(p=>el("option",{value:p.id},p.id+(p.id===S.default_plan?" (default)":""))));
+ sel.value=S.plans.some(p=>p.id===keep)?keep:S.default_plan;
+ const st=accessOf();const known=S.plans.map(p=>p.id);const groups=known.concat([...new Set(S.assignments.map(a=>a.plan))].filter(x=>known.indexOf(x)<0));const rows=[];
+ for(const g of groups){const as=S.assignments.filter(a=>a.plan===g);if(!as.length)continue;
+  rows.push(el("tr",{},el("td",{colspan:"3",class:"grp"},g+(known.indexOf(g)<0?" (no such plan: uses "+S.default_plan+")":"")+" · "+as.length)));
+  for(const a of as){const ps=planSelect(a.plan);ps.onchange=()=>assign(a.email,ps.value,"as-note");const s=st[a.email];
+   rows.push(el("tr",{},el("td",{class:"m"},a.email,s&&s!=="approved"?el("span",{class:"tag "+(s==="rejected"?"x":"w"),style:"margin-left:8px"},s==="rejected"?"rejected":"not approved"):null),el("td",{},ps),
+    el("td",{},el("button",{class:"b d",onclick:async()=>{if(!confirm("Remove "+a.email+"'s plan? They fall back to "+S.default_plan+"."))return;try{await api("PUT","assignments",{email:a.email,plan:""});note("as-note",a.email+" removed (now on "+S.default_plan+")","ok");toast(a.email+" removed");}catch(e){note("as-note",e.message,"bad");toast(e.message);}load(true);}},"remove"))));}}
+ $("#assign").replaceChildren(...(rows.length?rows:[el("tr",{},el("td",{class:"muted"},"No accounts assigned yet: everyone is on "+S.default_plan+"."))]));
+ const n=noteEl("as-note");$("#as-note").replaceChildren(...(n?[n]:[]));}
+function planSelect(v){const s=el("select",{});for(const p of S.plans)s.append(el("option",{value:p.id},p.id));s.value=S.plans.some(p=>p.id===v)?v:S.default_plan;return s;}
+async function assign(email,plan,nk){try{const r=await api("PUT","assignments",{email:email,plan:plan});note(nk,r.email+" is on "+r.plan+(r.approved?" and approved":""),"ok");toast(r.email+" → "+r.plan);await load(true);return true;}catch(e){note(nk,e.message,"bad");toast(e.message);renderPlans();renderAccess();return false;}}
+$("#as-save").onclick=async()=>{const em=$("#as-email").value.trim();if(!em){note("as-note","Enter an account email first","warn");renderPlans();return;}const pl=$("#as-plan").value;if(!pl){note("as-note","Pick a plan","warn");renderPlans();return;}if(await assign(em,pl,"as-note"))$("#as-email").value="";};
+$("#as-email").onkeydown=e=>{if(e.key==="Enter")$("#as-save").click();};
+
+/* ---------- waiting list ---------- */
+function accessOf(){const m={};const A=S.access;if(!A||!A.available)return m;for(const k of ["pending","approved","rejected"])for(const r of A[k])m[r.email]=r.status;return m;}
+function renderBadge(){const A=S.access;const n=A&&A.available?A.pending.length:0;$("#wl-badge").replaceChildren(...(n?[el("span",{class:"badge"},String(n))]:[]));}
+async function setAccess(email,status,plan){try{const r=await api("POST","access",{email:email,status:status,plan:plan});
+ note("wl-note",status==="approved"?(email+" approved on "+r.plan):status==="rejected"?(email+" rejected"):(email+" moved back to pending"),status==="rejected"?"warn":"ok");toast(email+": "+status);await load(true);}
+ catch(e){note("wl-note",e.message,"bad");toast(e.message);renderAccess();}}
+function who(r){return r.name?el("div",{class:"muted",style:"font-size:12px"},r.name):null;}
+function renderAccess(){const A=S.access;const n=noteEl("wl-note");$("#wl-note").replaceChildren(...(n?[n]:[]));
+ const req=$("#wl-req");
+ if(!A||!A.available){req.disabled=true;$("#wl-np").textContent=$("#wl-na").textContent=$("#wl-nr").textContent="–";for(const id of ["#wl-pending","#wl-approved","#wl-rejected"])$(id).replaceChildren(el("tr",{},el("td",{class:"muted"},"Apply D1 migration 0003_waitlist.sql to turn the waiting list on.")));return;}
+ req.disabled=false;req.checked=!!A.require_approval;
+ const plan=r=>{const a=S.assignments.find(x=>x.email===r.email);return a?a.plan:S.default_plan;};
+ $("#wl-np").textContent=A.pending.length;$("#wl-na").textContent=A.approved.length;$("#wl-nr").textContent=A.rejected.length;
+ $("#wl-pending").replaceChildren(...(A.pending.length?[el("tr",{},el("th",{},"Account"),el("th",{},"First asked"),el("th",{},"Last asked"),el("th",{},"Tries"),el("th",{},"Plan"),el("th",{},""))].concat(A.pending.map(r=>{const ps=planSelect(S.default_plan);
+  return el("tr",{},el("td",{class:"m"},r.email,who(r)),el("td",{class:"m"},ago(r.first_seen)),el("td",{class:"m"},ago(r.last_seen)),el("td",{class:"m"},String(r.count)),el("td",{},ps),
+   el("td",{},el("button",{class:"b p",onclick:()=>setAccess(r.email,"approved",ps.value)},"Approve")," ",el("button",{class:"b d",onclick:()=>setAccess(r.email,"rejected")},"Reject")));})):[el("tr",{},el("td",{class:"muted"},"Nobody is waiting."))]));
+ $("#wl-approved").replaceChildren(...(A.approved.length?A.approved.map(r=>el("tr",{},el("td",{class:"m"},r.email,who(r)),el("td",{class:"m"},plan(r)),el("td",{class:"m"},(r.decided_by?"by "+r.decided_by+" · ":"")+ago(r.decided_at)),
+  el("td",{},el("button",{class:"b",title:"back to pending: their requests are refused again",onclick:()=>setAccess(r.email,"pending")},"Undo")))):[el("tr",{},el("td",{class:"muted"},"No approved accounts yet."))]));
+ $("#wl-legacy").textContent=A.legacy_pending_email?(A.legacy_pending_email+" earlier account(s) with usage history are allowed and will be listed here on their next request."):"";
+ $("#wl-rejected").replaceChildren(...(A.rejected.length?A.rejected.map(r=>el("tr",{},el("td",{class:"m"},r.email,who(r)),el("td",{class:"m"},r.count+" tries · last "+ago(r.last_seen)),el("td",{class:"m"},(r.decided_by?"by "+r.decided_by+" · ":"")+ago(r.decided_at)),
+  el("td",{},el("button",{class:"b",title:"back to pending",onclick:()=>setAccess(r.email,"pending")},"Undo")))):[el("tr",{},el("td",{class:"muted"},"Nobody rejected."))]));}
+$("#wl-req").onchange=async e=>{const v=e.target.checked;try{await api("PUT","settings",{require_approval:v});note("wl-note",v?"New accounts now wait for approval":"Approval is off: any Blaze account can use the gateway (rejected ones stay blocked)",v?"ok":"warn");toast(v?"approval on":"approval off");}catch(x){note("wl-note",x.message,"bad");toast(x.message);}load(true);};
 async function start(){$("#login").classList.add("hidden");$("#app").classList.remove("hidden");try{const me=await api("GET","me");$("#who").textContent=me.admin.email;await load(true);loadModels().catch(()=>{});}catch(e){toast(e.message);}}
-setInterval(()=>{if(TOKEN&&S&&tab==="health"&&!document.hidden)load(false).catch(()=>{});},15000);
+setInterval(()=>{if(TOKEN&&S&&(tab==="health"||tab==="access")&&!document.hidden)load(false).catch(()=>{});},15000);
 if(TOKEN)start();else $("#login").classList.remove("hidden");
 })();
 </script></body></html>`;

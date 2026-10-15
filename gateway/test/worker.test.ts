@@ -57,6 +57,7 @@ beforeEach(async () => {
   ({ env, db, kv, ai } = makeEnv());
   ctx = new FakeCtx();
   userToken = await makeSession(kv, "u_user1", "someone@example.com");
+  db.approve("someone@example.com"); // 0.3.0: the waiting list is on by default
   calls.length = 0;
   upstream = (url, init) => okJSON(JSON.parse(String(init.body)).model);
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -70,7 +71,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("basics", () => {
   it("health", async () => {
     const r = await call("GET", "/health");
-    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.2.1" });
+    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.3.0" });
   });
   it("app endpoints need a live Blaze session", async () => {
     expect((await call("GET", "/v1/models")).status).toBe(401);
@@ -90,6 +91,7 @@ describe("basics", () => {
   it("falls back to blaze-auth /v1/me through the AUTH service binding", async () => {
     const me = vi.fn(async () => new Response(JSON.stringify({ user: { id: "u_svc", email: "svc@example.com" } }), { status: 200 }));
     env = { ...env, AUTH_KV: undefined, AUTH: { fetch: me } as unknown as Fetcher };
+    db.approve("svc@example.com");
     expect((await call("GET", "/v1/models", undefined, "bz_" + "s".repeat(43))).status).toBe(200);
     expect(me).toHaveBeenCalledOnce();
   });
@@ -471,5 +473,154 @@ describe("model discovery and the route editor API", () => {
     const r = await chat();
     expect(r.status).toBe(200);
     expect(r.headers.get("X-Blaze-Model")).toBe("anything-not-discovered");
+  });
+});
+
+describe("plans: assigning any plan (0.3.0 fix)", () => {
+  it("stores an explicit row for every plan, the default one included, and the account gets that plan", async () => {
+    for (const [email, plan] of [["a@example.com", "basic"], ["b@example.com", "standard"], ["c@example.com", "pro"]]) {
+      const r = await admin("PUT", "assignments", { email: email.toUpperCase() + " ", plan });
+      expect(r.status).toBe(200);
+      expect(r.body).toMatchObject({ ok: true, email, plan, approved: true });
+    }
+    const s = await admin("GET", "state");
+    expect(s.body.assignments).toEqual([
+      { email: "a@example.com", plan: "basic" }, { email: "b@example.com", plan: "standard" }, { email: "c@example.com", plan: "pro" },
+    ]);
+    expect(s.body.access.approved.map((r: any) => r.email).sort()).toEqual(["a@example.com", "b@example.com", "c@example.com", "someone@example.com"]);
+    // standard end to end: its limit applies to that account's chats
+    await admin("PUT", "plans/standard", { price_usd: 10, daily_requests: 1, daily_tokens: 0 });
+    resetDbCacheForTests();
+    const tok = await makeSession(kv, "u_b", "b@example.com");
+    const one = await call("POST", "/v1/chat/completions", { messages: [{ role: "user", content: "hi" }] }, tok);
+    expect(one.status).toBe(200);
+    const two = await call("POST", "/v1/chat/completions", { messages: [{ role: "user", content: "hi" }] }, tok);
+    expect(two.status).toBe(429);
+    expect((await two.json<any>()).error.message).toContain("standard plan");
+  });
+  it("a plan added later can be assigned; bad plans and emails are refused with a message", async () => {
+    await admin("PUT", "plans/team", { price_usd: 5, daily_requests: 10, daily_tokens: 0 });
+    expect((await admin("PUT", "assignments", { email: "t@example.com", plan: "team" })).status).toBe(200);
+    const bad = await admin("PUT", "assignments", { email: "t@example.com", plan: "nope" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.message).toContain("nope");
+    expect((await admin("PUT", "assignments", { email: "not-an-email", plan: "pro" })).status).toBe(400);
+    expect((await admin("PUT", "assignments", { email: "t@example.com", plan: "" })).status).toBe(200);
+    expect(db.rows("SELECT * FROM plan_assignments WHERE email = 't@example.com'")).toEqual([]);
+  });
+  it("the admin page rebuilds the plan dropdown on every load and groups assignments by plan", async () => {
+    const html = await (await call("GET", "/admin")).text();
+    expect(html).not.toContain("if(!sel.options.length)");
+    expect(html).toContain("sel.replaceChildren(");
+    expect(html).toContain("Waiting list");
+  });
+});
+
+describe("waiting list (0.3.0)", () => {
+  const ask = (tok: string) => call("POST", "/v1/chat/completions", { messages: [{ role: "user", content: "hello" }] }, tok);
+
+  it("an account that isn't approved is recorded as pending and refused with 403 waitlisted", async () => {
+    const tok = await makeSession(kv, "u_new", "new@example.com");
+    const r = await ask(tok);
+    expect(r.status).toBe(403);
+    const b = await r.json<any>();
+    expect(b.error.code).toBe("waitlisted");
+    expect(b.error.message).toBe("You're on the Blaze waiting list. You'll get access as soon as you're approved.");
+    expect((await call("GET", "/v1/models", undefined, tok)).status).toBe(403);
+    const row = db.rows("SELECT * FROM access WHERE email = 'new@example.com'")[0];
+    expect(row).toMatchObject({ status: "pending", uid: "u_new", name: "T", count: 2 });
+    expect(row.first_seen).toBeGreaterThan(0);
+    expect(row.last_seen).toBeGreaterThanOrEqual(row.first_seen);
+    expect(db.rows("SELECT * FROM usage WHERE uid = 'u_new'")).toEqual([]); // not charged
+    const s = await admin("GET", "state");
+    expect(s.body.access.require_approval).toBe(true);
+    expect(s.body.access.pending.map((x: any) => x.email)).toEqual(["new@example.com"]);
+  });
+
+  it("approve (with a plan) → allowed on that plan; reject → 403 access_rejected; undo → pending", async () => {
+    const tok = await makeSession(kv, "u_new", "new@example.com");
+    expect((await ask(tok)).status).toBe(403);
+    const ok = await admin("POST", "access", { email: "new@example.com", status: "approved", plan: "standard" });
+    expect(ok.body).toMatchObject({ ok: true, status: "approved", plan: "standard" });
+    expect((await ask(tok)).status).toBe(200);
+    expect(db.rows("SELECT plan FROM plan_assignments WHERE email = 'new@example.com'")).toEqual([{ plan: "standard" }]);
+    await admin("POST", "access", { email: "new@example.com", status: "rejected" });
+    const r = await ask(tok);
+    expect(r.status).toBe(403);
+    expect((await r.json<any>()).error.code).toBe("access_rejected");
+    let s = await admin("GET", "state");
+    expect(s.body.access.rejected.map((x: any) => x.email)).toEqual(["new@example.com"]);
+    await admin("POST", "access", { email: "new@example.com", status: "pending" });
+    expect((await (await ask(tok)).json<any>()).error.code).toBe("waitlisted");
+    s = await admin("GET", "state");
+    expect(s.body.access.pending.map((x: any) => x.email)).toEqual(["new@example.com"]);
+    // approving without a plan keeps the existing assignment
+    await admin("POST", "access", { email: "new@example.com", status: "approved" });
+    expect(db.rows("SELECT plan FROM plan_assignments WHERE email = 'new@example.com'")).toEqual([{ plan: "standard" }]);
+    expect((await admin("POST", "access", { email: "new@example.com", status: "maybe" })).status).toBe(400);
+  });
+
+  it("approving with no plan puts the account on the default plan", async () => {
+    const tok = await makeSession(kv, "u_n2", "n2@example.com");
+    await ask(tok);
+    const r = await admin("POST", "access", { email: "n2@example.com", status: "approved" });
+    expect(r.body.plan).toBe("basic");
+    expect((await ask(tok)).status).toBe(200);
+  });
+
+  it("assigning a plan in the plans list also approves", async () => {
+    const tok = await makeSession(kv, "u_n3", "n3@example.com");
+    expect((await ask(tok)).status).toBe(403);
+    await admin("PUT", "assignments", { email: "n3@example.com", plan: "standard" });
+    expect((await ask(tok)).status).toBe(200);
+  });
+
+  it("turning 'Require approval' off lets new and pending accounts in; rejected stay blocked", async () => {
+    const tok = await makeSession(kv, "u_new", "new@example.com");
+    const bad = await makeSession(kv, "u_bad", "bad@example.com");
+    await admin("POST", "access", { email: "bad@example.com", status: "rejected" });
+    expect((await ask(tok)).status).toBe(403);
+    expect((await admin("PUT", "settings", { require_approval: false })).status).toBe(200);
+    expect((await ask(tok)).status).toBe(200);
+    expect((await ask(bad)).status).toBe(403);
+    expect((await admin("GET", "state")).body.access.require_approval).toBe(false);
+    expect((await admin("PUT", "settings", { require_approval: "no" })).status).toBe(400);
+    await admin("PUT", "settings", { require_approval: true });
+    expect((await ask(await makeSession(kv, "u_later", "later@example.com"))).status).toBe(403);
+  });
+
+  it("admins are always allowed", async () => {
+    const luke = await makeSession(kv, "u_luke", "luke@example.com");
+    expect((await ask(luke)).status).toBe(200);
+    expect(db.rows("SELECT * FROM access WHERE email = 'luke@example.com'")).toEqual([]);
+  });
+
+  it("the migration grandfathers accounts with an assignment or any usage history", async () => {
+    resetDbCacheForTests();
+    const old = makeEnv({}, { before: "0003" });
+    old.db.sqlite.exec("INSERT INTO plan_assignments (email, plan, updated_at) VALUES ('pro@example.com', 'pro', 1)");
+    old.db.sqlite.exec("INSERT INTO usage (uid, day, requests, tokens) VALUES ('u_old', '2026-10-10', 3, 100)");
+    old.db.migrate();
+    expect(old.db.rows("SELECT email, status, decided_by FROM access")).toEqual([{ email: "pro@example.com", status: "approved", decided_by: "migration" }]);
+    expect(old.db.rows("SELECT value FROM settings WHERE key = 'require_approval'")).toEqual([{ value: "1" }]);
+    env = old.env; db = old.db; kv = old.kv;
+    const pro = await makeSession(kv, "u_pro", "pro@example.com");
+    const oldUser = await makeSession(kv, "u_old", "old@example.com");
+    const fresh = await makeSession(kv, "u_fresh", "fresh@example.com");
+    expect((await ask(pro)).status).toBe(200);
+    expect((await ask(oldUser)).status).toBe(200);
+    expect(db.rows("SELECT status, uid, decided_by FROM access WHERE email = 'old@example.com'")).toEqual([{ status: "approved", uid: "u_old", decided_by: "usage history" }]);
+    expect((await ask(fresh)).status).toBe(403);
+  });
+
+  it("without migration 0003 the gateway keeps working like 0.2.x and the admin page warns", async () => {
+    resetDbCacheForTests();
+    const old = makeEnv({}, { before: "0003" });
+    env = old.env; db = old.db; kv = old.kv;
+    const tok = await makeSession(kv, "u_x", "x@example.com");
+    expect((await ask(tok)).status).toBe(200);
+    const s = await admin("GET", "state");
+    expect(s.body.access.available).toBe(false);
+    expect(s.body.warnings.join(" ")).toContain("0003_waitlist.sql");
   });
 });
