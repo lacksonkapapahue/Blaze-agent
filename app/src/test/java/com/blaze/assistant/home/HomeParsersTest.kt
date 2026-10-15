@@ -125,7 +125,7 @@ class HomeParsersTest {
         assertTrue(one.lines.isEmpty())
         val two = CoinGecko.parse("""{"bitcoin":{"eur":70000.5,"eur_24h_change":-1.25},"ethereum":{"eur":2512.4,"eur_24h_change":2.0}}""", listOf("bitcoin", "ethereum"), "EUR")
         assertEquals(2, two.lines.size)
-        assertEquals("Ethereum", two.lines[1].title); assertEquals("2,512.40 EUR  ▲ 2.0%", two.lines[1].note)
+        assertEquals("Ethereum", two.lines[1].title); assertEquals("2,512 EUR  ▲ 2.0%", two.lines[1].note)
         assertEquals("▼ 1.3% today", two.change)
         assertEquals("bitcoin", CoinGecko.id("BTC")); assertEquals("avalanche-2", CoinGecko.id("avax")); assertEquals("pepe", CoinGecko.id("Pepe"))
         assertEquals("bitcoin", CoinGecko.parseSearch("""{"coins":[{"id":"bitcoin","symbol":"BTC"},{"id":"x"}]}"""))
