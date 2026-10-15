@@ -132,3 +132,20 @@ The PocketTTS voice model is downloaded from the sherpa-onnx `tts-models` releas
 ## Apache Commons Compress (v0.28.0)
 
 `org.apache.commons:commons-compress:1.21` (bzip2 reader for the voice model archive), Apache License 2.0, Copyright The Apache Software Foundation.
+
+## AndroidX Media3 (Blaze Music / Video, v0.30.1)
+
+ExoPlayer, MediaSession and PlayerView (`androidx.media3:media3-exoplayer`, `media3-session`, `media3-ui` 1.4.1), Apache License 2.0, Copyright The Android Open Source Project. Source: https://github.com/androidx/media
+
+## Store sources and data (v0.30.1)
+
+No third-party code is bundled for these; Blaze calls their public APIs. Content keeps its own licence, shown on every item.
+
+- **Jamendo** (https://developer.jamendo.com/v3.0): Creative Commons music. Needs a client_id from https://devportal.jamendo.com (Jamendo API terms: non-commercial use of the free tier; attribution). No key is shipped.
+- **Internet Archive** (https://archive.org/advancedsearch.php, https://archive.org/metadata): only items whose licence url is Creative Commons or public domain (audio), the Feature Films collection (public-domain films) and the Blender open movies.
+- **Blender open movies** (Big Buck Bunny, Elephants Dream, Sintel, Tears of Steel, Cosmos Laundromat, Spring, Agent 327, Sprite Fright, Caminandes): © Blender Foundation / Blender Studio, CC BY (Agent 327: CC BY-ND; Spring: public domain mark) as stated on each archive.org item. https://studio.blender.org/films/
+- **LRCLIB** (https://lrclib.net): lyrics, looked up on demand, no key.
+
+## YouTube plug-in (v0.30.1, optional module `youtube/`)
+
+Blaze's own code (InnerTube JSON client); no third-party extractor. **NewPipeExtractor was not used:** it is GPL-3.0. Blaze-agent is licensed PolyForm Noncommercial 1.0.0 (LICENSE.md), which adds a non-commercial restriction GPL-3.0 forbids, and the APK bundles proprietary Google Play services / ML Kit libraries; a GPL-3.0 dependency would require the whole APK to be GPL-3.0. If the YouTube module moves to a private repo, it still must not pull in GPL code while it ships inside Blaze. Downloading from YouTube may breach YouTube's Terms of Service; the module is isolated so builds can leave it out (delete `youtube/`).

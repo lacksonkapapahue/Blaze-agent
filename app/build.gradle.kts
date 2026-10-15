@@ -13,8 +13,11 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 116
-        versionName = "0.30.0"
+        versionCode = 117
+        versionName = "0.30.1"
+        // v0.30.1 Music Store: Jamendo client_id, from the environment or -Pjamendo.clientId at build time. Never hard-coded;
+        // empty = "not configured" (the user can paste one in the Music Store instead).
+        buildConfigField("String", "JAMENDO_CLIENT_ID", "\"" + (System.getenv("JAMENDO_CLIENT_ID") ?: (project.findProperty("jamendo.clientId") as String?) ?: "").replace("\"", "") + "\"")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -42,7 +45,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     // The Needle runner ships as an executable named lib*.so so Android unpacks it into nativeLibraryDir.
     packaging {
         jniLibs {
@@ -240,6 +243,14 @@ dependencies {
     // The sherpa-onnx runtime itself is NOT a dependency: its Kotlin API is vendored (com.k2fsa.sherpa.onnx) and the
     // native library is downloaded on demand, so the APK only grows by a few hundred KB.
     implementation("org.apache.commons:commons-compress:1.21")
+    // v0.30.1 Blaze Music / Blaze Video: media3 (ExoPlayer, MediaSession, PlayerView), Apache-2.0.
+    val media3 = "1.4.1"
+    implementation("androidx.media3:media3-exoplayer:$media3")
+    implementation("androidx.media3:media3-session:$media3")
+    implementation("androidx.media3:media3-ui:$media3")
+    implementation(project(":storeapi"))
+    // The YouTube Store is a plug-in: compiled in only when the youtube/ folder (Gradle :youtube) exists.
+    if (rootProject.findProject(":youtube") != null) implementation(project(":youtube"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")   // the real org.json (android.jar only has stubs)
     testImplementation("org.xerial:sqlite-jdbc:3.46.1.3")   // v0.26.3: blaze.db tests on a JVM SQLite with FTS5 (store/JdbcSql)

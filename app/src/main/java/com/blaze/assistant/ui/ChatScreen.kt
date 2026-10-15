@@ -324,6 +324,8 @@ fun ChatScreen() {
             "projects" -> go(navNow().projectsList())
             "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx)
             "terminal" -> com.blaze.assistant.terminal.BlazeTerminalActivity.open(ctx)
+            "music" -> com.blaze.assistant.mediaapps.MusicActivity.open(ctx, target)
+            "video" -> com.blaze.assistant.mediaapps.VideoActivity.open(ctx, target)
             "design" -> {
                 if (target.isNotBlank()) Views.designTarget.value = target
                 else if (Views.designTarget.value.isBlank()) try { com.blaze.assistant.agent.Designs.current()?.path?.let { Views.designTarget.value = it } } catch (_: Exception) { }
@@ -355,7 +357,7 @@ fun ChatScreen() {
             if (cmdName == "views") { input = TextFieldValue(""); showViews = true; return }
             if (cmdName == "search") { input = TextFieldValue(""); showSearch = true; return }
             if (cmdName == "projects") { input = TextFieldValue(""); go(navNow().projectsList()); return }
-            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser", "terminal") && !text.contains(' ')) {
+            if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser", "terminal", "music", "video") && !text.contains(' ')) {
                 input = TextFieldValue(""); Views.find(cmdName)?.let { openView(it) }; return
             }
         }

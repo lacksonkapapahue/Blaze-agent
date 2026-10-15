@@ -11,3 +11,6 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Blaze"
 include(":app")
+// v0.30.1 Blaze Music / Video Stores: the source interface, and the optional YouTube plug-in (only when its folder is here).
+include(":storeapi")
+if (file("youtube/build.gradle.kts").exists()) include(":youtube")

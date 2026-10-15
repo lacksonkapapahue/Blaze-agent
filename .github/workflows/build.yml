@@ -84,7 +84,7 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
           set -o pipefail
-          ./gradlew testReleaseUnitTest assembleRelease --stacktrace 2>&1 | tee build.log
+          ./gradlew testReleaseUnitTest :storeapi:test :youtube:test assembleRelease --stacktrace 2>&1 | tee build.log
 
       # Preview screenshots (Robolectric, ui/ShotsTest). Never blocks a release; the PNGs and the log go to the `shots` branch.
       - name: Screenshots
@@ -195,6 +195,41 @@ jobs:
         run: |
           { echo "Steps: ${{ join(steps.*.outcome, ', ') }}"; echo "Build failed on ${{ github.sha }} (run ${{ github.run_id }})"; echo; echo '```'; grep -E "^e: |error:|FAILURE|What went wrong| FAILED$" -A6 build.log 2>/dev/null | head -160; echo '----- tail -----'; tail -80 build.log 2>/dev/null || echo "no build.log (failed before Gradle ran)"; echo '```'; } > comment.md
           gh issue edit 1 --repo ${{ github.repository }} --body-file comment.md
+
+  # v0.30.1: the YouTube Store is an optional plug-in module (youtube/ → :youtube). Blaze must build, pass its tests and
+  # run without it (a public build drops the folder), and that APK must not contain any YouTube code.
+  build-without-youtube:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-noyt-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+      - name: Build and test with youtube/ deleted
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          rm -rf youtube
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew testReleaseUnitTest :storeapi:test assembleRelease --stacktrace 2>&1 | tee build.log
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          ls -la "$APK"
+          mkdir -p /tmp/dex && unzip -o -q "$APK" 'classes*.dex' -d /tmp/dex
+          if grep -a -l "Lcom/blaze/assistant/mediaapps/youtube/" /tmp/dex/*.dex; then echo "::error::YouTube classes found in the no-YouTube APK"; exit 1; fi
+          echo "No YouTube code in the APK."
 
   # The android-app-builder skill's template must keep building: make a project from it exactly as
   # Blaze does on the phone (setup.sh), then build it like its own workflow would.

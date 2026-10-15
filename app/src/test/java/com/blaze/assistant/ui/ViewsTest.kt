@@ -29,6 +29,8 @@ class ViewsTest {
         assertEquals("brain", Views.find("models")?.id)
         assertEquals("router", Views.find("blazerouter")?.id)
         assertEquals("terminal", Views.find("Terminal")?.id); assertEquals("terminal", Views.find("termux")?.id); assertEquals("jobs", Views.find("jobs")?.id)
+        assertEquals("music", Views.find("music")?.id); assertEquals("music", Views.find("/songs")?.id)
+        assertEquals("video", Views.find("movies")?.id); assertEquals("video", Views.find("Video")?.id)
         assertNull(Views.find("nope"))
     }
 

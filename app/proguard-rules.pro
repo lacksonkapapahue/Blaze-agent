@@ -24,3 +24,5 @@
 -dontwarn org.objectweb.asm.**
 -dontwarn org.osgi.**
 -dontwarn javax.annotation.**
+# v0.30.1 Blaze Music / Video: the download worker is created by WorkManager by class name.
+-keep class com.blaze.assistant.mediaapps.MediaDownloadWorker { <init>(...); }
