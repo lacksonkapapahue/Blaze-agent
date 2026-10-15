@@ -26,6 +26,8 @@ object Notifier {
     const val CH_ACTION = "blaze_action"
     private const val ID_ACTION = 11
     const val EXTRA_OPEN_FORM = "open_form"
+    /** v0.28.3: tapping a reply from a project chat opens that chat inside Projects (never in main Chat). */
+    const val EXTRA_OPEN_CHAT = "open_chat"
     private const val ID_WORK = 1
     private const val ID_REPLY = 2
     private const val ID_WAKE = 4
@@ -65,6 +67,13 @@ object Notifier {
         app, 0, Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
+
+    /** v0.28.3: opens Blaze at [chatId] when it's a project chat (MainActivity → Agent.openFromLink → Projects). */
+    private fun openChat(chatId: String?): PendingIntent {
+        if (chatId.isNullOrBlank() || com.blaze.assistant.agent.Projects.of(chatId) == null) return openApp()
+        return PendingIntent.getActivity(app, 7102, Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(EXTRA_OPEN_CHAT, chatId), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
 
     /** The Reply button: carries where the answer should go (the chat, or the heads-up text itself). */
     private fun replyIntent(code: Int, chatId: String?, context: String?): PendingIntent = PendingIntent.getBroadcast(
@@ -159,7 +168,7 @@ object Notifier {
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setAutoCancel(true)
-            .setContentIntent(openApp())
+            .setContentIntent(openChat(chatId))
             .addAction(replyAction)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

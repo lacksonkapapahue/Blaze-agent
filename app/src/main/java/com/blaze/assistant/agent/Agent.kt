@@ -239,7 +239,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         _thinking.value = s.thinking
         _status.value = s.status
         _meter.value = s.meter
-        if (!s.isPrivate) Settings.lastChatId = s.id
+        // v0.28.3: only the main thread is remembered as the chat to reopen (project chats live in Projects).
+        if (!s.isPrivate) Settings.lastChatId = Mind.MAIN
         _private.value = s.isPrivate
         // Forget idle chats in the background; working ones stay until they finish.
         sessions.values.removeAll { it !== s && !it.busy }
@@ -254,10 +255,11 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         LongChat.init(app)
         try { com.blaze.assistant.media.Media.init(app) } catch (_: Exception) { }
         refreshChats()
-        // One mind (v0.18.0): one continuous main conversation. A project thread you were in reopens; anything
-        // else opens the main thread (old chats are read-only in Archive).
-        val last = Settings.lastChatId
-        if (last.isNotEmpty() && last != Mind.MAIN && Projects.of(last) != null && ChatStore.load(last) != null) open(last) else show(mainSession())
+        // One mind (v0.18.0): one continuous main conversation. v0.28.3: main Chat always opens on the main thread.
+        // Builds before saved the last project chat as the chat to reopen, which put a project chat in main Chat;
+        // that pref is repaired here (project chats now open only inside Projects, see ChatNav). Nothing is deleted.
+        if (Settings.lastChatId.let { it.isNotEmpty() && it != Mind.MAIN }) Settings.lastChatId = Mind.MAIN
+        show(mainSession())
         // One-time, idempotent import of every old chat into the journal (chat files are never changed).
         io.launch {
             val d = Mind.db() ?: return@launch
@@ -390,6 +392,25 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Open a chat. If it's still working in the background you see it live. */
     fun open(id: String) { load(id)?.let { show(it) } }
 
+    /**
+     * v0.28.3: put [id] on screen for the shell (ChatNav.visibleChat): the main thread on the Chat tab, or a project
+     * chat inside Projects. A project chat that has no messages yet (just made with + New chat) is created fresh.
+     * A private chat on screen is never thrown away by a switch back to main (leaving it has its own confirm).
+     */
+    fun showChat(id: String) {
+        if (id.isBlank() || id == cur.id) return
+        if (id == Mind.MAIN) { if (!cur.isPrivate) show(mainSession()); return }
+        if (cur.isPrivate) return
+        cur.persist()
+        show(load(id) ?: Session(id))
+    }
+
+    /** v0.28.3: a new, empty project chat's id (it joins [projectId] with its first message; see ChatScreen.send). */
+    fun newChatId(): String = newId()
+
+    /** v0.28.3: a deep link / notification asked for this chat: only the main thread or a project chat open. */
+    fun openFromLink(id: String) { if (id.isNotBlank() && isLive(id)) open(id) }
+
     /** A chat's session: the live one if it's open or working, else read from disk. */
     private fun load(id: String): Session? {
         sessions[id]?.let { return it }
@@ -490,7 +511,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         sessions[id]?.stop()
         sessions.remove(id)
         ChatStore.delete(id)
-        if (id == cur.id) show(Session(newId()))
+        // v0.28.3: a deleted project chat leaves its project, and the screen falls back to the main thread (never a blank chat).
+        if (Projects.of(id) != null) Projects.assign(id, "")
+        if (id == cur.id) show(mainSession())
         refreshChats()
     }
 
@@ -662,7 +685,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             "You are Blaze, an AI assistant on the user's Android phone. " + Settings.customPersona
         else Personas.byId(Settings.personaId).prompt
 
-    private fun systemPrompt(userText: String, skipSkills: Set<String> = emptySet()): String {
+    private fun systemPrompt(userText: String, skipSkills: Set<String> = emptySet(), chatId: String = _chatId.value): String {
         val now = SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())
         val name = Settings.userName.ifBlank { null }
         val control = Settings.phoneControl
@@ -741,7 +764,7 @@ When you finish, say what you did in one short sentence.
             // v0.26.2: learned skills are in the one skills lookup below (SkillMatch.lookupBlock), not a block of their own.
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
             append(com.blaze.assistant.link.DesktopLink.promptLine())
-            append(SelfKnowledge.promptBlock(app)); append(Projects.promptLine(_chatId.value))
+            append(SelfKnowledge.promptBlock(app)); append(Projects.promptLine(chatId))
             append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
                 "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
             if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
@@ -1036,7 +1059,7 @@ When you finish, say what you did in one short sentence.
                 .apply { meter?.let { m -> put("meter_in", m.inTok).put("meter_out", m.outTok).put("meter_limit", m.limit) } }
                 .put("title_source", titleSource).put("title_turns", titleTurns).put("keep", keep)
                 .put("tips_pending", JSONArray(synchronized(unseenTips) { unseenTips.toList() }))
-            if (this === cur) Settings.lastChatId = id
+            if (this === cur && id == Mind.MAIN) Settings.lastChatId = id
             val cid = id
             io.launch {
                 ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list()
@@ -1237,7 +1260,7 @@ When you finish, say what you did in one short sentence.
             val sys = if (sp != null) Playbooks.specialistSystem(sp, Playbooks.forSpec(sp), SpecialistMatch.brief(sp, SkillMatch.cached()),
                     SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date()), Memory.promptBlock(lastUserText()), agentId) +
                     Modes.promptLine(agentPlan) + (if (Settings.longChat && rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "")
-                else systemPrompt(lastUserText(), turnSkills.full.map { it.name }.toSet()) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
+                else systemPrompt(lastUserText(), turnSkills.full.map { it.name }.toSet(), id) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +

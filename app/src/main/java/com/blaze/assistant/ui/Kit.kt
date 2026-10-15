@@ -6,6 +6,11 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -430,4 +435,51 @@ fun ActionText(text: String, color: Color = LocalBlaze.current.sub, size: androi
 fun ButtonText(text: String, color: Color = LocalBlaze.current.ink, size: androidx.compose.ui.unit.TextUnit = 14.sp) {
     Text(text.sentence(), maxLines = 1, overflow = TextOverflow.Ellipsis,
         style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = size, color = color))
+}
+
+/** v0.28.3: the back button's fill and outline (Material's surface-variant in the Blaze palette, the Kit's 1 dp hairline). */
+val BlazeColors.backFill: Color get() = if (dark) Color(0xFF34343A) else Color(0xFFF0F0EE)
+val BlazeColors.backLine: Color get() = if (dark) Color(0x26F0F0EE) else Color(0x1A111110)
+
+/**
+ * v0.28.3: the one back button for every page (settings, projects, project chats, search, gallery, Learn…), instead of
+ * a thin "←" text glyph. A 40 dp round tonal button with a 1 dp outline and Material's rounded ArrowBack (auto-mirrored
+ * for right-to-left), inside a 48 dp touch target, with a ripple and a slight press scale. Pair it with [BackTitle].
+ */
+@Composable
+fun BackButton(onClick: () -> Unit, modifier: Modifier = Modifier, desc: String = "Back") {
+    val c = LocalBlaze.current
+    val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val circle = androidx.compose.foundation.shape.CircleShape
+    Box(modifier.size(48.dp)
+        .semantics(mergeDescendants = true) { contentDescription = desc }
+        .clickable(interactionSource = press, indication = null, onClickLabel = desc, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        Box(Modifier.pressScale(press).size(40.dp).clip(circle).background(c.backFill, circle).border(1.dp, c.backLine, circle)
+            .indication(press, androidx.compose.foundation.LocalIndication.current), contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null,
+                tint = c.ink, modifier = Modifier.size(22.dp))
+        }
+    }
+}
+
+/**
+ * v0.28.3: a page header row: [BackButton], then the title (and an optional small line above it, e.g. the project name
+ * over a project chat's title), aligned the same on every page. [right] holds trailing actions.
+ */
+@Composable
+fun BackTitle(title: String, onBack: () -> Unit, modifier: Modifier = Modifier, eyebrow: String = "", size: androidx.compose.ui.unit.TextUnit = 20.sp,
+              right: (@Composable RowScope.() -> Unit)? = null) {
+    val c = LocalBlaze.current
+    Row(modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        BackButton(onBack)
+        Spacer(Modifier.width(6.dp))
+        Column(Modifier.weight(1f)) {
+            if (eyebrow.isNotBlank()) Text(eyebrow, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = c.sub))
+            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = size, letterSpacing = (-0.01).em, color = c.ink))
+        }
+        right?.invoke(this)
+    }
 }

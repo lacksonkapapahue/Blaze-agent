@@ -134,14 +134,8 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
     val current = settingsPages.firstOrNull { it.id == page }
 
     Column(Modifier.fillMaxSize().background(c.paper).statusBarsPadding().navigationBarsPadding().imePadding()) {
-        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(BlazeShapes.pill).clickable { back() }, contentAlignment = Alignment.Center) {
-                Text("←", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
-            }
-            Text(current?.title ?: "Settings", modifier = Modifier.weight(1f),
-                style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = c.ink))
-        }
+        // v0.28.3: the shared round BackButton (was a thin "←" glyph).
+        BackTitle(current?.title ?: "Settings", onBack = { back() }, modifier = Modifier.hairlineBottom(c.hair).padding(vertical = 2.dp))
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp)) {
             when (page) {
                 null -> SettingsList { page = it }

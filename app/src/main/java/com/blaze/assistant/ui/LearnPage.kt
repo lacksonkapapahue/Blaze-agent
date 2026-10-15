@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -89,7 +90,9 @@ private fun Review(deck: String, card: Card?, left: Int, reveal0: Boolean, now: 
     val c = LocalBlaze.current
     var reveal by remember(card?.id) { mutableStateOf(reveal0) }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        ActionText("\u2190 Decks", color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onBack).padding(end = 12.dp, top = 6.dp, bottom = 6.dp))
+        // v0.28.3: the shared round BackButton (was "← Decks" text).
+        BackButton(onBack, modifier = Modifier.offset(x = (-4).dp), desc = "Back to decks")
+        Text("Decks", style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = c.ink))
         Spacer(Modifier.weight(1f))
         Label(if (card == null) deck else "$deck \u00b7 $left left", color = c.sub, size = 9.sp, maxLines = 1)
     }

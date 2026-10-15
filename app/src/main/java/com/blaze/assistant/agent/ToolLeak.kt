@@ -117,6 +117,26 @@ object ToolLeak {
         return t.replace(Regex("""[ \t]+\n"""), "\n").replace(Regex("""\n{3,}"""), "\n\n").trim()
     }
 
+    /** v0.28.3: shown instead of an old saved reply that was nothing but leaked tool syntax. */
+    const val STORED_EMPTY = "That step didn't run, so nothing was done. Tap Retry to try it again."
+
+    /**
+     * v0.28.3: what the screen shows for a saved reply or chat preview. Replies saved before v0.28.1 can still hold raw
+     * leaked calls (Luke's `[github_open repo="LacksonKapapa/Blaze-Agent"]` at 15:55, shown again after the update),
+     * so they're stripped when drawn too. Text with no leak comes back unchanged (byte for byte).
+     */
+    fun forDisplay(text: String): String {
+        if (text.isEmpty() || (!text.contains('[') && !text.contains('<'))) return text
+        if (find(text).isEmpty()) return text
+        return strip(text, final = true)
+    }
+
+    /** [forDisplay] for a reply bubble: a reply that was only a leaked call becomes [STORED_EMPTY] instead of an empty bubble. */
+    fun bubbleText(text: String): String {
+        val t = forDisplay(text)
+        return if (t.isBlank() && text.isNotBlank()) STORED_EMPTY else t
+    }
+
     // ---------- mapping to real tools ----------
 
     private fun key(n: String) = n.lowercase().replace(Regex("[^a-z0-9]"), "")
