@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,13 +53,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.blaze.assistant.ui.BlazeTextToolbar
+import com.blaze.assistant.ui.CaptureClipboard
 import com.blaze.assistant.ui.Glass
+import com.blaze.assistant.ui.SelectionActions
+import com.blaze.assistant.ui.SelectionDo
+import com.blaze.assistant.ui.SelectionPill
 import com.blaze.assistant.ui.GlassIconButton
 import com.blaze.assistant.ui.MascotGlyph
 import com.blaze.assistant.ui.Type
@@ -130,6 +141,37 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
         w.setFindListener { active, n, done -> if (done) found = if (n == 0) "No matches" else "${active + 1} of $n" }
         if (q.isBlank()) { w.clearMatches(); found = "" } else w.findAllAsync(q)
     }
+    // v0.27.2: the same swipeable selection pill as the chat, for the answers in this sheet.
+    val ctx = LocalContext.current
+    val realClip = LocalClipboardManager.current
+    val capClip = remember(realClip) { CaptureClipboard(realClip) }
+    var tbRect by remember { mutableStateOf<Rect?>(null) }
+    var tbCopy by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var tbAll by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val toolbar = remember { BlazeTextToolbar({ r, cp, all -> tbRect = r; tbCopy = cp; tbAll = all }, { tbRect = null }) }
+    fun onSelection(a: SelectionActions.Action) {
+        val copy = tbCopy
+        when (a) {
+            SelectionActions.Action.COPY -> { copy?.invoke(); toolbar.hide() }
+            SelectionActions.Action.SELECT_ALL -> tbAll?.invoke()
+            else -> {
+                val t = capClip.capture(copy).trim()
+                toolbar.hide()
+                if (t.isBlank()) return
+                when (SelectionActions.resolve(a, t)) {
+                    SelectionActions.Action.SEARCH, SelectionActions.Action.OPEN_LINK -> {
+                        try { BrowserEngine.newTab(ctx, SelectionActions.browserUrl(t)); onDismiss() } catch (_: Exception) { SelectionDo.openInBlazeBrowser(ctx, t) }
+                    }
+                    SelectionActions.Action.ASK -> ask(SelectionActions.askPrompt(t))
+                    SelectionActions.Action.TRANSLATE -> ask(SelectionActions.translatePrompt(t, lang))
+                    SelectionActions.Action.DEFINE -> ask(SelectionActions.definePrompt(t))
+                    SelectionActions.Action.READ_ALOUD -> SelectionDo.readAloud(ctx, t)
+                    SelectionActions.Action.SHARE -> SelectionDo.share(ctx, t)
+                    else -> {}
+                }
+            }
+        }
+    }
     DisposableEffect(Unit) { onDispose { try { web?.clearMatches() } catch (_: Exception) { } } }
     LaunchedEffect(Unit) { initial?.takeIf { it.isNotBlank() && preview == null }?.let { ask(it) } }
     LaunchedEffect(list.size, list.lastOrNull()?.text?.length) { if (list.isNotEmpty()) state.animateScrollToItem(list.lastIndex) }
@@ -150,7 +192,7 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
                 }
                 GlassIconButton(Icons.Rounded.Close, "Close", size = 36.dp, onClick = onDismiss)
             }
-            if (list.isNotEmpty()) {
+            if (list.isNotEmpty()) CompositionLocalProvider(LocalTextToolbar provides toolbar, LocalClipboardManager provides capClip) {
                 LazyColumn(state = state, modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     itemsIndexed(list) { _, line ->
@@ -193,6 +235,12 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
                 } else GlassIconButton(Icons.Rounded.Send, if (input.isBlank()) "Summarise this page" else "Send", size = 46.dp,
                     bg = if (busy) Glass.raised2 else Glass.blue, enabled = !busy) { ask(input) }
             }
+        }
+        tbRect?.let { r ->
+            val d = LocalDensity.current
+            val short = with(d) { SelectionActions.likelyShort(r.width / density, r.height / density) }
+            val acts = remember(tbAll != null, short) { SelectionActions.forUnknown(short, allowQuote = false, allowSelectAll = tbAll != null) }
+            SelectionPill(r, acts, ink = Color(0xFF111114), paper = Color.White) { a -> onSelection(a) }
         }
     }
 }
