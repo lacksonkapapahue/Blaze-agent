@@ -132,49 +132,7 @@ fun MediaStrip(paths: List<String>) {
     }
 }
 
-/** Everything Blaze has made, newest first. */
-@Composable
-fun GalleryScreen(onDismiss: () -> Unit) {
-    val c = LocalBlaze.current
-    val ctx = LocalContext.current
-    val items by Media.items.collectAsState()
-    var open by remember { mutableStateOf<Media.Item?>(null) }
-    LaunchedEffect(Unit) { Media.refresh() }
-    DisposableEffect(Unit) { onDispose { Player.stop() } }
-    BackHandler { if (open != null) open = null else onDismiss() }
-    Column(Modifier.fillMaxSize().background(c.paper).statusBarsPadding().navigationBarsPadding()) {
-        // v0.28.3: the shared round BackButton (was a thin "←" glyph).
-        BackTitle(open?.title?.take(30) ?: "Gallery", onBack = { if (open != null) open = null else onDismiss() },
-            modifier = Modifier.hairlineBottom(c.hair).padding(vertical = 2.dp)) {
-            Label("${items.size}", color = c.weak, size = 10.sp, modifier = Modifier.padding(end = 12.dp))
-        }
-        val sel = open
-        if (sel != null) {
-            Column(Modifier.fillMaxSize().padding(16.dp)) {
-                MediaStrip(listOf(sel.file.absolutePath))
-                ActionText("Delete", color = c.accent, size = 10.sp, modifier = Modifier.clickable { Media.delete(sel.file); open = null }.padding(vertical = 10.dp))
-            }
-        } else if (items.isEmpty()) {
-            Column(Modifier.fillMaxSize().padding(20.dp)) {
-                Rows { EmptyState("Nothing here yet", "Ask Blaze to \u201cdraw a lion in sunglasses\u201d or \u201cmake me an afro beat\u201d. Everything it makes lands here.") }
-            }
-        } else {
-            LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().padding(2.dp)) {
-                items(items, key = { it.file.absolutePath }) { it ->
-                    Box(Modifier.padding(3.dp).aspectRatio(1f).clip(BlazeShapes.small).background(c.hair.copy(alpha = 0.3f)).clickable { open = it }, contentAlignment = Alignment.Center) {
-                        if (it.kind == "image") {
-                            val bmp = rememberThumb(it.file.absolutePath, 240)
-                            if (bmp != null) Image(bmp, contentDescription = it.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        } else Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(8.dp)) {
-                            Text(if (it.kind == "audio") "\u266B" else "\u25B6", style = TextStyle(fontSize = 26.sp, color = c.ink))
-                            Text(it.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 11.sp, color = c.sub))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+// v0.30.0: GalleryScreen moved to GalleryScreen.kt (albums, tabs, viewer).
 
 
 /** Your own attached photos/PDF pages, shown as pictures in your message. Tap to open full size. */
