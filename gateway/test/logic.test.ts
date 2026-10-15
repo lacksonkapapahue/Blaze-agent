@@ -104,6 +104,13 @@ describe("classify", () => {
     expect(classify("x", 402, "Payment required").scope).toBe("provider");
     expect(classify(WORKERS_AI, 429, "4006: you have used up your daily free allocation of 10,000 neurons").scope).toBe("provider");
   });
+  it("Nous Portal errors behave like every other provider's", () => {
+    // Nous's real 401 body (seen 2026-10-16) for a bad, blocked or empty key.
+    expect(classify("nous", 401, '{"status":401,"message":"Your API key is invalid, blocked or out of funds. Please go visit the portal to sort that out: https://portal.nousresearch.com "}')).toEqual({ kind: "key", coolMs: 30 * 60_000, scope: "key" });
+    expect(classify("nous", 402, "Payment Required: insufficient credits")).toMatchObject({ kind: "provider_limit", scope: "provider" });
+    expect(classify("nous", 429, "Rate limit exceeded", 15_000)).toEqual({ kind: "rate_limit", coolMs: 15_000, scope: "model" });
+    expect(classify("nous", 429, "Too many requests")).toMatchObject({ kind: "rate_limit", coolMs: 60_000, scope: "model" });
+  });
   it("401 / bad key only cools the key", () => {
     expect(classify("groq", 401, "Invalid API Key").scope).toBe("key");
     expect(classify("gemini", 400, "API key not valid. Please pass a valid API key.").scope).toBe("key");

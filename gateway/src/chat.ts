@@ -85,7 +85,7 @@ export async function route(
   // App v0.26.2: routes ("provider/model") that just came back empty (reasoning only) or broke mid-stream for this
   // request; they go last so the next model in the lineup answers. Never empties the lineup.
   const avoid = avoidSet(body.blaze_avoid);
-  const lineup = (cfg.routes[task] ?? []).filter(c => isRoutable(c, cfg.paid ?? new Set()));
+  const lineup = (cfg.routes[task] ?? []).filter(c => isRoutable(c, cfg.paid ?? new Set(), cfg));
   const preferred = lineup.filter(c => !avoid.has(`${c.provider}/${c.model}`));
   const plan = planCandidates(preferred.length ? [...preferred, ...lineup.filter(c => avoid.has(`${c.provider}/${c.model}`))] : lineup, p => isUsable(cfg, env, p, start), marks, start);
   const attempts: Attempt[] = [];

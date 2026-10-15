@@ -1,5 +1,15 @@
 # Blaze Gateway status
 
+- **2026-10-16, v0.3.1 (branch `gateway-nous`):** Nous Research (Nous Portal) provider `nous`
+  (migration 0004 adds the provider row + `model_tests`). Free models only (price 0 on the public
+  live `/v1/models`, which rotates); a Nous model is routed only after /admin Test replies within
+  3 s. No Nous model is in any route and no key exists yet. **Joey:** get a key at
+  portal.nousresearch.com → API keys (free plan), paste it in /admin › Providers › Nous Research ›
+  "paste a new key" › Add key, then in the card's "Free models right now" press Test on the ones you
+  want (✓ under 3 s) and add them in Routes (the picker tests again on pick).
+  - Watch: Nous's `/v1/models` JSON is ~570 KB (423 models on 2026-10-16), parsed by the cron about
+    daily like OpenRouter's list; if it hits the Workers Free CPU cap the error shows on the card.
+
 - **2026-10-15, v0.3.0 (branch `gateway-waitlist`, PR open, not merged / not deployed):** waiting
   list (D1 `accounts` + `settings`, migration 0003, admin tab "Waiting list", 403 `waitlisted` /
   `access_rejected`, approval on by default, admins always allowed, current users grandfathered)

@@ -74,7 +74,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("basics", () => {
   it("health", async () => {
     const r = await call("GET", "/health");
-    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.3.0" });
+    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.3.1" });
   });
   it("app endpoints need a live Blaze session", async () => {
     expect((await call("GET", "/v1/models")).status).toBe(401);
@@ -507,5 +507,163 @@ describe("model discovery and the route editor API", () => {
     const r = await chat();
     expect(r.status).toBe(200);
     expect(r.headers.get("X-Blaze-Model")).toBe("anything-not-discovered");
+  });
+});
+
+describe("Nous Research (Nous Portal), 0.3.1", () => {
+  const NOUS = "https://inference-api.nousresearch.com/v1";
+  const nousList = { data: [
+    { id: "stealth/missingno", name: "Stealth: Missingno", context_length: 262144, pricing: { prompt: "0.0000000000", completion: "0.0000000000" }, architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["tools"] },
+    { id: "stepfun/step-5-preview:free", name: "StepFun: Step 5 Preview (free)", context_length: 1048576, pricing: { prompt: "0", completion: "0" }, architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] }, supported_parameters: ["tools"] },
+    { id: "meta/muse-spark-open", name: "Meta: Muse Spark Open", context_length: 1048576, pricing: { prompt: "0.00000125", completion: "0.00000425" } },
+  ] };
+  let list: any;
+  beforeEach(() => {
+    list = nousList;
+    upstream = (url, init) => {
+      if (url === `${NOUS}/models`) return new Response(JSON.stringify(list), { status: 200 });
+      if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      return okJSON(JSON.parse(String(init.body)).model);
+    };
+  });
+  const nousCalls = () => calls.filter(c => c.url === `${NOUS}/chat/completions`);
+  const vet = async (model: string) => {
+    const r = await admin("POST", "test-model", { provider: "nous", model });
+    expect(r.body).toMatchObject({ ok: true, test_first: true, fast: true, listed: true, vetted: true });
+    return r.body;
+  };
+
+  it("is in the provider registry (also for databases seeded before 0.3.1, via migration 0004)", async () => {
+    const s = await admin("GET", "state");
+    const p = s.body.providers.find((x: any) => x.id === "nous");
+    expect(p).toMatchObject({ name: "Nous Research (Nous Portal)", base_url: NOUS, type: "openai", enabled: true, keys: [] });
+    expect(p.notes).toContain("portal.nousresearch.com");
+    // Migration alone (no seed run) puts the row in place.
+    const { FakeD1 } = await import("./helpers");
+    expect(new FakeD1().rows("SELECT id FROM providers").map(r => r.id)).toEqual(["nous"]);
+  });
+
+  it("lists the live free models before any key (public /v1/models); paid ones are dropped", async () => {
+    const r = await admin("POST", "providers/nous/discover");
+    expect(r.body).toMatchObject({ ok: true, count: 2, source: "api" });
+    const req = calls.find(c => c.url === `${NOUS}/models`)!;
+    expect(req.auth).toBe(""); // no key yet, and none needed
+    const m = await admin("GET", "models");
+    const nous = m.body.models.filter((x: any) => x.provider === "nous");
+    expect(nous.map((x: any) => x.id).sort()).toEqual(["stealth/missingno", "stepfun/step-5-preview:free"]);
+    expect(m.body).toMatchObject({ test_first: ["nous"], free_list_only: ["nous"], fast_ms: 3000 });
+    // The free list rotates: the next run replaces it.
+    list = { data: [nousList.data[0]] };
+    await admin("POST", "providers/nous/discover");
+    expect(db.rows("SELECT model_id FROM models WHERE provider_id = 'nous'").map(r => r.model_id)).toEqual(["stealth/missingno"]);
+  });
+
+  it("a model is routed only after it passes Test within 3 s; never suggested before", async () => {
+    await admin("POST", "providers/nous/discover");
+    // No key: Test can't run, the route can't be saved.
+    expect((await admin("POST", "test-model", { provider: "nous", model: "stealth/missingno" })).body).toMatchObject({ ok: false, error: "No enabled key for this provider" });
+    const refused = await admin("PUT", "routes/chat", { models: [{ provider: "nous", model: "stealth/missingno" }] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.message).toContain("must pass Test");
+    await addKey("nous", "sk-nous-test-key-ABCD");
+    // With a key but untested: still refused, and Suggest leaves Nous out.
+    expect((await admin("PUT", "routes/chat", { models: [{ provider: "nous", model: "stealth/missingno" }] })).status).toBe(400);
+    const sug = await admin("POST", "routes/suggest", {});
+    expect(JSON.stringify(sug.body.routes)).not.toContain("nous");
+    // A paid model never passes, even when it answers.
+    const paid = await admin("POST", "test-model", { provider: "nous", model: "meta/muse-spark-open" });
+    expect(paid.body).toMatchObject({ ok: true, listed: false, vetted: false });
+    expect((await admin("PUT", "routes/chat", { models: [{ provider: "nous", model: "meta/muse-spark-open" }] })).body.error.message).toContain("free list");
+    // Test passes fast → it can be routed, with the Bearer key, at Nous's URL.
+    calls.length = 0;
+    await vet("stealth/missingno");
+    expect(nousCalls()[0]!.auth).toBe("Bearer sk-nous-test-key-ABCD");
+    expect(db.rows("SELECT ok, kind FROM model_tests WHERE model_id = 'stealth/missingno'")).toEqual([{ ok: 1, kind: "ok" }]);
+    await setRoute("chat", [["nous", "stealth/missingno"], ["workers-ai", "@cf/x"]]);
+    calls.length = 0;
+    const r = await chat();
+    await ctx.settle();
+    expect(r.status).toBe(200);
+    expect(r.headers.get("X-Blaze-Provider")).toBe("nous");
+    expect(nousCalls()[0]!.body.model).toBe("stealth/missingno");
+    expect(JSON.stringify(nousCalls()[0]!.body)).not.toContain("blaze_");
+  });
+
+  it("slow (> 3 s) or failed tests, and models that left the free list, are skipped at request time", async () => {
+    await admin("POST", "providers/nous/discover");
+    await addKey("nous", "sk-nous-test-key-ABCD");
+    await vet("stealth/missingno");
+    await setRoute("chat", [["nous", "stealth/missingno"], ["workers-ai", "@cf/x"]]);
+    // Last test was slow: skipped (Workers AI answers instead, Nous never called).
+    db.sqlite.exec("UPDATE model_tests SET ms = 4200, kind = 'slow'");
+    resetDbCacheForTests();
+    calls.length = 0;
+    let r = await chat();
+    await ctx.settle();
+    expect(r.headers.get("X-Blaze-Provider")).toBe("workers-ai");
+    expect(nousCalls().length).toBe(0);
+    // Fast again, then the model rotates off the free list: skipped too.
+    db.sqlite.exec("UPDATE model_tests SET ms = 900, kind = 'ok'");
+    list = { data: [nousList.data[1]] };
+    await admin("POST", "providers/nous/discover");
+    resetDbCacheForTests();
+    calls.length = 0;
+    r = await chat();
+    await ctx.settle();
+    expect(r.headers.get("X-Blaze-Provider")).toBe("workers-ai");
+    expect(nousCalls().length).toBe(0);
+    // A failed test records ok = 0 (and cools the model like any failure).
+    upstream = () => new Response("Rate limit exceeded", { status: 429, headers: { "Retry-After": "20" } });
+    const t = await admin("POST", "test-model", { provider: "nous", model: "stepfun/step-5-preview:free" });
+    expect(t.body).toMatchObject({ ok: false, status: 429, kind: "rate_limit", vetted: false });
+    expect(db.rows("SELECT ok FROM model_tests WHERE model_id = 'stepfun/step-5-preview:free'")).toEqual([{ ok: 0 }]);
+  });
+
+  it("401 / 402 / 429 from Nous cool the key / provider / model and fall back, like other providers", async () => {
+    await admin("POST", "providers/nous/discover");
+    await addKey("nous", "sk-nous-test-key-ABCD");
+    await vet("stealth/missingno");
+    await vet("stepfun/step-5-preview:free");
+    await setRoute("chat", [["nous", "stealth/missingno"], ["nous", "stepfun/step-5-preview:free"], ["workers-ai", "@cf/x"]]);
+    const answer = (status: number, text: string, headers: Record<string, string> = {}) => {
+      upstream = (url, init) => (url === `${NOUS}/chat/completions` ? new Response(text, { status, headers }) : okJSON(JSON.parse(String(init.body)).model));
+    };
+
+    // 429 with Retry-After: that model cools for 20 s, the next Nous model is tried.
+    let n = 0;
+    upstream = (url, init) => {
+      const model = JSON.parse(String(init.body)).model;
+      if (url === `${NOUS}/chat/completions` && n++ === 0) return new Response("Rate limit exceeded", { status: 429, headers: { "Retry-After": "20" } });
+      return okJSON(model);
+    };
+    let r = await chat();
+    await ctx.settle();
+    expect(r.headers.get("X-Blaze-Model")).toBe("stepfun/step-5-preview:free");
+    let st = db.rows("SELECT model, reason, until FROM model_state WHERE provider_id = 'nous' AND until > 0");
+    expect(st.map(x => [x.model, x.reason])).toEqual([["stealth/missingno", "rate_limit"]]);
+    expect(st[0].until - Date.now()).toBeLessThanOrEqual(20_000);
+    await admin("POST", "cooldowns/clear", { provider: "nous" });
+
+    // 402: the whole provider rests; Workers AI answers.
+    answer(402, '{"message":"Payment required: insufficient credits"}');
+    r = await chat();
+    await ctx.settle();
+    expect(r.headers.get("X-Blaze-Provider")).toBe("workers-ai");
+    expect(db.rows("SELECT model, reason FROM model_state WHERE provider_id = 'nous' AND until > 0")).toEqual([{ model: "*", reason: "provider_limit" }]);
+    await admin("POST", "cooldowns/clear", { provider: "nous" });
+
+    // 401 (Nous: "invalid, blocked or out of funds"): only the key cools; no model is marked.
+    answer(401, '{"status":401,"message":"Your API key is invalid, blocked or out of funds. Please go visit the portal to sort that out: https://portal.nousresearch.com "}');
+    r = await chat();
+    await ctx.settle();
+    expect(r.headers.get("X-Blaze-Provider")).toBe("workers-ai");
+    expect(db.rows("SELECT cooling_until > 0 AS cooling, last_error FROM provider_keys WHERE provider_id = 'nous'")).toEqual([{ cooling: 1, last_error: "401 key" }]);
+    expect(db.rows("SELECT * FROM model_state WHERE provider_id = 'nous' AND until > 0")).toEqual([]);
+    // With its only key cooling, Nous is skipped without a call.
+    resetDbCacheForTests();
+    calls.length = 0;
+    r = await chat();
+    await ctx.settle();
+    expect(nousCalls().length).toBe(0);
   });
 });

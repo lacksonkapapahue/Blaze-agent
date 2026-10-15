@@ -13,6 +13,7 @@ confirmed from the provider's own page this time.
 | **Mistral** (free / Experiment plan) | Free mode is a monthly allowance at the lowest rate limits; no explicit public-app ban found, but it's positioned for trying the API. | "API requests made under the Experiment plan may be used to train Mistral's models" unless you opt out. | Low RPS/monthly tokens. | https://help.mistral.ai/en/articles/455206 (Experiment plan), https://help.mistral.ai/en/articles/347617 |
 | **GitHub Models** | **Retired**: fully shut down on 2026-07-30 (no inference API). Seeded disabled; don't enable. | — | — | https://docs.github.com/en/github-models |
 | **NVIDIA NIM** (build.nvidia.com) | Unverified this time; free API access is generally aimed at prototyping. Seeded disabled. | Unverified. | Unverified. | — |
+| **Nous Research** (Nous Portal, free models) | Unverified (added 2026-10-16, terms not checked). Only models priced 0 are used; the free list rotates. | Unverified. | Unverified (free-plan rate limits not documented where checked). | https://portal.nousresearch.com |
 | **Cloudflare Workers AI** | Yes: it's part of Workers Free/Paid; your Worker serving users is the intended use. | See Cloudflare's Workers AI data-usage page (not re-checked for 0.1.0). | **10,000 Neurons/day** free, resets 00:00 UTC; more needs Workers Paid. A few big models (Kimi K2.6/K2.7, GLM 5.x, DeepSeek V4) need a paid plan. | https://developers.cloudflare.com/workers-ai/platform/pricing/ |
 
 ## What this means for Blaze

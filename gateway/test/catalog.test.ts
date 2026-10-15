@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  CURATED_WORKERS_AI, friendly, inferCaps, isRoutable, parseGemini, parseOpenAIList, parseWorkersAI, prettify, suggestLineup, suggestTask, type ModelInfo,
+  CURATED_WORKERS_AI, friendly, inferCaps, isRoutable, notRoutableReason, parseGemini, parseOpenAIList, parseWorkersAI, prettify, pricedFree, suggestLineup, suggestTask, type ModelInfo,
 } from "../src/catalog";
 
 describe("catalog parsers", () => {
@@ -20,6 +20,23 @@ describe("catalog parsers", () => {
     expect(flash.name).toBe("Gemini Flash Latest (fast, sees images, long inputs)");
     expect(ms.find(m => m.id === "gemini-3-pro-preview")!.free).toBe(false);
     expect(ms.find(m => m.id === "gemma-3-27b-it")!.caps).not.toContain("tools");
+  });
+  it("Nous: only models the live list prices at 0 survive (string zeros included)", () => {
+    const ms = parseOpenAIList("nous", { data: [
+      { id: "stepfun/step-5-preview:free", name: "StepFun: Step 5 Preview (free)", context_length: 1048576, pricing: { prompt: "0", completion: "0", input_cache_read: "0" }, architecture: { input_modalities: ["text", "image", "video"], output_modalities: ["text"] }, supported_parameters: ["tools", "max_tokens"] },
+      { id: "stealth/missingno", name: "Stealth: Missingno", context_length: 262144, pricing: { prompt: "0.0000000000", completion: "0.0000000000" }, architecture: { input_modalities: ["text"], output_modalities: ["text"] }, supported_parameters: ["tools"] },
+      { id: "meta/muse-spark-open", name: "Meta: Muse Spark Open", context_length: 1048576, pricing: { prompt: "0.0000012500", completion: "0.0000042500" } },
+      { id: "half/free", name: "Half Free", pricing: { prompt: "0", completion: "0.000001" } },
+      { id: "no/pricing", name: "No Pricing" },
+    ] });
+    expect(ms.map(m => m.id)).toEqual(["stepfun/step-5-preview:free", "stealth/missingno"]);
+    expect(ms[0]!.caps).toEqual(expect.arrayContaining(["vision", "long", "tools"]));
+    expect(ms[0]!.context).toBe(1048576);
+    expect(ms.every(m => m.free)).toBe(true);
+    expect(pricedFree({ prompt: "0", completion: "0" })).toBe(true);
+    expect(pricedFree({ prompt: "0.0000001", completion: "0" })).toBe(false);
+    expect(pricedFree({ prompt: "", completion: "0" })).toBe(false);
+    expect(pricedFree(undefined)).toBe(false);
   });
   it("OpenRouter: only :free models survive", () => {
     const ms = parseOpenAIList("openrouter", { data: [
@@ -94,6 +111,16 @@ describe("free-only rule and lineup", () => {
     expect(isRoutable({ provider: "openrouter", model: "openai/gpt-4o" }, new Set())).toBe(false);
     expect(isRoutable({ provider: "openrouter", model: "x/y:free" }, new Set())).toBe(true);
     expect(isRoutable({ provider: "gemini", model: "gemini-3-pro-preview" }, new Set(["gemini|gemini-3-pro-preview"]))).toBe(false);
+  });
+  it("Nous: routed only while on the free list and after a passing Test within 3 s", () => {
+    const c = { provider: "nous", model: "stealth/missingno" };
+    const k = "nous|stealth/missingno";
+    expect(isRoutable(c, new Set())).toBe(false);
+    expect(notRoutableReason(c, new Set(), { vetted: new Set([k]) })).toContain("free list");
+    expect(notRoutableReason(c, new Set(), { listed: new Set([k]) })).toContain("must pass Test");
+    expect(isRoutable(c, new Set(), { listed: new Set([k]), vetted: new Set([k]) })).toBe(true);
+    // Other providers are unaffected by the gate.
+    expect(isRoutable({ provider: "groq", model: "m1" }, new Set(), {})).toBe(true);
   });
   const m = (provider: string, id: string, caps: ModelInfo["caps"], context = 0, free = true): ModelInfo => ({ provider, id, name: id, caps: ["chat", ...caps], context, free });
   const models: ModelInfo[] = [

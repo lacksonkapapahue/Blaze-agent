@@ -1,12 +1,13 @@
 // Model discovery: asks each provider's own model-list API what it serves, keeps the chat models,
 // tags what each can do (chat, vision, code, fast, long, tools), names them in plain words, and
 // caches the result in D1 `models`. Also builds the "best free lineup" per task from that cache.
-// Free only: OpenRouter keeps just its `:free` models; anything flagged paid-only is never offered
-// in /admin and never routed to (see isRoutable). Nothing here touches message content.
+// Free only: OpenRouter keeps just its `:free` models, Nous just the models its live list prices at 0;
+// anything flagged paid-only is never offered in /admin and never routed to (see isRoutable).
+// Nothing here touches message content.
 
 import { decryptKey } from "./crypto";
 import { invalidateConfig, type ProviderRow, type KeyRow } from "./db";
-import { DEFAULT_ROUTES, WORKERS_AI, type Candidate } from "./defaults";
+import { DEFAULT_ROUTES, FAST_MS, FREE_LIST_ONLY, TEST_FIRST, WORKERS_AI, type Candidate } from "./defaults";
 import type { Env } from "./env";
 import { modelsUrl } from "./providers";
 import { TASKS, type Task } from "./router";
@@ -150,7 +151,15 @@ function mk(provider: string, id: string, rawName: unknown, meta: { vision?: boo
 
 // ---------------- provider list parsers (pure) ----------------
 
-/** OpenAI-style {data:[{id, …}]} from Groq, Cerebras, Mistral, OpenRouter, NVIDIA, GitHub Models. */
+/** OpenRouter-style `pricing` ({prompt: "0", completion: "0"}): free only when both are exactly 0. */
+export function pricedFree(pricing: unknown): boolean {
+  if (!pricing || typeof pricing !== "object") return false;
+  const p = pricing as { prompt?: unknown; completion?: unknown };
+  const n = (v: unknown) => (v === undefined || v === null || v === "" ? NaN : Number(v));
+  return n(p.prompt) === 0 && n(p.completion ?? 0) === 0;
+}
+
+/** OpenAI-style {data:[{id, …}]} from Groq, Cerebras, Mistral, OpenRouter, Nous, NVIDIA, GitHub Models. */
 export function parseOpenAIList(provider: string, body: any): ModelInfo[] {
   const list: any[] = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : [];
   const out: ModelInfo[] = [];
@@ -161,6 +170,7 @@ export function parseOpenAIList(provider: string, body: any): ModelInfo[] {
     if (m.active === false || m.archived === true) continue;
     if (!isChatModel(id)) continue;
     if (provider === "openrouter" && !id.endsWith(":free")) continue; // free-only rule
+    if (FREE_LIST_ONLY.has(provider) && !pricedFree(m.pricing)) continue; // Nous: price 0 only (the list rotates)
     const c = m.capabilities;
     if (provider === "mistral" && c && typeof c === "object" && c.completion_chat === false) continue;
     const arch = m.architecture?.input_modalities;
@@ -250,7 +260,7 @@ export const CURATED_WORKERS_AI: CfModel[] = [
 // ---------------- fetching ----------------
 
 /** Providers whose model list is public (discovery works before a key is added). */
-const KEYLESS_LIST = new Set(["openrouter"]);
+const KEYLESS_LIST = new Set(["openrouter", "nous"]);
 
 async function getJSON(url: string, headers: Record<string, string>, fetcher: typeof fetch): Promise<{ ok: boolean; status: number; body: any; error: string }> {
   const ctl = new AbortController();
@@ -377,15 +387,35 @@ export async function loadModels(db: D1Database): Promise<ModelInfo[]> {
 
 // ---------------- the free-only rule ----------------
 
-/** May the gateway send traffic to this model? OpenRouter: `:free` only; anything flagged paid: never. */
-export function isRoutable(c: Candidate, paid: Set<string>): boolean {
-  if (c.provider === "openrouter" && !c.model.endsWith(":free")) return false;
-  return !paid.has(`${c.provider}|${c.model}`);
+/** What request-time routing knows beyond the paid set (Config.listed / Config.vetted). */
+export interface RouteGate {
+  /** "provider|model" on the latest discovered free list of a FREE_LIST_ONLY provider (Nous). */
+  listed?: ReadonlySet<string>;
+  /** "provider|model" whose latest /admin Test passed within FAST_MS. */
+  vetted?: ReadonlySet<string>;
+}
+
+/** Why the gateway won't send traffic to this model, or null when it may. */
+export function notRoutableReason(c: Candidate, paid: ReadonlySet<string>, gate: RouteGate = {}): string | null {
+  const k = `${c.provider}|${c.model}`;
+  if (c.provider === "openrouter" && !c.model.endsWith(":free")) return `OpenRouter: only :free models (${c.model})`;
+  if (paid.has(k)) return `${c.provider} ${c.model} is paid-only`;
+  if (FREE_LIST_ONLY.has(c.provider) && !gate.listed?.has(k)) return `${c.provider} ${c.model} isn't on ${c.provider}'s free list right now (press Find models to refresh it)`;
+  if (TEST_FIRST.has(c.provider) && !gate.vetted?.has(k)) return `${c.provider} ${c.model} must pass Test and reply within ${FAST_MS / 1000} s before it can be routed`;
+  return null;
+}
+
+/**
+ * May the gateway send traffic to this model? OpenRouter: `:free` only; anything flagged paid: never;
+ * Nous: only while on its free list and after passing Test within FAST_MS.
+ */
+export function isRoutable(c: Candidate, paid: ReadonlySet<string>, gate: RouteGate = {}): boolean {
+  return notRoutableReason(c, paid, gate) === null;
 }
 
 // ---------------- "Suggest best free lineup" ----------------
 
-const PROVIDER_BONUS: Record<string, number> = { gemini: 1.2, groq: 0.9, cerebras: 0.8, mistral: 0.6, nvidia: 0.3, openrouter: 0, github: -1, [WORKERS_AI]: -3 };
+const PROVIDER_BONUS: Record<string, number> = { gemini: 1.2, groq: 0.9, cerebras: 0.8, mistral: 0.6, nvidia: 0.3, nous: 0.2, openrouter: 0, github: -1, [WORKERS_AI]: -3 };
 
 /** Rough quality on a log2(billions of parameters) scale, from the id. */
 export function quality(id: string): number {
