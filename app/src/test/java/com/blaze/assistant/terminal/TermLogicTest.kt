@@ -13,11 +13,29 @@ class TermLogicTest {
     }
 
     @Test fun envsPreferLinux() {
-        assertEquals(listOf("alpine", "phone"), TermLogic.envs(true).map { it.id })
-        assertEquals(listOf("phone"), TermLogic.envs(false).map { it.id })
-        assertEquals("alpine", TermLogic.pick(null, true).id)
-        assertEquals("phone", TermLogic.pick("phone", true).id)
-        assertEquals("phone", TermLogic.pick("alpine", false).id)
+        assertEquals(listOf("alpine", "ubuntu", "phone"), TermLogic.envs(setOf("ubuntu", "alpine")).map { it.id })
+        assertEquals(listOf("phone"), TermLogic.envs(emptySet()).map { it.id })
+        assertEquals("alpine", TermLogic.pick(null, setOf("alpine")).id)
+        assertEquals("debian", TermLogic.pick("debian", setOf("alpine", "debian")).id)
+        assertEquals("phone", TermLogic.pick("alpine", emptySet()).id)
+    }
+
+    @Test fun distrosPerCpu() {
+        assertEquals("aarch64", TermLogic.cpu("arm64-v8a")); assertEquals("arm", TermLogic.cpu("armeabi-v7a")); assertEquals(null, TermLogic.cpu("x86_64"))
+        assertEquals(listOf("alpine", "ubuntu", "debian", "archlinux", "fedora", "manjaro"), TermLogic.installable("arm64-v8a").map { it.id })
+        assertEquals(listOf("alpine", "ubuntu", "debian", "archlinux"), TermLogic.installable("armeabi-v7a").map { it.id })
+        assertEquals(listOf("alpine"), TermLogic.installable("x86_64").map { it.id })
+        TermLogic.DISTROS.flatMap { it.urls.values }.forEach { assertTrue(it, it.startsWith("https://") && it.endsWith(".tar.xz")) }
+        assertEquals("Ubuntu 24.04", TermLogic.distro("ubuntu")!!.env().label)
+        assertEquals("Alpine Linux", TermLogic.ALPINE.label)
+        assertTrue(TermLogic.welcome(TermLogic.distro("archlinux")!!.env()).contains("pacman -S <package>"))
+    }
+
+    @Test fun paxRecords() {
+        val long = "usr/share/" + "x".repeat(120)
+        fun rec(k: String, v: String): String { val body = " $k=$v\n"; var n = body.toByteArray().size + 2; while ("$n$body".toByteArray().size != n) n++; return "$n$body" }
+        assertEquals(listOf("path" to long, "linkpath" to "../bin/é"), TermLogic.pax(rec("path", long) + rec("linkpath", "../bin/é")))
+        assertEquals(emptyList<Pair<String, String>>(), TermLogic.pax("garbage"))
     }
 
     @Test fun phoneShell() {

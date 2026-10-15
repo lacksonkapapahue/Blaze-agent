@@ -20,9 +20,11 @@ object Linux {
     val installing = MutableStateFlow(false)
 
     fun init(ctx: Context) { app = ctx.applicationContext }
-    private fun nat(name: String) = File(app.applicationInfo.nativeLibraryDir, name)
+    internal fun nat(name: String) = File(app.applicationInfo.nativeLibraryDir, name)
     fun base() = File(app.filesDir, "linux")
     fun rootfs() = File(base(), "alpine")
+    /** v0.29.2: every distro has its own rootfs folder (filesDir/linux/<id>); Alpine keeps "alpine". */
+    fun rootfs(id: String) = File(base(), id)
     fun installed() = ::app.isInitialized && File(rootfs(), "bin/busybox").exists() && File(rootfs(), ".blaze_ok").exists()
     fun supported() = ::app.isInitialized && nat("libproot.so").exists() && nat("libproot_loader.so").exists()
 
@@ -79,11 +81,16 @@ object Linux {
      * Pure-Kotlin .tar.gz unpacker (files, folders, symlinks, hard links, modes). Replaces the
      * busybox `tar` call, which could stall or die silently on some phones and left "Unpacking…".
      */
-    private fun untar(tgz: File, dest: File): Int {
+    private fun untar(tgz: File, dest: File): Int =
+        untarStream(java.util.zip.GZIPInputStream(java.io.BufferedInputStream(tgz.inputStream(), 64 * 1024)), dest, 0)
+
+    /** v0.29.2: any tar stream (gz or xz), with pax path/linkpath headers and [strip] leading folders (proot-distro tarballs). */
+    internal fun untarStream(stream: java.io.InputStream, dest: File, strip: Int, onCount: (Int) -> Unit = { status.value = "Unpacking… $it files" }): Int {
         val root = dest.canonicalPath
         var count = 0; var longName: String? = null; var longLink: String? = null
         val hard = mutableListOf<Pair<File, String>>()
-        java.util.zip.GZIPInputStream(java.io.BufferedInputStream(tgz.inputStream(), 64 * 1024)).use { inp ->
+        fun stripped(n: String): String { var x = n.removePrefix("./"); repeat(strip) { val i = x.indexOf('/'); x = if (i < 0) "" else x.substring(i + 1) }; return x }
+        stream.use { inp ->
             val hdr = ByteArray(512)
             fun readFully(b: ByteArray, len: Int): Boolean { var o = 0; while (o < len) { val r = inp.read(b, o, len - o); if (r < 0) return false; o += r }; return true }
             fun str(o: Int, l: Int): String { var e = o; while (e < o + l && hdr[e] != 0.toByte()) e++; return String(hdr, o, e - o, Charsets.UTF_8) }
@@ -99,12 +106,18 @@ object Linux {
                     val v = String(b, 0, size.toInt(), Charsets.UTF_8).trimEnd('\u0000')
                     if (type == 'L') longName = v else longLink = v; continue
                 }
-                if (type == 'x' || type == 'g') { skip(padded); continue }   // pax headers: not needed for Alpine
+                if (type == 'x' || type == 'g') {                 // pax headers: Debian/Ubuntu put long paths here
+                    val b = ByteArray(padded.toInt()); readFully(b, padded.toInt())
+                    if (type == 'x') for ((k, v) in TermLogic.pax(String(b, 0, size.toInt(), Charsets.UTF_8))) {
+                        if (k == "path") longName = v else if (k == "linkpath") longLink = v
+                    }
+                    continue
+                }
                 val prefix = str(345, 155)
                 var name = longName ?: (if (prefix.isNotEmpty()) "$prefix/" else "") + str(0, 100)
                 val link = longLink ?: str(157, 100)
                 longName = null; longLink = null
-                name = name.removePrefix("./").trimEnd('/')
+                name = stripped(name).trimEnd('/')
                 val mode = (oct(100, 8) and 0xFFF).toInt()
                 if (name.isEmpty()) { skip(padded); continue }
                 val out = File(dest, name)
@@ -113,7 +126,7 @@ object Linux {
                 when (type) {
                     '5' -> { out.mkdirs(); runCatching { Os.chmod(out.path, mode or 0b111_000_000) } }
                     '2' -> { runCatching { out.delete(); Os.symlink(link, out.path) } }
-                    '1' -> hard += out to link.removePrefix("./")
+                    '1' -> hard += out to stripped(link)
                     '0', '\u0000', '7' -> {
                         out.delete()
                         out.outputStream().use { o -> var left = size; val b = ByteArray(64 * 1024)
@@ -124,7 +137,7 @@ object Linux {
                     else -> skip(padded)
                 }
                 count++
-                if (count % 50 == 0) status.value = "Unpacking… $count files"
+                if (count % 50 == 0) onCount(count)
             }
         }
         for ((f, target) in hard) runCatching { File(dest, target).copyTo(f, overwrite = true); Os.chmod(f.path, Os.stat(File(dest, target).path).st_mode and 0xFFF) }
@@ -132,13 +145,16 @@ object Linux {
     }
 
     /** DNS, hosts, a profile, and stand-ins for /proc files Android hides from apps. */
-    private fun prepare() {
-        val r = rootfs()
+    private fun prepare() = prepare(rootfs(), "alpine")
+
+    internal fun prepare(r: File, name: String) {
         // v0.25.5: the phone's own DNS first (some Wi-Fi networks block 8.8.8.8 / 1.1.1.1), refreshed on every command.
         File(r, "etc/resolv.conf").apply { delete(); writeText(AlpineNet.resolvConf(phoneDns())) }
         File(r, "etc/hosts").writeText("127.0.0.1 localhost\n::1 localhost\n")
         File(r, "etc/profile.d").mkdirs()
-        File(r, "etc/profile.d/blaze.sh").writeText("export PS1='alpine:\\w\\$ '\nexport LANG=C.UTF-8\n")
+        File(r, "etc/profile.d/blaze.sh").writeText("export PS1='$name:\\w\\$ '\nexport LANG=C.UTF-8\n")
+        // apt drops to the _apt user to download, which PRoot can't do: keep it root.
+        if (File(r, "etc/apt").isDirectory) File(r, "etc/apt/apt.conf.d").apply { mkdirs() }.resolve("99blaze").writeText("APT::Sandbox::User \"root\";\n")
         File(r, "root").mkdirs(); File(r, "tmp").mkdirs()
         val fake = File(base(), "fake").apply { mkdirs() }
         File(fake, "stat").writeText("cpu  1000 0 1000 100000 0 0 0 0 0 0\n" + (0 until Runtime.getRuntime().availableProcessors()).joinToString("") { "cpu$it 250 0 250 25000 0 0 0 0 0 0\n" } +
@@ -166,9 +182,10 @@ object Linux {
     } catch (_: Throwable) { emptyList() }
 
     /** The command line that runs [cmd] (or a login shell) inside Alpine. */
-    fun command(cmd: String?, term: String = "xterm"): List<String> {
-        prepare()
-        val r = rootfs().absolutePath
+    fun command(cmd: String?, term: String = "xterm", distro: String = "alpine"): List<String> {
+        val rf = if (distro == "alpine") rootfs() else rootfs(distro)
+        if (distro == "alpine") prepare() else prepare(rf, distro)
+        val r = rf.absolutePath
         val fake = File(base(), "fake")
         val args = mutableListOf(nat("libproot.so").absolutePath, "--kill-on-exit", "--link2symlink", "-0", "-r", r,
             "-b", "/dev", "-b", "/proc", "-b", "/sys", "-b", "/system", "-b", "/apex",
@@ -180,7 +197,7 @@ object Linux {
         args += listOf("-w", "/root", "/usr/bin/env", "-i", "HOME=/root", "TERM=$term", "LANG=C.UTF-8", "COLORTERM=truecolor",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
         // v0.29.2: the interactive terminal gets bash when the user installed it (apk add bash), else Alpine's ash.
-        args += if (cmd == null) listOf(if (File(rootfs(), "bin/bash").exists()) "/bin/bash" else "/bin/sh", "-l") else listOf("/bin/sh", "-lc", cmd)
+        args += if (cmd == null) listOf(if (File(rf, "bin/bash").exists() || File(rf, "usr/bin/bash").exists()) "/bin/bash" else "/bin/sh", "-l") else listOf("/bin/sh", "-lc", cmd)
         return args
     }
 

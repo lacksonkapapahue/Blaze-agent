@@ -62,17 +62,17 @@ object TermSessions {
     fun find(s: TerminalSession): Tab? = synchronized(tabs) { tabs.firstOrNull { it.session === s } }
     fun active(): Tab? = synchronized(tabs) { tabs.getOrNull(current) }
 
-    fun envs(): List<TermLogic.Env> = TermLogic.envs(Linux.installed())
+    fun envs(): List<TermLogic.Env> = TermLogic.envs(Distros.installedIds())
 
     /** A new tab running [env] (or the default one). */
     fun open(ctx: Context, env: TermLogic.Env? = null): Tab {
         app = ctx.applicationContext
         Terminal.init(app); Terminal.setup()
-        val e = env ?: TermLogic.pick(lastEnv, Linux.installed())
+        val e = env ?: TermLogic.pick(lastEnv, Distros.installedIds())
         lastEnv = e.id
         val home = Terminal.home().absolutePath
-        val session = if (e.id == "alpine" && Linux.installed()) {
-            val cmd = Linux.command(null, "xterm-256color")
+        val session = if (e.id != "phone" && Distros.installed(e.id)) {
+            val cmd = Linux.command(null, "xterm-256color", e.id)
             TerminalSession(cmd.first(), home, cmd.toTypedArray(), TermLogic.envArray(Terminal.env(), Linux.env()), 3000, client)
         } else {
             val bb = File(app.applicationInfo.nativeLibraryDir, "libbusybox.so").takeIf { it.exists() }?.absolutePath

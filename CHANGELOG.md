@@ -4,7 +4,9 @@ Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has
 
 ## v0.29.2: Blaze Terminal
 - New **Terminal** view (/terminal, Views, "open terminal"): a full-screen, Termux-style terminal with a real PTY (Termux's Apache-2.0 terminal-emulator + terminal-view). vim, nano, htop, colours, Ctrl-C and resizing work.
-- Tabs run your Alpine Linux (bash if installed, else ash) or the phone shell (BusyBox ash). "+" opens a tab or installs Alpine; long-press a tab to close it. Shells keep running when you leave the screen.
+- More Linux: + → "Install a Linux…" offers Alpine, Ubuntu 24.04, Debian 12, Arch Linux ARM, Fedora and Manjaro (proot-distro rootfs, .tar.xz with pax headers; resumable download). Remove one from the same menu.
+- Tabs run any installed distro (bash when present) or the phone shell (BusyBox ash). The same distro can be open in several tabs. Long-press a tab to close it. Shells keep running when you leave the screen.
+- apt works as root under PRoot (APT::Sandbox::User root).
 - Termux's two extra-keys rows (ESC / ― HOME ↑ END PGUP · ⇥ CTRL ALT ← ↓ → PGDN) with key repeat; pinch to zoom; long-press to select and copy; ⋮ menu for paste, copy all, text size, restart and close.
 - The old Jobs page stays (Views → Jobs); "terminal" now opens the new one.
 

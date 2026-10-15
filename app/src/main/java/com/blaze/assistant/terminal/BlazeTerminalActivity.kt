@@ -210,19 +210,54 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
 
     private fun newTabMenu() {
         val envs = TermSessions.envs()
-        val labels = envs.map { it.label } + if (!Linux.installed()) listOf("Install Alpine Linux…") else emptyList()
+        val labels = envs.map { it.label } + "Install a Linux…"
         AlertDialog.Builder(this).setTitle("New tab").setItems(labels.toTypedArray()) { _, i ->
-            if (i < envs.size) { attach(TermSessions.open(this, envs[i])); showKeyboard() } else installAlpine()
+            if (i < envs.size) { attach(TermSessions.open(this, envs[i])); showKeyboard() } else installMenu()
         }.show()
     }
 
-    private fun installAlpine() {
+    /** Every distro this phone can run, with its size; installed ones can be removed (long-press style: second dialog). */
+    private fun installMenu() {
         if (!Linux.supported()) { Toast.makeText(this, "Linux isn't supported on this phone.", Toast.LENGTH_LONG).show(); return }
-        Toast.makeText(this, "Installing Alpine Linux (about 4 MB)…", Toast.LENGTH_SHORT).show()
+        val cpu = TermLogic.cpu(android.os.Build.SUPPORTED_ABIS.firstOrNull()) ?: "aarch64"
+        val list = Distros.installable()
+        val labels = list.map { d ->
+            val size = d.sizeMb[cpu]?.let { "~$it MB" } ?: ""
+            "${d.env().label}  ·  " + if (Distros.installed(d.id)) "installed" else size
+        }
+        AlertDialog.Builder(this).setTitle("Linux on this phone").setItems(labels.toTypedArray()) { _, i ->
+            val d = list[i]
+            if (Distros.installed(d.id)) {
+                AlertDialog.Builder(this).setTitle(d.env().label)
+                    .setItems(arrayOf("Open a new tab", "Remove ${d.name}")) { _, j ->
+                        if (j == 0) { attach(TermSessions.open(this, d.env())); showKeyboard() }
+                        else AlertDialog.Builder(this).setMessage("Remove ${d.name} and everything installed in it?")
+                            .setPositiveButton("Remove") { _, _ ->
+                                synchronized(TermSessions.tabs) { TermSessions.tabs.filter { it.env.id == d.id } }.forEach { TermSessions.close(it) }
+                                scope.launch { withContext(Dispatchers.IO) { Distros.uninstall(d.id) }; Toast.makeText(this@BlazeTerminalActivity, "${d.name} removed", Toast.LENGTH_SHORT).show()
+                                    TermSessions.active()?.let { attach(it) } ?: attach(TermSessions.open(this@BlazeTerminalActivity)) }
+                            }.setNegativeButton("Cancel", null).show()
+                    }.show()
+            } else install(d)
+        }.show()
+    }
+
+    private fun install(d: TermLogic.Distro) {
+        val text = TextView(this).apply { setPadding(dp(24), dp(16), dp(24), dp(8)); textSize = 14f; this.text = "Starting…" }
+        val dlg = AlertDialog.Builder(this).setTitle("Installing ${d.env().label}").setView(text)
+            .setNegativeButton("Hide", null).setCancelable(true).show()
+        val watch = scope.launch {
+            val flow = if (d.id == "alpine") Linux.status else Distros.status
+            flow.collect { text.text = it.ifBlank { "Starting…" } }
+        }
         scope.launch {
-            val r = withContext(Dispatchers.IO) { try { Linux.install() } catch (e: Exception) { "Couldn't install: ${e.message}" } }
-            Toast.makeText(this@BlazeTerminalActivity, r.take(160), Toast.LENGTH_LONG).show()
-            if (Linux.installed()) { attach(TermSessions.open(this@BlazeTerminalActivity, TermLogic.ALPINE)); showKeyboard() }
+            val r = Distros.install(d.id)
+            watch.cancel()
+            if (Distros.installed(d.id)) {
+                dlg.dismiss()
+                Toast.makeText(this@BlazeTerminalActivity, r.take(160), Toast.LENGTH_SHORT).show()
+                attach(TermSessions.open(this@BlazeTerminalActivity, d.env())); showKeyboard()
+            } else text.text = r
         }
     }
 
