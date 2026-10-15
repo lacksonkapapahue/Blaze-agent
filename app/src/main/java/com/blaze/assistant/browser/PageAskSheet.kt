@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FindInPage
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,23 +63,9 @@ import com.blaze.assistant.ui.GlassIconButton
 import com.blaze.assistant.ui.MascotGlyph
 import com.blaze.assistant.ui.Type
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 
-/** The scoped page chat: what it tells the model (pure, tested). */
-object PageAsk {
-    const val SYSTEM = "You are Blaze, answering questions about the web page the user has open. Use the page text below; " +
-        "when the answer isn't on the page, say so in one line and offer what you know, clearly marked. Be brief and plain: " +
-        "short paragraphs or a few bullets, no headings. Never ask for or repeat passwords or codes."
-
-    fun messages(page: String, history: List<Pair<Boolean, String>>): JSONArray {
-        val a = JSONArray().put(JSONObject().put("role", "system").put("content", SYSTEM + "\n\nPAGE:\n" + page.take(9000)))
-        history.forEach { (me, t) -> a.put(JSONObject().put("role", if (me) "user" else "assistant").put("content", t)) }
-        return a
-    }
-
-    val chips = listOf("Summarise this page", "Explain it simply", "What are the key points?")
-}
+/** One line in the page chat: the bubble text, a pasted link shown as a chip, and what the model was asked. */
+private data class Line(val me: Boolean, val text: String, val link: String? = null, val prompt: String = text)
 
 /**
  * "Ask Blaze about this page": a compact chat sheet scoped to the open page. Nothing here goes into the main chat
@@ -86,38 +73,54 @@ object PageAsk {
  * searches the page itself with WebView's find-in-page.
  */
 @Composable
-fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> String, web: WebView?, onDismiss: () -> Unit,
+fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAsk.Capture, web: WebView?, onDismiss: () -> Unit,
                  preview: List<Pair<Boolean, String>>? = null) {
     val scope = rememberCoroutineScope()
-    val list = remember { mutableStateListOf<Pair<Boolean, String>>().also { l -> preview?.let { l.addAll(it) } } }
+    val list = remember { mutableStateListOf<Line>().also { l -> preview?.let { p -> l.addAll(p.map { (me, t) -> Line(me, t) }) } } }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var page by remember { mutableStateOf<String?>(null) }
+    var page by remember { mutableStateOf<PageAsk.Capture?>(null) }
     var finding by remember { mutableStateOf(false) }
     var found by remember { mutableStateOf("") }
     val state = rememberLazyListState()
     val main = remember { Handler(Looper.getMainLooper()) }
+    val lang = remember { try { java.util.Locale.getDefault().getDisplayLanguage(java.util.Locale.ENGLISH).ifBlank { "English" } } catch (_: Exception) { "English" } }
 
+    // v0.27.1: an empty question summarises; a pasted link, one word or a greeting becomes a real request (PageQuestion).
     fun ask(q: String) {
-        val text = q.trim()
-        if (text.isEmpty() || busy) return
+        if (busy) return
         input = ""; busy = true
-        list += true to text
-        val history = list.toList()
-        list += false to "\u2026"
+        val cur = page
+        val intent = PageQuestion.parse(q, cur?.url ?: BrowserEngine.url())
+        list += Line(true, intent.shown, intent.link, intent.prompt)
+        val history = list.map { it.me to it.prompt }
+        list += Line(false, "\u2026")
         val idx = list.lastIndex
         scope.launch {
             try {
-                val p = page ?: readPage().also { page = it }
-                val r = com.blaze.assistant.agent.LlmClient.complete(PageAsk.messages(p, history), null, onText = { s ->
+                // A thin read (Lens results, a page still loading) is read again next time instead of being kept.
+                val p = cur ?: try { readPage() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { PageAsk.Capture.NONE }
+                page = p.takeUnless { PageAsk.thin(it) }
+                val extra = StringBuilder()
+                PageAsk.searchFor(intent, p)?.let { s ->
+                    val r = try { com.blaze.assistant.agent.Web.search(s, 5) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { "" }
+                    if (r.isNotBlank() && !r.startsWith("Error") && !r.startsWith("No results")) extra.append("WEB RESULTS for \u201c").append(s).append("\u201d:\n").append(r)
+                }
+                intent.fetch?.let { u ->
+                    val r = try { com.blaze.assistant.agent.Web.fetch(u, 4000) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { "" }
+                    if (r.isNotBlank() && !r.startsWith("Error")) extra.append(if (extra.isEmpty()) "" else "\n\n")
+                        .append("THE PAGE THE USER LINKED (").append(PageQuestion.host(u)).append("):\n").append(r)
+                }
+                val r = com.blaze.assistant.agent.LlmClient.complete(PageAsk.messages(p, history, extra.toString(), lang), null, onText = { s ->
                     val shown = com.blaze.assistant.agent.ReplyParts.split(s, final = false).text
-                    main.post { if (idx < list.size && shown.isNotBlank()) list[idx] = false to shown }
+                    main.post { if (idx < list.size && shown.isNotBlank()) list[idx] = Line(false, shown) }
                 })
-                val out = com.blaze.assistant.agent.ReplyParts.split(r.optString("content"), final = true).text.ifBlank { "I couldn't find an answer on this page." }
-                if (idx < list.size) list[idx] = false to out
+                val out = com.blaze.assistant.agent.ReplyParts.split(r.optString("content"), final = true).text
+                    .ifBlank { "I couldn't get an answer for this page just now. Tap a chip below or ask again in a moment." }
+                if (idx < list.size) list[idx] = Line(false, out)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) {
-                if (idx < list.size) list[idx] = false to ("I couldn't answer that: " + (e.message ?: "no connection").take(160))
+                if (idx < list.size) list[idx] = Line(false, "I couldn't answer that: " + (e.message ?: "no connection").take(160))
             } finally { busy = false }
         }
     }
@@ -129,7 +132,7 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> String
     }
     DisposableEffect(Unit) { onDispose { try { web?.clearMatches() } catch (_: Exception) { } } }
     LaunchedEffect(Unit) { initial?.takeIf { it.isNotBlank() && preview == null }?.let { ask(it) } }
-    LaunchedEffect(list.size, list.lastOrNull()?.second?.length) { if (list.isNotEmpty()) state.animateScrollToItem(list.lastIndex) }
+    LaunchedEffect(list.size, list.lastOrNull()?.text?.length) { if (list.isNotEmpty()) state.animateScrollToItem(list.lastIndex) }
 
     val top = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)).clickable(remember { MutableInteractionSource() }, null) { onDismiss() },
@@ -150,12 +153,17 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> String
             if (list.isNotEmpty()) {
                 LazyColumn(state = state, modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    itemsIndexed(list) { _, (me, t) ->
+                    itemsIndexed(list) { _, line ->
+                        val me = line.me
                         Box(Modifier.fillMaxWidth(), contentAlignment = if (me) Alignment.CenterEnd else Alignment.CenterStart) {
-                            SelectionContainer {
-                                Text(t, modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp))
-                                    .background(if (me) Glass.blue else Glass.raised).padding(horizontal = 12.dp, vertical = 9.dp),
-                                    style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = Glass.text))
+                            Column(horizontalAlignment = if (me) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                // A pasted link is a compact chip, never a giant URL bubble.
+                                line.link?.let { LinkChip(PageQuestion.chip(it)) }
+                                if (line.text.isNotBlank()) SelectionContainer {
+                                    Text(line.text, modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp))
+                                        .background(if (me) Glass.blue else Glass.raised).padding(horizontal = 12.dp, vertical = 9.dp),
+                                        style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = Glass.text))
+                                }
                             }
                         }
                     }
@@ -168,7 +176,7 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> String
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f).clip(Glass.pill).background(Glass.raised).border(1.dp, Glass.border, Glass.pill)
                     .padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    if (input.isEmpty()) Text(if (finding) "Find words on this page" else "Ask about this page", maxLines = 1,
+                    if (input.isEmpty()) Text(if (finding) "Find words on this page" else "Ask about this page (or send to summarise)", maxLines = 1, overflow = TextOverflow.Ellipsis,
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.weak))
                     BasicTextField(input, { input = it; if (finding) find(it) }, singleLine = finding, maxLines = if (finding) 1 else 3,
                         cursorBrush = SolidColor(Glass.blue), textStyle = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, color = Glass.text),
@@ -182,8 +190,8 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> String
                     GlassIconButton(Icons.Rounded.KeyboardArrowUp, "Previous match", size = 40.dp) { find(input, false) }
                     Spacer(Modifier.width(4.dp))
                     GlassIconButton(Icons.Rounded.KeyboardArrowDown, "Next match", size = 40.dp) { find(input, true) }
-                } else GlassIconButton(Icons.Rounded.Send, "Send", size = 46.dp, bg = if (input.isBlank() || busy) Glass.raised2 else Glass.blue,
-                    enabled = input.isNotBlank() && !busy) { ask(input) }
+                } else GlassIconButton(Icons.Rounded.Send, if (input.isBlank()) "Summarise this page" else "Send", size = 46.dp,
+                    bg = if (busy) Glass.raised2 else Glass.blue, enabled = !busy) { ask(input) }
             }
         }
     }
@@ -197,5 +205,14 @@ private fun Chip(text: String, active: Boolean = false, onClick: () -> Unit) {
             androidx.compose.material3.Icon(Icons.Rounded.FindInPage, contentDescription = null, tint = Glass.text, modifier = Modifier.padding(end = 6.dp).width(16.dp))
         }
         Text(text, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = Glass.text))
+    }
+}
+
+@Composable
+private fun LinkChip(label: String) {
+    Row(Modifier.widthIn(max = 260.dp).clip(Glass.pill).background(Glass.blue.copy(alpha = 0.85f)).border(1.dp, Glass.border, Glass.pill)
+        .padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.Icon(Icons.Rounded.Link, contentDescription = null, tint = Glass.text, modifier = Modifier.padding(end = 6.dp).width(16.dp))
+        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = Glass.text))
     }
 }
