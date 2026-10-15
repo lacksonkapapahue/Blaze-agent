@@ -100,3 +100,7 @@ What changed in each build: [CHANGELOG.md](CHANGELOG.md).
 
 ## Credits
 BlazeRouter is a Go port of [OmniRoute](https://github.com/diegosouzapw/OmniRoute) (MIT); see THIRD_PARTY_NOTICES.md.
+
+## License
+
+Blaze is source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). You may read, run and modify it for noncommercial purposes; commercial use needs written permission from the author. Third-party components keep their own licences (THIRD_PARTY_NOTICES.md).
