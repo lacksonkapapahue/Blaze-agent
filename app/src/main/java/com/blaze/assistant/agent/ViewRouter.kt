@@ -57,7 +57,8 @@ object ViewRouter {
             r("""\b((?:old|past|previous|earlier|archived) (?:chats?|conversations?)|chat history|what did (?:we|i) (?:say|talk|discuss)|we talked about|last time we)\b""")),
         Spec("memory", "Memory", "lasting facts about the user, their people, preferences and decisions",
             listOf("memory_save", "remember", "forget", "memory_search"), emptyList(),
-            r("""\b(remember (?:that|this|my|me)|don'?t forget (?:that|my)|forget (?:that|my|about)|what do you (?:know|remember)|keep in mind)\b""")),
+            r("""\b(remember (?:that|this|my|me)|don'?t forget (?:that|my)|forget (?:that|my|about)|what do you (?:know|remember)|keep in mind|""" +
+                """(?:show|list|see|view|read|display)\b.{0,20}\b(?:your |my |all |saved )?memories|(?:your|my) memories)\b""")),
         Spec("browser", "Browser", "websites Blaze opens, fills in or signs in to (background tabs; browser_show only when the user must step in)",
             listOf("browser_open", "browser_click", "browser_type", "browser_secure_input"), listOf("browser"),
             r("""(\b(?:open|go to|visit|log ?in to|sign ?in to|sign up (?:on|for)|fill (?:in|out))\b.{0,40}(?:\bsite\b|\bwebsite\b|\bportal\b|\.com\b|\.org\b|\.zm\b|https?://)|https?://)""")),
@@ -88,7 +89,7 @@ object ViewRouter {
         """(?:show|hide|add|remove|delete|drop|make|change|turn|rotate|spin|move|put|give|use|swap|replace|resize|scale|zoom|colou?r|paint|fix|undo|redo|open|let me see|see|view|""" +
         """bigger|smaller|taller|shorter|wider|narrower|thinner|thicker|longer|more|less|darker|lighter|brighter|try|flip|mirror|cent(?:er|re)|align|increase|decrease|raise|lower|lift|""" +
         """extend|shrink|enlarge|attach|include|without|with|no|switch|set|label|animate|place)\b""")
-    private val notDesign = r("""\b(calendar|e-?mails?|inbox|messages?|whatsapp|sms|texts?|calls?|alarms?|timers?|weather|news|battery|notifications?|music|songs?|playlist|volume|wi-?fi|bluetooth|reminders?|flash ?cards?|memory|contacts?|torch|brightness)\b""")
+    private val notDesign = r("""\b(calendar|e-?mails?|inbox|messages?|whatsapp|sms|texts?|calls?|alarms?|timers?|weather|news|battery|notifications?|music|songs?|playlist|volume|wi-?fi|bluetooth|reminders?|flash ?cards?|memory|memories|remember|know about me|contacts?|torch|brightness)\b""")
 
     /** A short change to what was just designed ("show engine", "make it taller", "add fins", "open it for me so I can see"). */
     fun isFollowOnEdit(text: String): Boolean {
@@ -130,14 +131,17 @@ object ViewRouter {
             "Do NOT write the questions and answers in chat. To quiz from an existing deck: flashcards action=due and ask one card at a time."
         "design" -> "\nREQUIRED VIEW THIS TURN: Design. Make it for real with the design tool: 3D (a rocket, car, building, product…) → design action=create kind=3d " +
             "title=… parts=[…] (8-40 parts, real proportions, y up, parts that should touch do); pages, UI mockups, posters, slides, charts, diagrams, floor plans, games → " +
-            "design action=create html=<one complete document>; 2D art → svg. The Design view opens by itself. Then reply in one or two lines (what you made, how to look around). " +
+            "design action=create html=<one complete document>; 2D art → svg. The Design view opens by itself. Then reply in one or two lines describing only what the tool result says " +
+            "you made (a 3D model only if it says 3D; orbit/zoom only for 3D). " +
             "Don't paste the code in chat, and never say it's made unless the tool succeeded."
         "schedule" -> "\nREQUIRED VIEW THIS TURN: Schedule. Create it with create_routine / schedule_command / create_trigger (or set_alarm / add_calendar_event for one-off times) and say when it will run in one line."
         "gallery" -> "\nREQUIRED VIEW THIS TURN: Gallery. Make it with generate_image (art/photos) or run_code (beats, charts) saved under /root/phone/ so it lands in the Gallery; reply briefly."
         "skills" -> "\nREQUIRED VIEW THIS TURN: Skills. Save a workflow with save_workflow (name, trigger, steps, checks), or a skill with write_skill / install_skill; say its name in one line."
         "projects" -> "\nREQUIRED VIEW THIS TURN: Projects. Use open_view view=projects so the user can create or open the project there; keep the reply short."
         "archive" -> "\nREQUIRED VIEW THIS TURN: Archive. Look it up with search_chat / search_past_chats and answer in chat from what you find (quote the exact words when it helps). There is no chat list screen to open."
-        "memory" -> "\nREQUIRED VIEW THIS TURN: Memory. Save, update or forget with memory_save / remember / forget (or look up with memory_search); confirm in one line."
+        "memory" -> "\nREQUIRED VIEW THIS TURN: Memory. Save, update or forget with memory_save / remember / forget (or look up with memory_search); confirm in one line. " +
+            "To show what you remember (\"show me your memories\", \"what do you know about me\"), call memory_search query=all and list the lines in chat grouped plainly " +
+            "(about you, preferences, people, projects…), then one line on how to change or delete one. Never open Design or another view for this."
         "browser" -> "\nREQUIRED VIEW THIS TURN: Browser. Do it in Blaze's background browser (browser_open, browser_click, browser_type, browser_secure_input); browser_show only if the user must step in."
         else -> "\nREQUIRED VIEW THIS TURN: ${s.name}. Create the result there with ${s.tools.joinToString(" / ")}, open or link it, and reply briefly."
     }

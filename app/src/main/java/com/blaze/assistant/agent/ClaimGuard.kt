@@ -39,7 +39,8 @@ object ClaimGuard {
 
     private const val VERBS = """created|made|built|generated|designed|drawn|drew|rendered|updated|changed|modified|edited|adjusted|tweaked|added|opened|saved|set up|scheduled|put|placed|switched|redesigned|rebuilt|shown|showing|displayed"""
     // "I've updated the design", "I have opened…", "the design has been updated", "it's now in…", "done, I added…"
-    private val pastClaim = Regex("""\b(?:i|i've|i have|i just|i've just|we've|it's|it is|it has been|has been|have been|is now|are now|done|all done)\b[^.!?\n]{0,30}?\b(?:$VERBS)\b""", ic)
+    // v0.27.x: also a sentence that opens with the verb ("Opened the Solar Panel diagram in Design view.").
+    private val pastClaim = Regex("""^\s*(?:$VERBS)\b|\b(?:i|i've|i have|i just|i've just|we've|it's|it is|it has been|has been|have been|is now|are now|done|all done)\b[^.!?\n]{0,30}?\b(?:$VERBS)\b""", ic)
     // "view it in the design section", "you can see it in Design", "it's in the Learn view", "open the design view to see"
     private fun whereClaim(n: String) = Regex("""\b(?:view|see|find|check|open|look at|explore|orbit|tap)\b[^.!?\n]{0,30}\b(?:in|on|from)\s+(?:the\s+|your\s+)?(?:$n)\b(?:\s+(?:section|view|tab|screen|page|panel))?|""" +
         """\b(?:it's|it is|they're|they are|now)\s+(?:now\s+)?(?:in|on)\s+(?:the\s+|your\s+)(?:$n)\s+(?:section|view|tab|screen)|""" +
@@ -72,7 +73,8 @@ object ClaimGuard {
             "design" -> c.name == Designs.TOOL || c.name == "preview_server" ||
                 (c.name in setOf("file_write", "file_edit") && Regex("""(?i)\.(html?|svg|css|js)$""").containsMatchIn(c.args.optString("path").trim()))
             "gallery" -> c.name in setOf("generate_image", "gallery", "run_code")
-            "memory" -> c.name in setOf("memory_save", "memory_update", "remember", "forget")
+            // v0.27.x: showing / listing memories is backed by a lookup too.
+            "memory" -> c.name in setOf("memory_save", "memory_update", "remember", "forget", "memory_search", "recall_memory")
             "browser" -> c.name.startsWith("browser_") || c.name in setOf("open_url", "navigate_to")
             else -> c.name in spec.tools
         }
@@ -89,6 +91,25 @@ object ClaimGuard {
         return null
     }
 
+    /**
+     * v0.27.x: is a claim about [spec]'s view something this request is about? Only then is the model re-prompted to
+     * do the work there. "show me your memories" answered with "Opened the solar panel diagram in Design" is not a
+     * reason to go and open Design; the stray claim is dropped instead ([drop]).
+     */
+    fun relevant(spec: ViewRouter.Spec, userText: String, turnView: String? = null): Boolean {
+        if (turnView == spec.id) return true
+        if (ViewRouter.route(userText)?.id == spec.id) return true
+        val n = nouns[spec.id] ?: return false
+        return Regex("""\b(?:$n)\b""", ic).containsMatchIn(userText)
+    }
+
+    /** [reply] with the claim sentences about [spec] taken out ("" when nothing else was said). */
+    fun drop(reply: String, spec: ViewRouter.Spec): String {
+        val bad = claims(reply, spec.id).toSet()
+        val rest = sentences(reply).filterNot { it in bad }.joinToString(" ").trim()
+        return if (rest.length < 12) "" else rest
+    }
+
     /** The one re-prompt: do it for real now. */
     fun nudge(spec: ViewRouter.Spec, current: Designs.Current?): String = "[Blaze check] Your reply says you made, changed or opened something in ${spec.name}, " +
         "but no ${spec.name} tool succeeded this turn, so nothing is there. Do it for real now: " + when (spec.id) {
@@ -103,7 +124,7 @@ object ClaimGuard {
             "memory" -> "memory_save / remember. "
             "browser" -> "browser_open and the other browser_ tools. "
             else -> "${spec.tools.joinToString(" / ")}. "
-        } + "Then reply in one or two lines about what the tool actually did. If it can't be done, say so plainly."
+        } + "Then reply in one or two lines about what the tool actually did (its real result: 2D or 3D, what it shows). If it can't be done, say so plainly."
 
     /** The claim sentences swapped for an honest line (the rest of the reply is kept). */
     fun honest(reply: String, spec: ViewRouter.Spec): String {
@@ -116,7 +137,7 @@ object ClaimGuard {
             "gallery" -> "make it in the Gallery this time, so nothing new is there yet"
             "memory" -> "save that to memory this time"
             else -> "do that in ${spec.name} this time, so nothing changed there yet"
-        } + ". Say \u201ctry again\u201d and I'll do it properly."
+        } + ". Say \u201ctry again\u201d and I'll have another go."
         return if (rest.length < 12) line else "$line\n\n$rest"
     }
 }

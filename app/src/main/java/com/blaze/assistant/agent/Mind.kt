@@ -689,7 +689,7 @@ object Mind {
 
     fun tools(): List<JSONObject> = listOf(
         fn("memory_search", "Search what you know about the user (profile, preferences, people, projects, decisions, facts). Call it before answering anything about them, their people, plans or past conversations.",
-            JSONObject().put("query", str("Words to look for, e.g. 'Gloria' or 'food'")).put("kind", kindProp()), listOf("query")),
+            JSONObject().put("query", str("Words to look for, e.g. 'Gloria' or 'food'; 'all' lists everything saved (for \"show me your memories\" / \"what do you know about me\")")).put("kind", kindProp()), listOf("query")),
         fn("memory_save", "Save one lasting line: profile, preference, person, project state, decision or commitment. Keep the user's conditions exactly; set inferred=true when you inferred it. A newer version of a line replaces the old one automatically.",
             JSONObject().put("kind", kindProp()).put("subject", str("Who or what it is about, e.g. 'You', 'Gloria', 'HomeGlow'"))
                 .put("text", str("One line")).put("related", str("Other subjects, comma-separated")).put("inferred", JSONObject().put("type", "boolean")),
@@ -705,6 +705,13 @@ object Mind {
         if (db == null) return "Memory isn't available on this phone right now."
         return when (name) {
             "memory_search" -> {
+                // v0.27.x: "show me your memories" → the model asks for everything; give it every line (grouped by kind).
+                if (MemoryIntent.meansAll(args.optString("query")) && args.optString("kind").isBlank()) {
+                    val all = try { db!!.all() } catch (_: Exception) { emptyList() }
+                    return if (all.isEmpty()) "Nothing is saved about the user yet." else
+                        "Everything saved (${all.size} lines). Show them to the user grouped plainly, no Design or other view:\n" +
+                            all.take(120).joinToString("\n") { line(it) }
+                }
                 val hits = db!!.search(args.optString("query"), args.optString("kind").ifBlank { null }, 12)
                 if (hits.isEmpty()) "Nothing saved about \u201c${args.optString("query")}\u201d. Try other words, or search_chat for earlier conversations."
                 else hits.joinToString("\n") { line(it) }

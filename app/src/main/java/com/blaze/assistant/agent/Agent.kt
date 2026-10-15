@@ -665,6 +665,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             if (name != null) append("The user's name is $name. ")
             append(com.blaze.assistant.connect.Connectors.promptBlock())
             append("\nHOW YOU TALK: short, warm and sure of yourself, like a sharp friend texting back. Lead with the answer. One or two sentences unless they ask for more. Never say \"let me know if there's anything else\", \"feel free to\", \"I'd be happy to\" or similar filler, and never ask the user to share personal details for your memory. ")
+            append(AnswerStyle.RULE)
             append("\nYou are Blaze and you can control yourself with blaze_self (close/go quiet, stop, orb, wake word, read-aloud, model, personality, settings, your setup and crash log). When the user wants help setting you up, or asks what you can do or what's installed, call blaze_self setup_check and guide them one step at a time. If the user asks you to shut down, close, go away or stop, do that with blaze_self, never a phone setting. ")
             append("\nWhen the user tells you something lasting about themselves, save it quietly with the remember tool. ")
             append("\nIf the user says \"again\", \"do it again\" or \"same for X\", repeat your last actions from this chat (adapted to X) without asking. ")
@@ -1105,6 +1106,21 @@ When you finish, say what you did in one short sentence.
                 }
             }
             job = scope.launch(ctxTag) {
+                // v0.27.x: "show me your memories" / "what do you know about me" is answered straight from the memory table:
+                // grouped, with how to change or delete a line. No model call, no tool loop, no Design.
+                if (attachments.isEmpty() && !routine && agentId == null && notificationContext.isNullOrBlank() && MemoryIntent.isListRequest(shown)) {
+                    mood = Mood.ACTING
+                    add(Role.STEP, "Looking through what I remember")
+                    val reply = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                        try { if (Mind.db() != null) MemoryIntent.format(Mind.all()) else MemoryIntent.formatPlain(Memory.facts.value) }
+                        catch (_: Exception) { MemoryIntent.formatPlain(Memory.facts.value) }
+                    }
+                    history.put(JSONObject().put("role", "assistant").put("content", reply))
+                    addReply(-1, reply, "")
+                    mood = Mood.IDLE
+                    persist(); announce()
+                    return@launch
+                }
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
@@ -1208,6 +1224,8 @@ When you finish, say what you did in one short sentence.
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
                 (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs) +
+                // v0.27.x: "how do I install X" → lead with the action and end with one concrete offer to do it.
+                AnswerStyle.turnHint(lastUserText()) +
                 // v0.26.1: an in-chat diagram / chart is drawn in the reply itself (no files, preview or use_skill).
                 (if (turnView == null && turnDesignNote.isEmpty() && Settings.bool("rich_replies", true) && VisualRoute.inChat(lastUserText())) VisualRoute.HINT else "")
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
@@ -1389,6 +1407,10 @@ When you finish, say what you did in one short sentence.
                 thinking = ""
                 var gateLeft = 2
                 var actedThisTurn = false
+                // v0.27.x: any tool ran (lookups too), corrective re-prompts left this turn (all kinds), designs shown this turn.
+                var lookedThisTurn = false
+                var nudgesLeft = RetryGuard.MAX
+                Designs.touched.clear()
                 val lastResults = ArrayList<String>()
                 // Autopilot: a bigger step budget and a clock; normal turns keep the old cap.
                 val autopilot = Modes.autopilot && !routine
@@ -1556,31 +1578,44 @@ When you finish, say what you did in one short sentence.
                         val shown = ReplyParts.split(textOut, final = true).text
                         val bad = synchronized(turnOk) { ClaimGuard.unbacked(shown, turnOk.toList()) }
                         if (bad != null) {
-                            if (!claimNudged && step < maxSteps - 3) {
+                            // v0.27.x: only a claim about what the user asked for is worth doing for real; a stray claim about
+                            // another view ("show me your memories" → "Opened the solar diagram in Design") is dropped, never acted on.
+                            val related = ClaimGuard.relevant(bad, lastUserText(), turnView?.id)
+                            val rest = if (related) "" else ClaimGuard.drop(shown, bad)
+                            if (!related && rest.isNotEmpty()) {
+                                textOut = rest
+                                reply.put("content", textOut)
+                                pendingFollowups = emptyList()
+                            } else if (!claimNudged && nudgesLeft > 0 && step < maxSteps - 3) {
                                 claimNudged = true
-                                groupsOn += bad.groups
+                                nudgesLeft--
+                                if (related) groupsOn += bad.groups
                                 if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
-                                add(Role.STEP, "Doing it for real in ${bad.name}")
-                                history.put(JSONObject().put("role", "user").put("content", ClaimGuard.nudge(bad, if (bad.id == "design") Designs.current() else null)))
+                                add(Role.STEP, if (related) RetryGuard.label(RetryGuard.Kind.CLAIM, bad.name) else RetryGuard.label(RetryGuard.Kind.OFF_TOPIC))
+                                val n = if (related) ClaimGuard.nudge(bad, if (bad.id == "design" && (lastTurnDesign || Designs.recent())) Designs.current() else null) else RetryGuard.OFF_TOPIC
+                                history.put(JSONObject().put("role", "user").put("content", RetryGuard.anchor(n, lastUserText())))
                                 continue
+                            } else {
+                                textOut = ClaimGuard.honest(shown, bad)
+                                reply.put("content", textOut)
+                                pendingFollowups = emptyList()
                             }
-                            textOut = ClaimGuard.honest(shown, bad)
-                            reply.put("content", textOut)
-                            pendingFollowups = emptyList()
                         }
                     }
-                    if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && !routine) {
+                    if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && nudgesLeft > 0 && !routine) {
                         val nudge = when {
-                            FakeCall.looksFake(ReplyParts.split(textOut, final = true).text, ToolCalls.names(allTools), actedThisTurn, lastUserText()) -> FakeCall.NUDGE
+                            FakeCall.looksFake(ReplyParts.split(textOut, final = true).text, ToolCalls.names(allTools), actedThisTurn, lastUserText(), lookedThisTurn) -> FakeCall.NUDGE
                             Autonomy.looksLikeRefusal(textOut) -> Autonomy.REFUSAL_NUDGE
                             actedThisTurn && Autonomy.lastFailed(lastResults) -> Autonomy.VERIFY_NUDGE
                             else -> null
                         }
                         if (nudge != null) {
                             gateLeft--
+                            nudgesLeft--
                             if (liveId >= 0) msgs = msgs.filterNot { it.id == liveId }
-                            add(Role.STEP, if (nudge == FakeCall.NUDGE) "Doing it properly this time" else "Trying another way")
-                            history.put(JSONObject().put("role", "user").put("content", nudge))
+                            add(Role.STEP, RetryGuard.label(if (nudge == FakeCall.NUDGE) RetryGuard.Kind.FAKE_CALL else RetryGuard.Kind.REFUSAL))
+                            // v0.27.x: a retry stays on the user's latest request.
+                            history.put(JSONObject().put("role", "user").put("content", RetryGuard.anchor(nudge, lastUserText())))
                             lastResults.clear()
                             continue
                         }
@@ -1603,6 +1638,11 @@ When you finish, say what you did in one short sentence.
                         }
                     }
                     if (calls == null || calls.length() == 0) {
+                        // v0.27.x: the reply only describes what the design tool really produced (a flat diagram is not "3D").
+                        if (Designs.touched.isNotEmpty()) {
+                            val g = Designs.groundReply(textOut, Designs.touched.toList())
+                            if (g != textOut) { textOut = g; reply.put("content", g) }
+                        }
                         kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
                         val secs = (System.currentTimeMillis() - turnStart) / 1000.0
                     if (step > 0) { com.blaze.assistant.device.Haptics.done(app); com.blaze.assistant.device.Sounds.done() }
@@ -1668,6 +1708,7 @@ When you finish, say what you did in one short sentence.
                         // A tool from a group pulls in the rest of that group (e.g. a stuck run_plan brings tap/scroll).
                         ToolRouter.groupOf(name)?.let { groupsOn += it }
                         if (name !in parallelSafe && name !in setOf("find_tool", "load_tools", "goal", "processes")) actedThisTurn = true
+                        if (name !in setOf("find_tool", "load_tools")) lookedThisTurn = true
                         lastResults += result
                         if (ClaimGuard.succeeded(result)) { turnOk += ClaimGuard.Call(name, args); lastOkStep = msgs.lastOrNull { it.role == Role.STEP }?.text.orEmpty() }
                         if (name == "run_plan" || name == "read_screen") groupsOn += "screen"
@@ -2029,7 +2070,7 @@ When you finish, say what you did in one short sentence.
             return when (name) {
                 "remember" -> { add(Role.STEP, "Remembering that"); Memory.add(args.optString("fact"), args.optString("replaces")) }
                 "forget" -> { add(Role.STEP, "Forgetting that"); Memory.forget(args.optString("fact")) }
-                in Mind.toolNames -> { add(Role.STEP, if (name == "memory_search") "Checking memory for \u201c${args.optString("query").take(40)}\u201d" else "Saving to memory")
+                in Mind.toolNames -> { add(Role.STEP, if (name == "memory_search") (if (MemoryIntent.meansAll(args.optString("query"))) "Looking through what I remember" else "Checking memory for \u201c${args.optString("query").take(40)}\u201d") else "Saving to memory")
                     kotlinx.coroutines.withContext(Dispatchers.IO) { Mind.run(name, args) } }
                 "generate_image" -> if (Regex("(?i)\\b(pie|bar|line)\\s*chart|\\bgraph\\b|\\bplot\\b|\\bdiagram\\b|\\btable\\b|\\bpdf\\b|\\binfographic|\\bspreadsheet").containsMatchIn(args.optString("prompt"))) {
                     "Refused: the AI picture tool can't draw exact charts, tables or documents (it makes a random look-alike). Make it with run_code (Python matplotlib / reportlab) and save under /root/phone/. " +
@@ -2163,7 +2204,7 @@ When you finish, say what you did in one short sentence.
                 "termux_run" -> { add(Role.STEP, "Termux: " + args.optString("command").take(60)); com.blaze.assistant.terminal.Terminal.runInTermux(app, args.optString("command"), args.optBoolean("background", true)) }
                 "delegate" -> delegate(args)
                 "create_specialist" -> createSpecialist(args)
-                "recall_memory" -> { add(Role.STEP, "Checking memory"); Memory.recall(args.optString("query")) }
+                "recall_memory" -> { add(Role.STEP, if (MemoryIntent.meansAll(args.optString("query"))) "Looking through what I remember" else "Checking memory"); Memory.recall(args.optString("query")) }
                 "blaze_self" -> {
                     val act = args.optString("action")
                     add(Role.STEP, when (act) { "setup_check", "status" -> "Checking my setup"; "install" -> "Installing ${args.optString("what")}"; "open" -> "Opening ${args.optString("target")}"; else -> "Adjusting myself: $act" })
