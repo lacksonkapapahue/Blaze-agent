@@ -109,7 +109,7 @@ object MagicHandState {
     /** v0.28.1: tap on a grab action. Returns the new state and the action to run now (null = queued or ignored). */
     fun tapGrab(u: Ui, g: GrabAction): Pair<Ui, GrabAction?> = when {
         u.panel != Panel.GRAB -> u to null
-        u.grabBusy -> u.copy(queued = g, note = "${g.label}: as soon as it's read") to null
+        u.grabBusy -> u.copy(queued = g) to null   // the card says "Copy when ready"
         u.grabbed.isBlank() -> u to null
         else -> u.copy(queued = null) to g
     }

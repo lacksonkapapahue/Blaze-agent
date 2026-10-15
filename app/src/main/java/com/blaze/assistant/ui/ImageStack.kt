@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -235,8 +236,11 @@ fun ImagePagerFrame(bitmaps: List<ImageBitmap?>, index: Int, progress: Float, zo
                     alpha = pg.alpha
                     if (rel == 0) { scaleX = zoom; scaleY = zoom }
                 }, contentAlignment = Alignment.Center) {
-                    if (bmp != null) Image(bmp, contentDescription = "Picture ${i + 1} of $n", contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 72.dp).clip(RoundedCornerShape(18.dp)))
+                    // Sized to the picture's own shape so the rounded corners sit on the picture, not on empty space.
+                    if (bmp != null) Box(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 72.dp), contentAlignment = Alignment.Center) {
+                        Image(bmp, contentDescription = "Picture ${i + 1} of $n", contentScale = ContentScale.Fit,
+                            modifier = Modifier.aspectRatio(bmp.width.toFloat() / bmp.height.coerceAtLeast(1)).clip(RoundedCornerShape(18.dp)))
+                    }
                 }
             }
         }
