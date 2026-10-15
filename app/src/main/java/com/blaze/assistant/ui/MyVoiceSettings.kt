@@ -212,7 +212,7 @@ fun MyVoiceCard(
                 ui.test != null && !ui.test.ok -> Body(ui.test.error, color = c.accent)
                 ui.test != null -> {
                     Body("Made %.1f s of speech in %.1f s. %s".format(ui.test.audioSec, ui.test.makeMs / 1000f, SpeedWatch.describe(ui.test.rtf)))
-                    if (ui.test.rtf > 1f) Body("Tip: pick Fast below, or turn on \u201CKeep my voice when it's slow\u201D to always hear yourself (with pauses).", color = c.sub)
+                    if (ui.test.rtf > 1f) Body("Turn on \u201CKeep my voice when it's slow\u201D below to always hear yourself (with pauses between sentences).", color = c.sub)
                 }
                 else -> Body(if (canTest) "Blaze will say a test sentence in your voice." else "Download the model and record first.")
             }
@@ -226,7 +226,7 @@ fun MyVoiceCard(
     if (ui.message.isNotEmpty()) Body(ui.message, color = c.accent, modifier = Modifier.padding(top = 8.dp))
 
     if (packReady || ui.hasVoice) {
-        Label("My voice speed", modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
+        Label("My voice quality", modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
         Row(Modifier.fillMaxWidth()) {
             listOf("auto" to "Auto", "fast" to "Fast", "balanced" to "Balanced", "best" to "Best").forEach { (v, l) ->
                 Box(Modifier.weight(1f).padding(end = 6.dp).hairline(if (quality == v) c.ink else c.hair)
@@ -234,7 +234,7 @@ fun MyVoiceCard(
                     contentAlignment = Alignment.Center) { ButtonText(l, color = if (quality == v) c.paper else c.ink, size = 13.sp) }
             }
         }
-        Body("Fast suits older phones; Best sounds smoother but needs a quicker phone.", modifier = Modifier.padding(top = 4.dp))
+        Body("Fast is slightly quicker; Best sounds a little smoother.", modifier = Modifier.padding(top = 4.dp))
         ToggleRow("Keep my voice when it's slow", "Off: if your phone can't keep up, Blaze switches to the phone voice and tells you", keepSlow, onKeepSlow)
         Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
             if (ui.hasVoice && !setupOpen) ActionText("Re-record", color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onRerecord).padding(vertical = 10.dp).padding(end = 14.dp))

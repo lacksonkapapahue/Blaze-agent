@@ -37,7 +37,8 @@ class VoiceRouteTest {
     @Test fun lowEndDefaults() {
         val a12Ram = 3L * 1024 * 1024 * 1024
         assertTrue(VoiceRoute.lowEnd(a12Ram, 8))
-        assertEquals(2, VoiceRoute.numSteps("auto", true))
+        assertEquals(3, VoiceRoute.numSteps("auto", true))
+        assertEquals(2, VoiceRoute.numSteps("fast", false))
         assertEquals(3, VoiceRoute.numSteps("auto", false))
         assertEquals(5, VoiceRoute.numSteps("best", true))
         assertEquals(4, VoiceRoute.threads(8))

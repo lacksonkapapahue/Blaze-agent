@@ -43,7 +43,7 @@ object VoiceRoute {
         "fast" -> 2
         "balanced" -> 3
         "best" -> 5
-        else -> if (lowEnd) 2 else 3
+        else -> 3   // measured: steps barely change speed (lm_main dominates), so Auto keeps quality
     }
 
     /** A Galaxy A12 class phone: 4 GB RAM or less, or only little cores. Picks threads and default quality. */
