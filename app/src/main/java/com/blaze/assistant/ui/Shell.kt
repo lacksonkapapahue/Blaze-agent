@@ -1,5 +1,8 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
