@@ -1,12 +1,19 @@
 package com.blaze.assistant.store
 
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.PreparedStatement
 
-/** [Sql] for JVM tests: sqlite-jdbc (a modern SQLite with FTS5, like the phone's bundled one). */
+/**
+ * [Sql] for JVM tests: sqlite-jdbc (a modern SQLite with FTS5, like the phone's bundled one).
+ *
+ * Connects through sqlite-jdbc's own driver, not java.sql.DriverManager: DriverManager only hands out a driver
+ * registered from the caller's class loader, and in a Robolectric test (its own sandbox class loader) the driver had
+ * been registered from the plain test class loader by the JVM tests that ran first, so `JdbcSql()` failed there with
+ * "No suitable driver found for jdbc:sqlite::memory:" (MindUpgradeTest.bothStoresAnswerTheSame, v0.26.3 CI).
+ */
 class JdbcSql(url: String = "jdbc:sqlite::memory:") : Sql {
-    val conn: Connection = DriverManager.getConnection(url)
+    val conn: Connection = org.sqlite.JDBC().connect(url, java.util.Properties())
+        ?: throw java.sql.SQLException("Not a SQLite URL: $url")
 
     private fun prep(sql: String, args: Array<out Any?>): PreparedStatement {
         val st = conn.prepareStatement(sql)
