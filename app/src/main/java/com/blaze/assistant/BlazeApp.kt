@@ -63,7 +63,7 @@ class BlazeApp : Application() {
         com.blaze.assistant.link.DesktopLink.start()
         if (Settings.bool("dash_auto", false)) com.blaze.assistant.dashboard.Dashboard.start(this)
         if (Settings.orbPinned && android.provider.Settings.canDrawOverlays(this)) com.blaze.assistant.ui.Overlay.showOrb(this)
-        // v0.28.2 blaze-docs: index Blaze's own docs (+ the real tool list) into blaze.db when the build changed. Off the main
+        // v0.28.4 blaze-docs: index Blaze's own docs (+ the real tool list) into blaze.db when the build changed. Off the main
         // thread and a few seconds after start so it never slows opening the app; a no-op when nothing changed.
         val app = this
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {

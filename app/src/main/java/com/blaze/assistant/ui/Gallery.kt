@@ -143,12 +143,9 @@ fun GalleryScreen(onDismiss: () -> Unit) {
     DisposableEffect(Unit) { onDispose { Player.stop() } }
     BackHandler { if (open != null) open = null else onDismiss() }
     Column(Modifier.fillMaxSize().background(c.paper).statusBarsPadding().navigationBarsPadding()) {
-        Row(Modifier.fillMaxWidth().hairlineBottom(c.hair).padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(BlazeShapes.pill).clickable { if (open != null) open = null else onDismiss() }, contentAlignment = Alignment.Center) {
-                Text("\u2190", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
-            }
-            Text(open?.title?.take(30) ?: "Gallery", modifier = Modifier.weight(1f),
-                style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 20.sp, color = c.ink))
+        // v0.28.3: the shared round BackButton (was a thin "←" glyph).
+        BackTitle(open?.title?.take(30) ?: "Gallery", onBack = { if (open != null) open = null else onDismiss() },
+            modifier = Modifier.hairlineBottom(c.hair).padding(vertical = 2.dp)) {
             Label("${items.size}", color = c.weak, size = 10.sp, modifier = Modifier.padding(end = 12.dp))
         }
         val sel = open

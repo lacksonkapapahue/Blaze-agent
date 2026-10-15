@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * v0.28.2 blaze-docs: Blaze's knowledge about itself as an on-demand lookup, not prompt text.
+ * v0.28.4 blaze-docs: Blaze's knowledge about itself as an on-demand lookup, not prompt text.
  *
  * At build time Gradle writes assets/blaze-docs/ from the repo (README, CHANGELOG split per version, STATUS, docs/, the
  * hand-written about.md with this build's version / commit / SDK levels, manifest.json; app/build.gradle.kts

@@ -597,7 +597,7 @@ object MagicHand {
             if (!on || isPrivate()) { set { MagicHandState.back(it, MagicHandGuard.PRIVATE_NOTE) }; return@launch }
             val before = Agent.messages.value.lastOrNull()?.id ?: Long.MIN_VALUE
             askedAgent = true
-            Agent.send(q, byVoice = false, attachments = listOfNotNull(att))
+            Agent.send(q, byVoice = false, attachments = listOfNotNull(att), untrusted = com.blaze.assistant.agent.ConfirmGate.MAGIC_HAND)
             val t0 = SystemClock.uptimeMillis()
             var seenBusy = false
             while (on && SystemClock.uptimeMillis() - t0 < 180_000) {

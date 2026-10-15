@@ -379,7 +379,7 @@ object Connectors {
                 body(m.optJSONObject("payload")).ifBlank { m.optString("snippet") }.take(6000)
             }
             "gmail_send" -> {
-                if (!Agent.confirm("Email ${a.optString("to")}?", "${a.optString("subject")}\n\n${a.optString("body").take(300)}", "Send"))
+                if (!Agent.confirm("Email ${a.optString("to")}?", "${a.optString("subject")}\n\n${a.optString("body").take(300)}", "Send", always = true))
                     return "The user declined. The email was NOT sent."
                 val raw = "To: ${a.optString("to")}\r\nSubject: ${a.optString("subject")}\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n${a.optString("body")}"
                 send("POST", "$g/messages/send", JSONObject().put("raw", b64(raw.toByteArray())), t)
@@ -472,7 +472,7 @@ object Connectors {
                 if (l.length() == 0) "No open issues." else (0 until l.length()).joinToString("\n") { k -> val i = l.getJSONObject(k); "#${i.optInt("number")} ${i.optString("title")}" }
             }
             "github_create_issue" -> {
-                if (!Agent.confirm("Open an issue in ${a.optString("repo")}?", a.optString("title"), "Create")) return "The user declined."
+                if (!Agent.confirm("Open an issue in ${a.optString("repo")}?", a.optString("title"), "Create", always = true)) return "The user declined."
                 val r = send("POST", "$api/repos/${a.optString("repo")}/issues", JSONObject().put("title", a.optString("title")).put("body", a.optString("body")), t, h)
                 "Created issue #${r.optInt("number")}: ${r.optString("html_url")}"
             }
@@ -575,7 +575,7 @@ object Connectors {
             }
             "slack_post" -> {
                 val id = chanId(a.optString("channel")) ?: return "No channel ${a.optString("channel")}."
-                if (!Agent.confirm("Post in ${a.optString("channel")}?", a.optString("text").take(300), "Post")) return "The user declined. Nothing was posted."
+                if (!Agent.confirm("Post in ${a.optString("channel")}?", a.optString("text").take(300), "Post", always = true)) return "The user declined. Nothing was posted."
                 val o = send("POST", "$api/chat.postMessage", JSONObject().put("channel", id).put("text", a.optString("text")), t)
                 if (o.optBoolean("ok")) "Posted." else "Slack: ${o.optString("error")}"
             }

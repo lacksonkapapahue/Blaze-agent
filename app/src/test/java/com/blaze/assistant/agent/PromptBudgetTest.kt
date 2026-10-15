@@ -13,7 +13,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * v0.28.2 audit: the prompt carries a pinned core + a subject index + lookup tools, never the whole memory or the docs.
+ * v0.28.4 audit: the prompt carries a pinned core + a subject index + lookup tools, never the whole memory or the docs.
  * With 500 memories and every doc indexed in blaze.db, the memory/docs part of the system prompt grows by far less
  * than the 6k-token budget compared with an empty store, and none of the docs text or the unpinned memories is in it.
  * Skills: only the matched ones are injected, within SkillMatch's budget; core skills stay within theirs.

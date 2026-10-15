@@ -92,6 +92,26 @@ class ToolLeakTest {
         assertEquals(s, ToolLeak.strip(s, final = false))
     }
 
+    // v0.28.3: Luke's 15:55 reply was saved by the old build and still drawn raw after updating to v0.28.1.
+    @Test fun oldSavedLeaksAreHiddenWhenDrawn() {
+        assertEquals(ToolLeak.STORED_EMPTY, ToolLeak.bubbleText(github))
+        assertFalse(ToolLeak.bubbleText(github).contains("["))
+        assertEquals("", ToolLeak.forDisplay(github))
+        assertEquals("Opening it now.", ToolLeak.bubbleText("Opening it now. $github"))
+        // The chat-list preview under a project chat.
+        assertEquals("", ToolLeak.forDisplay("[github_open repo=\"LacksonKapapa/Blaze-Agent\"]"))
+        // Mixed-case owner / repo maps to opening the real repo.
+        val (n, a) = only(ToolLeak.toCalls("[github_open repo=\"LacksonKapapa/Blaze-Agent\"]", all))
+        assertEquals("browser_open", n); assertEquals("https://github.com/lacksonkapapahue/Blaze-agent", a.getString("url"))
+        assertEquals(ToolLeak.BLAZE_REPO_URL, ToolLeak.githubUrl(JSONObject().put("repo", "lacksonkapapa/BLAZE-AGENT")))
+    }
+
+    @Test fun displayLeavesNormalRepliesByteForByte() {
+        for (s in listOf("", "Plain answer.", "Tasks:\n- [x] done\n- [ ] next  \n\n\n\nSee [the docs](https://example.com).", "Use <b>bold</b>   \n here"))
+            assertEquals(s, ToolLeak.forDisplay(s))
+        assertEquals("", ToolLeak.bubbleText(""))
+    }
+
     @Test fun promptRuleAsksForNativeCalls() {
         assertTrue(ToolLeak.PROMPT_RULE.contains("native tool-calling"))
         assertTrue(ToolLeak.NUDGE.contains("native tool-calling"))

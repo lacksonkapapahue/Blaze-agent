@@ -33,7 +33,7 @@ data class ChatMessage(val id: Long, val role: Role, val text: String, val files
                        val at: Long = System.currentTimeMillis(),
                        /** v0.26.1: how long the model's reasoning streamed (ms), for "Thought it through · 4 s"; 0 = not measured. */
                        val thinkMs: Long = 0L,
-                       /** v0.28.2: on the first step of a turn, when that turn really started (ms; a retry or a wake starts a new one); 0 = unknown. */
+                       /** v0.28.4: on the first step of a turn, when that turn really started (ms; a retry or a wake starts a new one); 0 = unknown. */
                        val startAt: Long = 0L)
 
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
@@ -130,14 +130,20 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
      * Ask the user to approve something risky. Shows a card in the chat and the orb panel,
      * plus a notification with Allow / Don't when Blaze isn't on screen. Times out as "no".
      */
-    suspend fun confirm(title0: String, detail: String, action: String, always: Boolean = false): Boolean {
+    suspend fun confirm(title0: String, detail0: String, action: String, always: Boolean = false): Boolean {
         val tag = kotlin.coroutines.coroutineContext[BgAgents.Tag]
         val title = if (tag != null) "${tag.id} · $title0" else title0
-        // [always] (v0.17.0, sends the PC asked for): the card is shown even with a standing OK or Autopilot.
-        if (!always && Autonomy.preApproved(title0, detail)) { cur.note("Standing OK: $title", false); return true }
-        // Autopilot: the user is away, so ordinary confirms pass. Destructive ones (delete, money,
-        // messages and calls in their name) still wait for their tap.
-        if (!always && Modes.autopilot && !Modes.destructive(title0, detail)) { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
+        // v0.28.2 (ConfirmGate): [always] = outbound in the user's name (texts, calls, messages, email, posts, money,
+        // deletes, installs, phone settings): the card always shows. A turn that read untrusted content (web, messages,
+        // notifications, the screen, shared files…) also loses standing OKs and Autopilot for destructive actions.
+        val source = kotlin.coroutines.coroutineContext[ConfirmGate.Taint]?.source
+        when (ConfirmGate.decide(always, Modes.destructive(title0, detail0), !always && Autonomy.preApproved(title0, detail0), Modes.autopilot, source != null)) {
+            ConfirmGate.Decision.STANDING_OK -> { cur.note("Standing OK: $title", false); return true }
+            // Autopilot: the user is away, so ordinary confirms pass. Destructive ones still wait for their tap.
+            ConfirmGate.Decision.AUTOPILOT_OK -> { (if (tag != null) null else cur)?.note("Autopilot approved: $title0", false); return true }
+            ConfirmGate.Decision.SHOW -> { }
+        }
+        val detail = ConfirmGate.detail(detail0, source)
         val d = kotlinx.coroutines.CompletableDeferred<Boolean>()
         tag?.let { BgAgents.setWaiting(it.id, true) }
         _confirm.value = PendingConfirm(title, detail, action, d)
@@ -226,7 +232,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
     @Volatile private var cur: Session = Session("boot")
 
-    /** v0.28.2: when the open chat's current turn started (the live work card's clock before its first step). */
+    /** v0.28.4: when the open chat's current turn started (the live work card's clock before its first step). */
     val turnStartAt: Long get() = cur.turnAt
 
     private fun show(s: Session) {
@@ -238,7 +244,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         _thinking.value = s.thinking
         _status.value = s.status
         _meter.value = s.meter
-        if (!s.isPrivate) Settings.lastChatId = s.id
+        // v0.28.3: only the main thread is remembered as the chat to reopen (project chats live in Projects).
+        if (!s.isPrivate) Settings.lastChatId = Mind.MAIN
         _private.value = s.isPrivate
         // Forget idle chats in the background; working ones stay until they finish.
         sessions.values.removeAll { it !== s && !it.busy }
@@ -253,10 +260,11 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         LongChat.init(app)
         try { com.blaze.assistant.media.Media.init(app) } catch (_: Exception) { }
         refreshChats()
-        // One mind (v0.18.0): one continuous main conversation. A project thread you were in reopens; anything
-        // else opens the main thread (old chats are read-only in Archive).
-        val last = Settings.lastChatId
-        if (last.isNotEmpty() && last != Mind.MAIN && Projects.of(last) != null && ChatStore.load(last) != null) open(last) else show(mainSession())
+        // One mind (v0.18.0): one continuous main conversation. v0.28.3: main Chat always opens on the main thread.
+        // Builds before saved the last project chat as the chat to reopen, which put a project chat in main Chat;
+        // that pref is repaired here (project chats now open only inside Projects, see ChatNav). Nothing is deleted.
+        if (Settings.lastChatId.let { it.isNotEmpty() && it != Mind.MAIN }) Settings.lastChatId = Mind.MAIN
+        show(mainSession())
         // One-time, idempotent import of every old chat into the journal (chat files are never changed).
         io.launch {
             val d = Mind.db() ?: return@launch
@@ -342,7 +350,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Retry the newest answer. */
     fun retryLast() { cur.msgs.lastOrNull { it.role == Role.BLAZE || it.role == Role.ERROR }?.let { retry(it.id) } }
 
-    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList()) {
+    /** [untrusted]: where outside content in [text] came from (Magic Hand's screen text), see ConfirmGate. */
+    fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), untrusted: String? = null) {
         // "Shut down", "stop", "be quiet"… are handled on-device, even mid-task.
         val self = if (attachments.isEmpty()) SelfControl.match(text) else null
         if (self != null) {
@@ -358,7 +367,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         }
         // Typing or speaking while Blaze waits on a question answers it.
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
-        cur.send(text, byVoice, attachments)
+        cur.send(text, byVoice, attachments, untrusted = untrusted)
     }
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
@@ -387,6 +396,25 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 
     /** Open a chat. If it's still working in the background you see it live. */
     fun open(id: String) { load(id)?.let { show(it) } }
+
+    /**
+     * v0.28.3: put [id] on screen for the shell (ChatNav.visibleChat): the main thread on the Chat tab, or a project
+     * chat inside Projects. A project chat that has no messages yet (just made with + New chat) is created fresh.
+     * A private chat on screen is never thrown away by a switch back to main (leaving it has its own confirm).
+     */
+    fun showChat(id: String) {
+        if (id.isBlank() || id == cur.id) return
+        if (id == Mind.MAIN) { if (!cur.isPrivate) show(mainSession()); return }
+        if (cur.isPrivate) return
+        cur.persist()
+        show(load(id) ?: Session(id))
+    }
+
+    /** v0.28.3: a new, empty project chat's id (it joins [projectId] with its first message; see ChatScreen.send). */
+    fun newChatId(): String = newId()
+
+    /** v0.28.3: a deep link / notification asked for this chat: only the main thread or a project chat open. */
+    fun openFromLink(id: String) { if (id.isNotBlank() && isLive(id)) open(id) }
 
     /** A chat's session: the live one if it's open or working, else read from disk. */
     private fun load(id: String): Session? {
@@ -488,7 +516,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         sessions[id]?.stop()
         sessions.remove(id)
         ChatStore.delete(id)
-        if (id == cur.id) show(Session(newId()))
+        // v0.28.3: a deleted project chat leaves its project, and the screen falls back to the main thread (never a blank chat).
+        if (Projects.of(id) != null) Projects.assign(id, "")
+        if (id == cur.id) show(mainSession())
         refreshChats()
     }
 
@@ -660,7 +690,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             "You are Blaze, an AI assistant on the user's Android phone. " + Settings.customPersona
         else Personas.byId(Settings.personaId).prompt
 
-    private fun systemPrompt(userText: String, skipSkills: Set<String> = emptySet()): String {
+    private fun systemPrompt(userText: String, skipSkills: Set<String> = emptySet(), chatId: String = _chatId.value): String {
         val now = SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date())
         val name = Settings.userName.ifBlank { null }
         val control = Settings.phoneControl
@@ -699,7 +729,7 @@ When you finish, say what you did in one short sentence.
             append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
             // v0.28.1: models sometimes wrote "[/find_tool need=…]" as the reply instead of calling the tool.
             append("\n" + ToolLeak.PROMPT_RULE)
-            // v0.28.2 blaze-docs: one static line + the repo URL; the docs themselves are looked up (blaze_docs_search), never pasted here.
+            // v0.28.4 blaze-docs: one static line + the repo URL; the docs themselves are looked up (blaze_docs_search), never pasted here.
             append(BlazeDocs.PROMPT_LINE)
             append("\nEverything you create that keeps running (alarms, timers, routines, triggers, calendar events, jobs) gets an ID like R4. To change, stop or delete one, call processes to find the ID, then process(id, action). Only use action=details when the user asks for specifics.")
             // v0.24.3: the core skills' pinned rules (voice, task workflow, views, specialists, workflows, coding), every turn,
@@ -741,7 +771,7 @@ When you finish, say what you did in one short sentence.
             // v0.26.2: learned skills are in the one skills lookup below (SkillMatch.lookupBlock), not a block of their own.
             Processes.countLine().takeIf { it.isNotBlank() }?.let { append("\nTracked now: $it (IDs via processes).") }
             append(com.blaze.assistant.link.DesktopLink.promptLine())
-            append(SelfKnowledge.promptBlock(app)); append(Projects.promptLine(_chatId.value))
+            append(SelfKnowledge.promptBlock(app)); append(Projects.promptLine(chatId))
             append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
                 "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
             if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
@@ -829,7 +859,7 @@ When you finish, say what you did in one short sentence.
         return ToolGuide.apply(t).also { try { BlazeDocs.noteTools(it) } catch (_: Throwable) { } }
     }
 
-    /** v0.28.2: the real tool list (for the blaze-docs tool reference, indexed at startup). */
+    /** v0.28.4: the real tool list (for the blaze-docs tool reference, indexed at startup). */
     suspend fun toolCatalog(): JSONArray = tools()
 
     /** True while Blaze's own screen is visible. */
@@ -858,6 +888,8 @@ When you finish, say what you did in one short sentence.
         var ctxTag: kotlin.coroutines.CoroutineContext = kotlin.coroutines.EmptyCoroutineContext
         /** Instructions the user (or the lead) sent while this chat works; read at the next step. */
         val steer = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        /** v0.28.2: what untrusted content this turn has read (ConfirmGate); rides in the turn's coroutine context. */
+        val taint = ConfirmGate.Taint()
         /** Agent results waiting for the turn in progress to end. */
         val wakes = java.util.concurrent.ConcurrentLinkedQueue<String>()
         /** Speed plan step 11: text of the current step already handed to TTS while it streamed. */
@@ -947,7 +979,7 @@ When you finish, say what you did in one short sentence.
         var autoStepId = -1L
 
         /**
-         * v0.28.2 (Luke's "Worked · 4 steps · 97m 45s" for 33 s of steps): when the turn in progress started. The work card
+         * v0.28.4 (Luke's "Worked · 4 steps · 97m 45s" for 33 s of steps): when the turn in progress started. The work card
          * used to time a turn from the message before its steps, so a Retry or a background agent's wake ran the clock
          * from a message sent long before. The first step of each turn now carries this ([ChatMessage.startAt]).
          */
@@ -1050,7 +1082,7 @@ When you finish, say what you did in one short sentence.
                 .apply { meter?.let { m -> put("meter_in", m.inTok).put("meter_out", m.outTok).put("meter_limit", m.limit) } }
                 .put("title_source", titleSource).put("title_turns", titleTurns).put("keep", keep)
                 .put("tips_pending", JSONArray(synchronized(unseenTips) { unseenTips.toList() }))
-            if (this === cur) Settings.lastChatId = id
+            if (this === cur && id == Mind.MAIN) Settings.lastChatId = id
             val cid = id
             io.launch {
                 ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list()
@@ -1088,8 +1120,12 @@ When you finish, say what you did in one short sentence.
             persist()
         }
 
-        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), notificationContext: String? = null) {
+        fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), notificationContext: String? = null,
+                 untrusted: String? = null) {
             if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
+            // v0.28.2: a new turn starts clean; what came with the message (a shared file, Magic Hand's screen text) counts as read.
+            taint.clear()
+            taint.mark(untrusted ?: if (attachments.isNotEmpty()) ConfirmGate.SHARED_FILE else null)
             Voice.lastTurnByVoice = byVoice
             val shown = text.trim().ifEmpty { "Take a look at this." }
             LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
@@ -1133,7 +1169,7 @@ When you finish, say what you did in one short sentence.
                     if (step.isNotBlank() && step != said && Voice.state.value == Voice.State.IDLE) { said = step; Voice.say(step) }
                 }
             }
-            job = scope.launch(ctxTag) {
+            job = scope.launch(ctxTag + taint) {
                 // v0.27.x: "show me your memories" / "what do you know about me" is answered straight from the memory table:
                 // grouped, with how to change or delete a line. No model call, no tool loop, no Design.
                 if (attachments.isEmpty() && !routine && agentId == null && notificationContext.isNullOrBlank() && MemoryIntent.isListRequest(shown)) {
@@ -1154,7 +1190,7 @@ When you finish, say what you did in one short sentence.
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
                 if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
                     mood = Mood.THINKING
-                    val fast = try { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                    val fast = try { kotlinx.coroutines.withContext(ConfirmGate.Direct) { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
                     val pic = if (fast == null && !offline && !Settings.lowData) com.blaze.assistant.media.Media.directPrompt(shown) else null
                     if (pic != null) {
@@ -1206,7 +1242,7 @@ When you finish, say what you did in one short sentence.
             msgs = list.take(userIdx + 1)
             Voice.lastTurnByVoice = false
             beginTurn()
-            job = scope.launch(ctxTag) { runLoop() }
+            job = scope.launch(ctxTag + taint) { runLoop() }
         }
 
         /**
@@ -1216,10 +1252,11 @@ When you finish, say what you did in one short sentence.
         fun wake(text: String) {
             if (job?.isActive == true) { wakes.add(text); return }
             history.put(JSONObject().put("role", "user").put("content", text))
+            taint.clear(); taint.mark(ConfirmGate.AGENT_REPORT)
             mood = Mood.THINKING
             Voice.lastTurnByVoice = false
             beginTurn()
-            job = scope.launch(ctxTag) { runLoop() }
+            job = scope.launch(ctxTag + taint) { runLoop() }
         }
 
         /** Only the newest screenshot is sent as an image; older ones become a note. */
@@ -1249,14 +1286,14 @@ When you finish, say what you did in one short sentence.
             val sys = if (sp != null) Playbooks.specialistSystem(sp, Playbooks.forSpec(sp), SpecialistMatch.brief(sp, SkillMatch.cached()),
                     SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date()), Memory.promptBlock(lastUserText()), agentId) +
                     Modes.promptLine(agentPlan) + (if (Settings.longChat && rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "")
-                else systemPrompt(lastUserText(), turnSkills.full.map { it.name }.toSet()) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
+                else systemPrompt(lastUserText(), turnSkills.full.map { it.name }.toSet(), id) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
                 (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
                 (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs) +
                 // v0.27.x: "how do I install X" → lead with the action and end with one concrete offer to do it.
                 AnswerStyle.turnHint(lastUserText()) +
-                // v0.28.2: "take me to the blaze-agent repo" / "what version are you": look it up in Blaze's docs, never guess.
+                // v0.28.4: "take me to the blaze-agent repo" / "what version are you": look it up in Blaze's docs, never guess.
                 (if (BlazeDocs.isAboutBlaze(lastUserText())) BlazeDocs.TURN_HINT else "") +
                 // v0.26.1: an in-chat diagram / chart is drawn in the reply itself (no files, preview or use_skill).
                 (if (turnView == null && turnDesignNote.isEmpty() && Settings.bool("rich_replies", true) && VisualRoute.inChat(lastUserText())) VisualRoute.HINT else "")
@@ -1412,7 +1449,7 @@ When you finish, say what you did in one short sentence.
                 turnSkills = SkillMatch.forTurn(userNow)
                 // v0.26.2: a phone-state question ("am I on mute?") is answered from the Phone now line: no skill packs, no tool loop.
                 val stateQ = !routine && PhoneState.kind(userNow) != null
-                // v0.28.2: a question about Blaze itself ("take me to blaze-agent repo in github") is a docs lookup: no coding skills
+                // v0.28.4: a question about Blaze itself ("take me to blaze-agent repo in github") is a docs lookup: no coding skills
                 // (≈ 6,000 chars of them were pulled in by "repo" / "github") and no Coder specialist.
                 val selfQ = !routine && BlazeDocs.isAboutBlaze(userNow)
                 if (stateQ || selfQ) turnSkills = SkillMatch.Result.NONE
@@ -1947,6 +1984,9 @@ When you finish, say what you did in one short sentence.
             val V = com.blaze.assistant.browser.Vault
             val host = kotlinx.coroutines.withContext(Dispatchers.Main) { B.host() }
             if (host.isBlank()) return "No page is open in Blaze's browser. Open the sign-in page with browser_open first, then call this again."
+            // v0.28.2: no secure form or saved login on a plain-http page (except this phone / the LAN).
+            val pageUrl = kotlinx.coroutines.withContext(Dispatchers.Main) { B.url() }
+            if (!com.blaze.assistant.connect.UrlSafety.autofillAllowed(pageUrl)) return com.blaze.assistant.connect.UrlSafety.AUTOFILL_REFUSED
             val fields = S.parseFields(args.optJSONArray("fields"))
             if (fields.isEmpty()) return "Error: give fields, e.g. [{\"name\":\"email\",\"kind\":\"email\"},{\"name\":\"password\",\"kind\":\"password\"}]."
             if (fields.any { S.isCardField(it) }) return "Card details are never collected in the chat. Show the live browser with browser_show so the user types them on the page, or stop before paying."
@@ -1991,6 +2031,8 @@ When you finish, say what you did in one short sentence.
             val r = try { runToolRaw(name, args, shots) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
+            // v0.28.2: outside content is now in the context: later sends / deletes this turn always ask (ConfirmGate).
+            ConfirmGate.sourceOf(name)?.let { taint.mark(it) }
             if (name in Orient.looking && !r.startsWith("Phone control")) com.blaze.assistant.phone.BlazeAccessibilityService.instance?.let { orient.saw(it.currentPkg()) }
             return if (r.isBlank()) ToolGuide.empty(name) else glance + r
         }
@@ -2145,7 +2187,7 @@ When you finish, say what you did in one short sentence.
                         }
                         "save" -> M.find(args.optString("path"))?.let { add(Role.STEP, "Saving ${it.name} to your phone"); M.saveToPhone(it) } ?: "Not in the gallery: ${args.optString("path")}. Call gallery list."
                         "share" -> M.find(args.optString("path"))?.let { app.startActivity(M.shareIntent(it)); "Opened the share sheet for ${it.name}." } ?: "Not in the gallery."
-                        "delete" -> M.find(args.optString("path"))?.let { f -> if (confirm("Delete from Gallery?", f.name, "Delete")) { M.delete(f); "Deleted ${f.name}." } else "The user did NOT approve deleting it." } ?: "Not in the gallery."
+                        "delete" -> M.find(args.optString("path"))?.let { f -> if (confirm("Delete from Gallery?", f.name, "Delete", always = true)) { M.delete(f); "Deleted ${f.name}." } else "The user did NOT approve deleting it." } ?: "Not in the gallery."
                         else -> M.list()
                     }
                 }
@@ -2212,7 +2254,7 @@ When you finish, say what you did in one short sentence.
                 "run_ussd" -> {
                     val code = args.optString("code")
                     add(Role.STEP, "Dialling $code")
-                    if (com.blaze.assistant.phone.Ussd.risky(code) && !confirm("Dial $code?", "This looks like a mobile money or multi-step code.", "Dial"))
+                    if (com.blaze.assistant.phone.Ussd.risky(code) && !confirm("Dial $code?", "This looks like a mobile money or multi-step code.", "Dial", always = true))
                         "The user did NOT approve dialling $code."
                     else com.blaze.assistant.phone.Ussd.run(app, code)
                 }
@@ -2225,14 +2267,14 @@ When you finish, say what you did in one short sentence.
                         "download_file" -> "Downloading ${args.optString("url").substringAfterLast('/').take(50)}"
                         else -> name.replace('_', ' ')
                     })
-                    if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete")) "The user did NOT approve deleting that."
+                    if (name == "file_delete" && !confirm("Delete this?", args.optString("path").take(200), "Delete", always = true)) "The user did NOT approve deleting that."
                     else if (name == "run_code") withMediaScan { com.blaze.assistant.terminal.DevTools.run(app, name, args) }
                     else com.blaze.assistant.terminal.DevTools.run(app, name, args)
                 }
                 in com.blaze.assistant.phone.PimEdit.names -> {
                     val (title, detail) = com.blaze.assistant.phone.PimEdit.describe(name, args)
                     add(Role.STEP, title.removeSuffix("?"))
-                    if (!confirm(title, detail.take(200), if (name == "delete_event") "Delete" else "Save")) "The user did NOT approve that change."
+                    if (!confirm(title, detail.take(200), if (name == "delete_event") "Delete" else "Save", always = name.startsWith("delete"))) "The user did NOT approve that change."
                     else kotlinx.coroutines.withContext(Dispatchers.IO) { com.blaze.assistant.phone.PimEdit.run(app, name, args) }
                 }
                 com.blaze.assistant.terminal.Git.NAME -> {
@@ -2376,7 +2418,7 @@ When you finish, say what you did in one short sentence.
                     add(Role.STEP, PhoneTools.describe(name, args))
                     val label = args.optString("text").ifBlank { svc?.labelOf(args.optInt("element")).orEmpty() }
                     if (Settings.confirmRisky && risky.containsMatchIn(label) &&
-                        !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap"))
+                        !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap", always = true))
                         "The user did NOT approve tapping \"$label\". Don't retry; tell them it's ready for them to finish."
                     else PhoneTools.run(app, name, args)
                 }
@@ -2451,7 +2493,7 @@ When you finish, say what you did in one short sentence.
                             else {
                                 val label = svc.labelOf(id)
                                 if (Settings.confirmRisky && risky.containsMatchIn(label) &&
-                                    !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc.currentApp() ?: "the app"}.", "Tap"))
+                                    !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc.currentApp() ?: "the app"}.", "Tap", always = true))
                                     return "The user did NOT approve tapping \"$label\" (step ${i + 1}). Don't retry; tell them it's ready for them to finish."
                                 svc.flash(id)
                                 val r = svc.tap(id, st.optString("do") == "long_press")

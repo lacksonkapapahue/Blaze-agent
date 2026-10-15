@@ -26,6 +26,9 @@ export interface Env {
   ADMIN_EMAILS?: string;
   /** Secret. Fallback admin login when blaze-auth isn't reachable. */
   ADMIN_TOKEN?: string;
+  /** Var, optional. Comma-separated web origins allowed to call /v1 from a browser (CORS). Empty = none:
+   *  the native apps don't need CORS and the admin page is same-origin. */
+  ALLOWED_ORIGINS?: string;
 }
 
 export const VERSION = "0.3.0";

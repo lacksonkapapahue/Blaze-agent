@@ -3,7 +3,7 @@ package com.blaze.assistant.ui
 import com.blaze.assistant.agent.ChatMessage
 
 /**
- * v0.28.2: how long a turn's work took, for the work card ("Worked · 4 steps · 33s").
+ * v0.28.4: how long a turn's work took, for the work card ("Worked · 4 steps · 33s").
  *
  * Luke's screenshot showed "Worked · 4 steps · 97m 45s" over steps of 0–13 s: the card timed a run of steps from the
  * message before it (the user's prompt), so a Retry or a background agent's wake 97 minutes later counted the whole

@@ -37,12 +37,12 @@
   `build.yml` ignores `gateway/**`).
 - **Deployed:** 2026-10-13 (v0.1.0, Worker version 193d76d6-42ee-4ebe-87ca-cbf1634b8448), from the
   sandbox with wrangler using a Cloudflare API token "blaze-gateway-deploy" (Workers Scripts Edit,
-  D1 Edit, Workers AI Read, Workers KV Storage Read, Account Settings Read; account
-  ef895b6795ee39066c863c39a42ec8b6).
+  D1 Edit, Workers AI Read, Workers KV Storage Read, Account Settings Read; on the Cloudflare
+  account).
   - URL: `https://blaze-gateway.blaze-app.workers.dev` · health `/health` → `{"ok":true,...}` ·
     admin `/admin` (renders; HEALTH / ROUTES / PROVIDERS / PLANS).
   - D1 `blaze-gateway` = `f27cf26b-799b-418b-8298-913c7515fe7e`, migration 0001 applied.
-  - Worker secrets set: `KEY_ENCRYPTION_SECRET`, `ADMIN_EMAILS` (kapapaluckson75@gmail.com),
+  - Worker secrets set: `KEY_ENCRYPTION_SECRET`, `ADMIN_EMAILS` (the owner's Blaze account email),
     `ADMIN_TOKEN`. KEY_ENCRYPTION_SECRET and ADMIN_TOKEN are saved in Luke's Hark vault.
   - Workers AI (keyless) tested OK from /admin (llama-3.3-70b fp8-fast, llama-3.1-8b fast).
     `/v1` answers 401 without a Blaze `bz_` token, as intended; an end-to-end `/v1` chat still

@@ -13,7 +13,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * v0.28.2 blaze-docs: chunking by heading (300–800 tokens, doc + section path + version), the idempotent reindex in
+ * v0.28.4 blaze-docs: chunking by heading (300–800 tokens, doc + section path + version), the idempotent reindex in
  * blaze.db next to the memories, bm25 search ("repo" → the exact URL), the tool reference, no secrets in what ships,
  * and the GitHub near-miss fix from Luke's screenshot.
  */

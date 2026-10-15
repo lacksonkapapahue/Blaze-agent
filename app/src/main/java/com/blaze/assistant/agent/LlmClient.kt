@@ -192,7 +192,7 @@ object LlmClient {
             warmed[host] = now
             Thread {
                 try {
-                    val c = URL(b).openConnection() as HttpURLConnection
+                    val c = com.blaze.assistant.connect.UrlSafety.open(b)
                     c.requestMethod = "HEAD"; c.connectTimeout = 5000; c.readTimeout = 5000
                     c.responseCode; c.inputStream.close()
                 } catch (_: Exception) { }
@@ -215,7 +215,9 @@ object LlmClient {
         val owner = keyOwner(key)
         if (owner != null && owner != t.pid && t.pid != Providers.CUSTOM && t.pid != Providers.keyless.id)
             throw LlmException("The key saved under ${Providers.byId(t.pid).name} is actually a ${Providers.byId(owner).name} key. Open Settings → AI and paste the right key for each service.", 401)
-        val conn = URL("$base/chat/completions").openConnection() as HttpURLConnection
+        // v0.28.2: http:// only to this phone, the LAN or Tailscale; never keys or chats in the clear over the internet.
+        com.blaze.assistant.connect.UrlSafety.problem(base)?.let { throw LlmException(it, 0) }
+        val conn = com.blaze.assistant.connect.UrlSafety.open("$base/chat/completions")
         conn.requestMethod = "POST"
         // A free-chain call (timeoutMs < 120 s) gives up quickly so the next model gets a turn.
         val chained = timeoutMs < 120_000

@@ -11,7 +11,7 @@ dash.cloudflare.com › My Profile › API Tokens › **Create Token** › *Cust
 - Account › **D1** › Edit
 - Account › **Workers AI** › Read
 - Account › **Workers KV Storage** › Read (to bind blaze-auth's namespace)
-- Account resources: your account (`ef895b6795ee39066c863c39a42ec8b6`)
+- Account resources: the Cloudflare account (the one blaze-auth runs on)
 
 (The "Edit Cloudflare Workers" template plus D1 Edit also works.) Copy the token.
 
@@ -33,7 +33,7 @@ github.com/lacksonkapapahue/Blaze-agent › Settings › Secrets and variables �
 | Name | Value |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | the token from step 1 |
-| `CLOUDFLARE_ACCOUNT_ID` | `ef895b6795ee39066c863c39a42ec8b6` |
+| `CLOUDFLARE_ACCOUNT_ID` | the Cloudflare account's ID (dashboard › Workers & Pages, right-hand column) |
 | `KEY_ENCRYPTION_SECRET` | the string from step 2 |
 | `ADMIN_EMAILS` | your Blaze account email (comma-separate several) |
 | `GATEWAY_ADMIN_TOKEN` | optional: 24+ random characters, a fallback admin login |
@@ -53,7 +53,7 @@ deploy job:
 
 Without `CLOUDFLARE_API_TOKEN` the deploy job just says "skipping deploy" and passes.
 
-Prefer doing it from a computer once? `cd gateway && export CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=ef895b6795ee39066c863c39a42ec8b6 && ./scripts/first-deploy.sh`, then the three `npx wrangler secret put …` lines it prints.
+Prefer doing it from a computer once? `cd gateway && export CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=<the Cloudflare account ID> && ./scripts/first-deploy.sh`, then the three `npx wrangler secret put …` lines it prints.
 
 ## 5. Add provider keys
 

@@ -53,8 +53,9 @@ class MarketerPackTest {
         // Agent needs Android at init).
         val root = listOf(File("src/main"), File("app/src/main")).first { it.isDirectory }
         val agent = File(root, "java/com/blaze/assistant/agent/Agent.kt").readText()
-        assertTrue(agent.contains("if (!always && Autonomy.preApproved(title0, detail))"))
-        assertTrue(agent.contains("if (!always && Modes.autopilot"))
+        // v0.28.2: the decision moved to ConfirmGate (pure, see ConfirmGateTest); always = the card shows.
+        assertTrue(agent.contains("ConfirmGate.decide(always,"))
+        assertEquals(ConfirmGate.Decision.SHOW, ConfirmGate.decide(always = true, destructive = false, preApproved = true, autopilot = true, tainted = false))
         assertTrue(File(root, "java/com/blaze/assistant/link/DesktopLink.kt").readText().contains("always = true, from = pcName"))
     }
 

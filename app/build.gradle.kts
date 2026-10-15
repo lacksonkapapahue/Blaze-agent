@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 98
-        versionName = "0.28.2"
+        versionCode = 100
+        versionName = "0.28.4"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -69,7 +69,7 @@ android {
     }
 }
 
-// ---------------------------------------------------------------- v0.28.2 blaze-docs
+// ---------------------------------------------------------------- v0.28.4 blaze-docs
 // Blaze's knowledge about itself, generated from this repo at build time into assets/blaze-docs/ (README, CHANGELOG split
 // per version, STATUS, docs/, the hand-written app/blaze-docs/about.md with the build's version, commit and SDK levels, and
 // a manifest). On the first launch after an update the app chunks it into blaze.db (blaze_docs + blaze_docs_fts) and the

@@ -109,6 +109,7 @@ import com.blaze.assistant.agent.Agent
 import com.blaze.assistant.agent.Attachment
 import com.blaze.assistant.agent.Attachments
 import com.blaze.assistant.agent.ChatMessage
+import com.blaze.assistant.agent.ChatNav
 import com.blaze.assistant.agent.Mood
 import com.blaze.assistant.agent.Role
 import com.blaze.assistant.agent.Settings
@@ -141,7 +142,7 @@ private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item
     val out = mutableListOf<Item>()
     var run = mutableListOf<ChatMessage>()
     var prevAt = 0L
-    // v0.28.2: the card's start is the turn's real start and a finished card's end is frozen (WorkTime).
+    // v0.28.4: the card's start is the turn's real start and a finished card's end is frozen (WorkTime).
     fun flush(live: Boolean, next: ChatMessage?) {
         if (run.isEmpty()) return
         val end = WorkTime.end(run, live, next?.at ?: 0L, next != null && next.role != Role.USER, 0L)
@@ -291,8 +292,13 @@ fun ChatScreen() {
     LaunchedEffect(callReq) { if (callReq > 0) startCall() }
 
     // ---- 0.12 shell state ----
-    var shellMode by rememberSaveable { mutableStateOf("chat") }
-    var projectOpen by rememberSaveable { mutableStateOf("") }
+    // v0.28.3: Chat | Projects and where you are in Projects (list → project → project chat), as one ChatNav.
+    // Main Chat always shows the main thread; project chats open inside Projects and never replace it.
+    var navS by rememberSaveable { mutableStateOf(ChatNav().encode()) }
+    val nav = ChatNav.decode(navS)
+    fun navNow(): ChatNav = ChatNav.decode(navS)
+    fun go(n: ChatNav) { navS = n.encode() }
+    val shellMode = nav.tab
     var showViews by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var avatarMenu by remember { mutableStateOf(false) }
@@ -317,12 +323,12 @@ fun ChatScreen() {
         showViews = false; showSearch = false; plusOpen = false; avatarMenu = false
         when (v.special) {
             "gallery" -> GalleryUi.open.value = true
-            "projects" -> { shellMode = "projects"; projectOpen = "" }
+            "projects" -> go(navNow().projectsList())
             "browser" -> com.blaze.assistant.browser.BrowserTools.show(ctx)
             "design" -> {
                 if (target.isNotBlank()) Views.designTarget.value = target
                 else if (Views.designTarget.value.isBlank()) try { com.blaze.assistant.agent.Designs.current()?.path?.let { Views.designTarget.value = it } } catch (_: Exception) { }
-                shellMode = "chat"; Views.showing.value = "design"
+                go(navNow().switchTab(ChatNav.CHAT)); Views.showing.value = "design"
             }
             else -> settingsPage = v.page ?: ""
         }
@@ -349,7 +355,7 @@ fun ChatScreen() {
         if (text.startsWith("/") && !text.startsWith("//")) {
             if (cmdName == "views") { input = TextFieldValue(""); showViews = true; return }
             if (cmdName == "search") { input = TextFieldValue(""); showSearch = true; return }
-            if (cmdName == "projects") { input = TextFieldValue(""); shellMode = "projects"; return }
+            if (cmdName == "projects") { input = TextFieldValue(""); go(navNow().projectsList()); return }
             if (cmdName in setOf("jobs", "schedule", "accounts", "doctor", "design", "router", "skills", "gallery", "browser") && !text.contains(' ')) {
                 input = TextFieldValue(""); Views.find(cmdName)?.let { openView(it) }; return
             }
@@ -361,8 +367,9 @@ fun ChatScreen() {
         if (full.isBlank() && pending.isEmpty()) return
         if (mood != Mood.IDLE) return
         clearedAt = 0L
-        val pid = com.blaze.assistant.agent.Projects.current.value
-        if (pid.isNotBlank() && Agent.chatId.value != com.blaze.assistant.agent.Mind.MAIN && com.blaze.assistant.agent.Projects.of(Agent.chatId.value) == null) com.blaze.assistant.agent.Projects.assign(Agent.chatId.value, pid)
+        // v0.28.3: a new project chat joins its project with its first message (only from its own screen in Projects).
+        val n = navNow()
+        if (n.inProjectChat && Agent.chatId.value == n.chat && com.blaze.assistant.agent.Projects.of(n.chat) == null) com.blaze.assistant.agent.Projects.assign(n.chat, n.project)
         Agent.send(full, attachments = pending)
         pending = emptyList(); quote = ""; input = TextFieldValue("")
     }
@@ -400,15 +407,32 @@ fun ChatScreen() {
             }
         }
     }
-    fun newChat(projectId: String = "") {
-        Agent.clear(projectId.isNotBlank()); quote = ""; com.blaze.assistant.agent.Projects.current.value = projectId
-        exitView(); shellMode = "chat"
+    // v0.28.3: project chats open inside Projects (a project chat screen), never in main Chat.
+    fun newProjectChat(projectId: String) {
+        if (projectId.isBlank()) return
+        quote = ""; plusOpen = false
+        go(navNow().openChat(projectId, Agent.newChatId()))
     }
-    fun openChat(id: String) {
+    fun openProjectChat(id: String) {
         // One mind: only the main thread and project threads open (v0.24.0: no chat list or archive screen).
-        if (!Agent.isLive(id)) return
-        Agent.open(id); com.blaze.assistant.agent.Projects.current.value = com.blaze.assistant.agent.Projects.of(id)?.id.orEmpty()
-        showSearch = false; exitView(); shellMode = "chat"
+        val p = com.blaze.assistant.agent.Projects.of(id)?.id ?: return
+        quote = ""; showSearch = false
+        go(navNow().openChat(p, id))
+    }
+    fun deleteProjectChat(id: String) {
+        go(navNow().chatDeleted(id))
+        Agent.deleteChat(id)
+    }
+    // The shell drives which thread the agent shows (main on Chat, the open project chat in Projects)…
+    LaunchedEffect(nav.visibleChat) {
+        Agent.showChat(nav.visibleChat)
+        com.blaze.assistant.agent.Projects.current.value = if (nav.inProjectChat) nav.project else ""
+    }
+    // …and follows when something else shows a chat (a notification, the secure form card): a project chat opens in Projects.
+    LaunchedEffect(currentChat) {
+        val n = navNow()
+        val f = n.follow(currentChat) { com.blaze.assistant.agent.Projects.of(it)?.id }
+        if (f != n) go(f)
     }
 
 
@@ -417,37 +441,75 @@ fun ChatScreen() {
     // v0.24.4 private chat: confirm before leaving (the chat is thrown away).
     val isPrivate by Agent.privateChat.collectAsState()
     var confirmLeavePrivate by remember { mutableStateOf(false) }
+    // v0.28.3: the thread + composer show on main Chat and on a project chat screen; views (Design…) belong to main Chat.
+    val chatBody = nav.tab == ChatNav.CHAT || nav.inProjectChat
+    val viewShowing = if (nav.inProjectChat) "" else showing
     BackHandler(enabled = isPrivate && !confirmLeavePrivate) { confirmLeavePrivate = true }
+    // v0.28.3: back inside Projects: project chat → project page → projects list (then the system's back).
+    BackHandler(enabled = !isPrivate && nav.back() != null) { navNow().back()?.let { go(it) } }
     Box(Modifier.fillMaxSize().background(c.paper)) {
         ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             ShellTopBar(mode = shellMode,
                 // v0.24.0: the toggle only switches tabs; there is no conversation list behind it.
-                onMode = { m -> shellMode = m; if (m == "projects") projectOpen = "" },
-                onLogo = { exitView(); shellMode = "chat"; showViews = false; plusOpen = false },
+                // v0.28.3: switching tabs keeps your place in Projects; Chat is always the main thread.
+                onMode = { m -> plusOpen = false; showViews = false; go(navNow().switchTab(m)) },
+                onLogo = { exitView(); go(navNow().switchTab(ChatNav.CHAT)); showViews = false; plusOpen = false },
                 onSearch = { showSearch = true },
                 routerOk = Settings.ready,
                 onRouter = { settingsPage = "ai" },
                 avatar = me?.name?.ifBlank { me.email }?.ifBlank { null } ?: Settings.userName.ifBlank { "B" },
                 onAvatar = { avatarMenu = true }, mood = mood,
-                viewChip = if (showing.isNotEmpty() && shellMode == "chat") (Views.find(showing)?.name ?: showing) else "",
+                viewChip = if (showing.isNotEmpty() && nav.tab == ChatNav.CHAT) (Views.find(showing)?.name ?: showing) else "",
                 onExit = { exitView() },
                 isPrivate = isPrivate,
-                onGhost = { if (isPrivate) confirmLeavePrivate = true else { exitView(); shellMode = "chat"; Agent.enterPrivate() } })
+                onGhost = { if (isPrivate) confirmLeavePrivate = true else { exitView(); go(navNow().switchTab(ChatNav.CHAT)); Agent.enterPrivate() } })
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 // v0.27.0: Chat and Projects cross-fade when you switch tabs.
-                androidx.compose.animation.Crossfade(shellMode == "projects", modifier = Modifier.fillMaxSize(),
-                    animationSpec = MotionTokens.medium(), label = "tab") { projectsTab ->
-                if (projectsTab) {
+                // v0.28.3: three panes: main Chat, the Projects list / a project page, and a project chat screen.
+                val pane = when { nav.inProjectChat -> "pchat"; nav.tab == ChatNav.PROJECTS -> "projects"; else -> "chat" }
+                androidx.compose.animation.Crossfade(pane, modifier = Modifier.fillMaxSize(),
+                    animationSpec = MotionTokens.medium(), label = "tab") { paneNow ->
+                if (paneNow == "projects") {
                     val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
-                    ProjectsPane(projects, allChats, busyChats, needs, projectOpen,
-                        onOpen = { projectOpen = it }, onBack = { projectOpen = "" },
-                        onCreate = { projectOpen = com.blaze.assistant.agent.Projects.create(it).id },
-                        onChat = { openChat(it) }, onNewChat = { newChat(it) },
+                    ProjectsPane(projects, allChats, busyChats, needs, nav.project,
+                        onOpen = { go(navNow().openProject(it)) }, onBack = { navNow().back()?.let { go(it) } },
+                        onCreate = { go(navNow().openProject(com.blaze.assistant.agent.Projects.create(it).id)) },
+                        onChat = { openProjectChat(it) }, onNewChat = { newProjectChat(it) },
                         onInstructions = { id, t -> com.blaze.assistant.agent.Projects.setInstructions(id, t) },
                         onBrief = { id, t -> com.blaze.assistant.agent.Projects.setBrief(id, t) },
-                        onDelete = { com.blaze.assistant.agent.Projects.delete(it); projectOpen = "" })
+                        onDelete = { com.blaze.assistant.agent.Projects.delete(it); go(navNow().projectDeleted(it)) },
+                        onRenameChat = { id, t -> Agent.renameChat(id, t) },
+                        onDeleteChat = { deleteProjectChat(it) })
                     LaunchedEffect(Unit) { Agent.refreshChats() }
+                } else if (paneNow == "pchat") {
+                    val n = nav
+                    val proj = projects.firstOrNull { it.id == n.project }
+                    val meta = allChats.firstOrNull { it.id == n.chat }
+                    Column(Modifier.fillMaxSize()) {
+                        ProjectChatHeader(proj?.name.orEmpty(), meta?.title.orEmpty(),
+                            onBack = { navNow().back()?.let { go(it) } },
+                            onRename = { t -> Agent.renameChat(n.chat, t) },
+                            onDelete = { deleteProjectChat(n.chat) },
+                            onNewChat = { newProjectChat(n.project) },
+                            canEdit = meta != null)
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            // Only this chat's own thread is ever drawn here (never main's while the screens cross-fade).
+                            if (n.inProjectChat && currentChat == n.chat) {
+                                if (!hasMessages) ProjectChatEmpty(proj?.name.orEmpty(), hasInstructions = proj?.let { it.instructions.isNotBlank() || it.brief.isNotBlank() } == true)
+                                else {
+                                    val dens = LocalDensity.current
+                                    CompositionLocalProvider(LocalTextToolbar provides toolbar, LocalClipboardManager provides capClip,
+                                        LocalDensity provides androidx.compose.ui.unit.Density(dens.density, dens.fontScale * Settings.textScale)) {
+                                        MessageList(mood, onQuote = { quote = it }, onFollowup = { send(it) })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (nav.chat.isNotBlank() && currentChat == nav.chat) {
+                    // Main Chat never draws a project chat's thread (the agent is switching back to main).
+                    Box(Modifier.fillMaxSize())
                 } else if (showing == "design") {
                     DesignView(designTarget, busy = mood != Mood.IDLE, status = liveStatus,
                         onAsk = { send(it) }, onOpenInBrowser = { u ->
@@ -467,14 +529,14 @@ fun ChatScreen() {
                     }
                 }
                 }
-                if (clearedAt > 0L && shellMode == "chat") {
+                if (clearedAt > 0L && chatBody) {
                     LaunchedEffect(clearedAt) { delay(com.blaze.assistant.agent.ClearScreen.UNDO_MS - 3_000); clearedAt = 0L }
                     UndoBar("Chat cleared \u00b7 nothing is forgotten", onUndo = { Agent.undoClear(); clearedAt = 0L }, onDismiss = { clearedAt = 0L })
                 }
                 // Dim the chat while a sheet (+ menu, /views) is open, so half-cut lines at its edge read as background.
-                if (shellMode == "chat" && showing.isEmpty() && (plusOpen || showViews)) SheetScrim { plusOpen = false; showViews = false }
+                if (chatBody && viewShowing.isEmpty() && (plusOpen || showViews)) SheetScrim { plusOpen = false; showViews = false }
             }
-            if (shellMode == "chat" && showing.isEmpty()) {
+            if (chatBody && viewShowing.isEmpty()) {
                 if (voiceState == Voice.State.LISTENING) ListeningStrip()
                 LaunchedEffect(a11yOn) { if (a11yOn) Settings.setBool("a11y_seen", true) }
                 LaunchedEffect(control) { if (control == com.blaze.assistant.phone.PhoneControl.State.CONNECTED) Settings.setBool("a11y_seen", true) }
@@ -492,9 +554,9 @@ fun ChatScreen() {
             // v0.25.5: live mini view of the Linux desktop while Blaze works in it; tap for the full Desktop view.
             if (settingsPage != "linux") DesktopLiveCard(onOpen = { com.blaze.assistant.desktop.LinuxDesktop.requestViewer(); settingsPage = "linux" })
             // v0.24.6: "Open in Design?" instead of switching views on its own.
-            if (shellMode == "chat") viewOffer?.let { o -> if (showing != o.id) ViewOfferChip(Views.offerLabel(o.id),
+            if (nav.tab == ChatNav.CHAT) viewOffer?.let { o -> if (showing != o.id) ViewOfferChip(Views.offerLabel(o.id),
                 onOpen = { Views.offer.value = null; Views.find(o.id)?.let { openView(it, o.target) } }, onDismiss = { Views.offer.value = null }) }
-            if (shellMode == "chat" && showing.isEmpty()) {
+            if (chatBody && viewShowing.isEmpty()) {
                 val sugg = remember(input.text) { fileSuggestions(input.text).ifEmpty { CommandRunner.suggest(input.text) } }
                 if (sugg.isNotEmpty() && !showViews) SuggestionList(sugg) { s ->
                     if (s.runNow) send(s.fill) else input = TextFieldValue(s.fill, TextRange(s.fill.length))
@@ -516,7 +578,7 @@ fun ChatScreen() {
                 if (plusOpen) BackHandler { plusOpen = false }
                 AnimatedVisibility(plusOpen, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
                     val model = ""
-                    PlusMenu(plusItems(work, approval, model, clipHasImage, com.blaze.assistant.agent.Projects.of(currentChat) != null)) { id ->
+                    PlusMenu(plusItems(work, approval, model, clipHasImage, nav.inProjectChat)) { id ->
                         plusOpen = false
                         when (id) {
                             "camera" -> openCamera()
@@ -531,7 +593,7 @@ fun ChatScreen() {
                             "model" -> settingsPage = "ai"
                             "views" -> showViews = true
                             "linux" -> settingsPage = "linux"
-                            "new" -> newChat(com.blaze.assistant.agent.Projects.of(Agent.chatId.value)?.id.orEmpty())
+                            "new" -> newProjectChat(navNow().project)
                             "clear" -> clearScreen()
                         }
                     }
@@ -796,9 +858,11 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
         } }
         Role.BLAZE -> if (m.meta == com.blaze.assistant.update.Updater.CARD) UpdateCard()
         else if (m.meta.startsWith(com.blaze.assistant.agent.BgAgents.CARD)) AgentCard(m.meta.removePrefix(com.blaze.assistant.agent.BgAgents.CARD))
-        else SwipeToQuote(true, onQuote = { onQuote(m.text) }) { Column(Modifier.fillMaxWidth()) {
+        else SwipeToQuote(true, onQuote = { onQuote(com.blaze.assistant.agent.ToolLeak.forDisplay(m.text)) }) { Column(Modifier.fillMaxWidth()) {
             com.blaze.assistant.agent.ThinkingLabel.label(live = false, hasThought = m.thinking.isNotBlank(), ms = m.thinkMs, show = Settings.showReasoning)?.let { ThinkingLine(it, live = false) }
-            BlazeReply(m.id, m.text, pos)
+            // v0.28.3: old saved replies may hold raw leaked tool syntax; it's hidden when drawn too.
+            val shown = remember(m.text) { com.blaze.assistant.agent.ToolLeak.bubbleText(m.text) }
+            BlazeReply(m.id, shown, pos)
             if (m.media.isNotEmpty()) MediaStrip(m.media)
             if (pos.ends || followups.isNotEmpty()) Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = true)
             else if (com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech()).isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
@@ -839,7 +903,7 @@ private fun Actions(m: ChatMessage, side: Side, time: String, canAct: Boolean, o
     if (chipOnly && chip.isBlank()) return
     if (chipOnly) { MetaLine(side, "", emptyList(), chip, chip.startsWith("⚡")); return }
     val acts = buildList<Pair<String, (() -> Unit)?>> {
-        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(RichKit.readable(m.text)) else Md.plain(splitQuote(m.text).second))); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
+        add("Copy" to { clip.setText(AnnotatedString(if (m.role == Role.BLAZE) Md.plain(RichKit.readable(com.blaze.assistant.agent.ToolLeak.bubbleText(m.text))) else Md.plain(splitQuote(m.text).second))); Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show() })
         if (allowQuote) add("Quote" to { onQuote(m.text) })
         add("Retry" to (if (canAct) ({ Agent.retry(m.id) }) else null))
     }

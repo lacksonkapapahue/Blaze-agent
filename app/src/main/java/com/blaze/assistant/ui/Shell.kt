@@ -286,10 +286,10 @@ fun SearchScreen(onView: (BlazeView) -> Unit, onAsk: (String) -> Unit, onDismiss
     if (autoFocus) LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Exception) { } }
     val views = remember(q) { if (q.isBlank()) Views.all.take(6) else Views.filter(q).take(8) }
     Column(Modifier.fillMaxSize().background(c.paper)) {
-        Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onDismiss).semantics { contentDescription = "Back" }, contentAlignment = Alignment.Center) {
-                Text("←", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
-            }
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // v0.28.3: the shared round BackButton.
+            BackButton(onDismiss)
+            Spacer(Modifier.width(4.dp))
             Row(Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(c.bubble).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 SearchGlyph(c.sub, 15.dp)
@@ -322,19 +322,73 @@ fun SearchScreen(onView: (BlazeView) -> Unit, onAsk: (String) -> Unit, onDismiss
 }
 
 @Composable
-fun ChatRow(ch: ChatMeta, busy: Boolean, current: Boolean = false, chip: String = "", onClick: () -> Unit) {
+@OptIn(ExperimentalFoundationApi::class)
+fun ChatRow(ch: ChatMeta, busy: Boolean, current: Boolean = false, chip: String = "", onMore: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = LocalBlaze.current
     Row(Modifier.padding(horizontal = 16.dp, vertical = 3.dp).fillMaxWidth().clip(BlazeShapes.medium).background(if (current) c.faint else c.raised)
-        .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+        .combinedClickable(onClick = onClick, onLongClick = onMore).padding(start = 14.dp, end = if (onMore != null) 4.dp else 14.dp, top = 11.dp, bottom = 11.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(ch.title.ifBlank { "Untitled" }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, color = c.ink))
-            if (ch.preview.isNotBlank()) Text(ch.preview, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
+            // v0.28.3: a preview saved before the leak fix can hold raw tool syntax ("[github_open repo=…]"); never show it.
+            val preview = remember(ch.preview) { com.blaze.assistant.agent.ToolLeak.forDisplay(ch.preview) }
+            if (preview.isNotBlank()) Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
         }
         // Pinned mark sits on the right so every title lines up (v0.15.0).
         if (ch.pinned) { Spacer(Modifier.width(8.dp)); Box(Modifier.size(6.dp).clip(CircleShape).background(c.accent)); Spacer(Modifier.width(8.dp)) }
         if (busy) Label("Working", color = c.accent, size = 9.sp)
         else if (chip.isNotBlank()) Label(chip, color = c.sub, size = 9.sp)
+        if (onMore != null) Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = "Chat options", onClick = onMore)
+            .semantics { contentDescription = "Options for ${ch.title.ifBlank { "this chat" }}" }, contentAlignment = Alignment.Center) {
+            MoreDots(c.sub)
+        }
     }
+}
+
+/** v0.28.3: three round dots (the ⋯ menu). */
+@Composable
+fun MoreDots(color: Color, size: androidx.compose.ui.unit.Dp = 18.dp) {
+    Canvas(Modifier.size(size)) {
+        val r = this.size.width / 11f
+        listOf(0.2f, 0.5f, 0.8f).forEach { x -> drawCircle(color, r, Offset(this.size.width * x, this.size.height / 2)) }
+    }
+}
+
+/** v0.28.3: rename a chat (project chats). */
+@Composable
+fun RenameChatDialog(current: String, onDone: (String) -> Unit, onDismiss: () -> Unit) {
+    var t by remember { mutableStateOf(current) }
+    BlazeDialog(title = "Rename chat", confirm = "Save", onConfirm = { onDone(t.trim()) }, dismiss = "Cancel", onDismiss = onDismiss) {
+        BlazeTextField(t, { t = it.take(80) }, "Chat name", modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { onDone(t.trim()) }))
+    }
+}
+
+/**
+ * v0.28.3: the top of a project chat screen (inside Projects): back to the project page, the project's name over the
+ * chat's title, and ⋯ for Rename / Delete / New chat. The thread under it is the same message list and composer as main Chat.
+ */
+@Composable
+fun ProjectChatHeader(project: String, title: String, onBack: () -> Unit, onRename: (String) -> Unit, onDelete: () -> Unit, onNewChat: () -> Unit,
+                      canEdit: Boolean = true) {
+    val c = LocalBlaze.current
+    var menu by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    BackTitle(title.ifBlank { "New chat" }, onBack = onBack, eyebrow = project, size = 18.sp,
+        modifier = Modifier.background(c.paper).hairlineBottom(c.hair)) {
+        Box {
+            Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClickLabel = "Chat options") { menu = true }
+                .semantics { contentDescription = "Chat options" }, contentAlignment = Alignment.Center) { MoreDots(c.ink) }
+            if (menu) BlazeMenu(true, onDismiss = { menu = false }, items = buildList<Pair<String, () -> Unit>> {
+                add("New chat in this project" to onNewChat)
+                if (canEdit) { add("Rename" to { renaming = true }); add("Delete chat" to { deleting = true }) }
+            })
+        }
+    }
+    if (renaming) RenameChatDialog(title, onDone = { t -> renaming = false; if (t.isNotBlank()) onRename(t) }, onDismiss = { renaming = false })
+    if (deleting) BlazeDialog(title = "Delete this chat?", body = "Its messages are removed from this phone. The project and its other chats stay.",
+        confirm = "Delete", onConfirm = { deleting = false; onDelete() }, warm = true, dismiss = "Keep", onDismiss = { deleting = false })
 }
 
 // ---------------------------------------------------------------- the one live work card
@@ -575,7 +629,9 @@ fun MicMark(color: Color, speaking: Boolean) {
 fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<String>, needsYou: Set<String>, openId: String,
                  onOpen: (String) -> Unit, onBack: () -> Unit, onCreate: (String) -> Unit, onChat: (String) -> Unit,
                  onNewChat: (String) -> Unit, onInstructions: (String, String) -> Unit, onDelete: (String) -> Unit,
-                 onBrief: (String, String) -> Unit = { _, _ -> }) {
+                 onBrief: (String, String) -> Unit = { _, _ -> },
+                 /** v0.28.3: rename / delete one of the project's chats. */
+                 onRenameChat: (String, String) -> Unit = { _, _ -> }, onDeleteChat: (String) -> Unit = {}) {
     val c = LocalBlaze.current
     val open = projects.firstOrNull { it.id == openId }
     Column(Modifier.fillMaxSize().background(c.paper)) {
@@ -607,7 +663,9 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 16.sp, color = c.ink))
-                            Text(if (p.chats.size == 1) "1 chat" else "${p.chats.size} chats", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
+                            // v0.28.3: count the chats that exist (an id whose file is gone isn't a chat).
+                            val n = p.chats.count { id -> chats.any { it.id == id } }
+                            Text(if (n == 1) "1 chat" else "$n chats", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
                         }
                         when {
                             needs -> StatusChip("Needs you", c.accent, filled = true)
@@ -622,13 +680,8 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
             var ins by remember(open.id) { mutableStateOf(open.instructions) }
             var brief by remember(open.id, open.brief) { mutableStateOf(open.brief) }
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack).semantics { contentDescription = "Back" }, contentAlignment = Alignment.Center) {
-                        Text("←", style = TextStyle(fontFamily = Type.Display, fontSize = 22.sp, color = c.ink))
-                    }
-                    Text(open.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
-                        style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 22.sp, letterSpacing = (-0.02).em, color = c.ink))
-                }
+                // v0.28.3: the shared round BackButton (was a thin "←" glyph); back goes to the projects list.
+                BackTitle(open.name, onBack = onBack, modifier = Modifier.padding(top = 4.dp), size = 22.sp)
                 BlazeButton("New chat in this project", lead = "+", modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(), height = 46.dp) { onNewChat(open.id) }
                 Label("Instructions", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 10.dp, bottom = 6.dp))
                 BlazeTextField(ins, { ins = it; onInstructions(open.id, it) }, "What Blaze should know in every chat here",
@@ -642,7 +695,21 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
                     modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), singleLine = false, minHeight = 96.dp)
                 Label("Chats", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp))
                 val list = open.chats.mapNotNull { id -> chats.firstOrNull { it.id == id } }
-                list.forEach { ch -> ChatRow(ch, ch.id in busy, chip = if (ch.id in needsYou) "Needs you" else "") { onChat(ch.id) } }
+                // v0.28.3: each chat opens inside Projects; ⋯ (or a long-press) renames or deletes it.
+                var menuFor by remember { mutableStateOf("") }
+                var renaming by remember { mutableStateOf<ChatMeta?>(null) }
+                var deleting by remember { mutableStateOf<ChatMeta?>(null) }
+                list.forEach { ch ->
+                    Box {
+                        ChatRow(ch, ch.id in busy, chip = if (ch.id in needsYou) "Needs you" else "", onMore = { menuFor = ch.id }) { onChat(ch.id) }
+                        if (menuFor == ch.id) BlazeMenu(true, onDismiss = { menuFor = "" },
+                            items = listOf("Rename" to { renaming = ch }, "Delete chat" to { deleting = ch }))
+                    }
+                }
+                renaming?.let { ch -> RenameChatDialog(ch.title, onDone = { t -> renaming = null; if (t.isNotBlank()) onRenameChat(ch.id, t) }, onDismiss = { renaming = null }) }
+                deleting?.let { ch -> BlazeDialog(title = "Delete \u201c${ch.title.ifBlank { "this chat" }.take(40)}\u201d?",
+                    body = "Its messages are removed from this phone. The project, its instructions and its other chats stay.",
+                    confirm = "Delete", onConfirm = { deleting = null; onDeleteChat(ch.id) }, warm = true, dismiss = "Keep", onDismiss = { deleting = null }) }
                 if (list.isEmpty()) Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) { Rows { EmptyState("No chats yet", "Start one with + New chat. It keeps this project's instructions and brief.", mark = false) } }
                 BlazeButton("Delete project (chats stay)", kind = BtnKind.DANGER, modifier = Modifier.padding(20.dp), height = 40.dp) { onDelete(open.id) }
             }
@@ -664,5 +731,21 @@ fun ProjectBadge(name: String) {
     val c = LocalBlaze.current
     Box(Modifier.size(38.dp).clip(CircleShape).background(BlazeBrush.primarySoft), contentAlignment = Alignment.Center) {
         Text(name.trim().take(1).uppercase().ifBlank { "#" }, style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = c.ink))
+    }
+}
+
+/** v0.28.3: an empty project chat (just made with + New chat): what this thread is, above the composer. */
+@Composable
+fun ProjectChatEmpty(project: String, hasInstructions: Boolean) {
+    val c = LocalBlaze.current
+    Column(Modifier.fillMaxSize().padding(horizontal = 28.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        ProjectBadge(project)
+        Spacer(Modifier.height(14.dp))
+        Text("New chat in ${project.ifBlank { "this project" }}", maxLines = 2, overflow = TextOverflow.Ellipsis,
+            style = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 18.sp, color = c.ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center))
+        Spacer(Modifier.height(6.dp))
+        Text(if (hasInstructions) "Blaze follows this project's instructions and brief here. Your main chat stays as it is."
+            else "This thread stays in the project. Your main chat stays as it is.",
+            style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.sub, textAlign = androidx.compose.ui.text.style.TextAlign.Center))
     }
 }

@@ -84,6 +84,8 @@ class MainActivity : FragmentActivity() {
         i ?: return
         // "Action required" notification: open the chat that's waiting on the secure form (the card shows there).
         if (i.getBooleanExtra(Notifier.EXTRA_OPEN_FORM, false)) { i.removeExtra(Notifier.EXTRA_OPEN_FORM); Agent.showFormChat(); Notifier.clearAction() }
+        // v0.28.3: a reply notification from a project chat opens that chat in Projects (the shell follows Agent's chat).
+        i.getStringExtra(Notifier.EXTRA_OPEN_CHAT)?.let { id -> i.removeExtra(Notifier.EXTRA_OPEN_CHAT); Agent.openFromLink(id) }
         val listen = i.getBooleanExtra(EXTRA_LISTEN, false) ||
             i.action == android.content.Intent.ACTION_ASSIST || i.action == android.content.Intent.ACTION_VOICE_COMMAND
         if (i.action == ACTION_CALL) { i.action = null; Voice.callRequests.value = Voice.callRequests.value + 1; return }
