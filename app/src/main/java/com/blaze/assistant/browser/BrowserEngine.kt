@@ -69,13 +69,26 @@ object BrowserEngine {
         @Volatile var loaded: CompletableDeferred<Unit> = CompletableDeferred(Unit)
         /** A JS alert/confirm the page showed while nobody was looking (answered for it, told to Blaze on the next read). */
         @Volatile var lastDialog: String? = null
+        /** v0.29.7: a tab restored after a restart that hasn't loaded yet (loads when it's shown). */
+        internal var pending: TabStore.Snap? = null
+        /** v0.29.7: saved accounts for this page's sign-in form (the "Use a saved password" bar). */
+        var fillAccounts by mutableStateOf<List<BrowserLogins.Login>>(emptyList())
     }
+
+    /** v0.29.7: a sign-in the user just sent, waiting for "Save password?" (memory only, never written unless they tap Save). */
+    data class LoginOffer(val tabId: Int, val host: String, val site: String, val user: String, val pass: String, val update: Boolean)
+    var loginOffer by mutableStateOf<LoginOffer?>(null)
+    private var offerWaiting: LoginOffer? = null
 
     /** Set when a page's renderer died (Android closed it for memory, or it crashed) and the tab was reopened. */
     @Volatile var lastCrash: String? = null
 
     val tabs = mutableStateListOf<Tab>()
-    var current by mutableIntStateOf(0)
+    private var currentIndex by mutableIntStateOf(0)
+    /** The tab on screen. Switching to a restored tab loads it (v0.29.7). */
+    var current: Int
+        get() = currentIndex
+        set(v) { currentIndex = v; tabs.getOrNull(v)?.let { if (it.pending != null) main.post { wake(it) } }; scheduleSave() }
     var desktop by mutableStateOf(false)
     var fullView by mutableStateOf<View?>(null)
     private var fullCallback: WebChromeClient.CustomViewCallback? = null
@@ -90,10 +103,88 @@ object BrowserEngine {
     fun init(ctx: Context) {
         if (::app.isInitialized) return
         app = ctx.applicationContext
+        BrowserLogins.dir = app.filesDir; TabStore.dir = app.filesDir; SavedPages.root = app.filesDir
         BrowserVpn.onMaskChanged = { remask() }
         BrowserVpn.init(app)
         main.post { clearPrivateData() }   // leftovers if Blaze was killed with private tabs open
+        restoreTabs()
     }
+
+    // ---------- v0.29.7 tabs that survive a restart ----------
+    private var restored = false
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val saveTask = Runnable { saveTabsNow() }
+
+    /** Saves the tab list a moment after something changed (page loaded, tab opened / closed / switched). */
+    fun scheduleSave() { if (!restored) return; main.removeCallbacks(saveTask); main.postDelayed(saveTask, 1500) }
+
+    /** Writes the normal tabs (URL, title, order, back/forward state) and flushes cookies so sign-ins survive a kill. */
+    fun saveTabsNow() {
+        if (!restored || !::app.isInitialized) return
+        main.removeCallbacks(saveTask)
+        try {
+            val snaps = tabs.filter { !it.isPrivate }.map { snapOf(it) }
+            val saved = TabStore.Saved(snaps, TabStore.activeIndex(tabs.map { it.isPrivate }, current))
+            io.execute { TabStore.write(saved) }   // one writer thread, in order
+        } catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("Browser tabs not saved", e) }
+        flushCookies()
+    }
+
+    fun flushCookies() { try { CookieManager.getInstance().flush() } catch (_: Throwable) { } }
+
+    @Suppress("DEPRECATION")
+    private fun snapOf(t: Tab): TabStore.Snap {
+        t.pending?.let { return it.copy(title = t.title) }
+        val st = HashMap<String, String>()
+        try {
+            val b = android.os.Bundle()
+            t.web.saveState(b)
+            for (k in b.keySet()) when (val v = b.get(k)) {
+                is ByteArray -> st[k] = "b:" + java.util.Base64.getEncoder().encodeToString(v)
+                is String -> st[k] = "s:$v"
+                else -> {}
+            }
+        } catch (_: Throwable) { st.clear() }
+        val url = t.url.takeIf { it.isNotBlank() && it != "about:blank" } ?: ""
+        return TabStore.Snap(url, if (url.isEmpty()) "" else t.title, if (url.isEmpty()) emptyMap() else st)
+    }
+
+    /** Reopens last session's normal tabs. Only the active one loads now; the rest load when you switch to them. */
+    private fun restoreTabs() {
+        if (restored) return
+        val s = try { TabStore.read() } catch (_: Throwable) { TabStore.Saved(emptyList(), 0) }
+        try {
+            val made = s.tabs.map { snap -> newTab(app, null, false, restore = snap) }
+            restored = true
+            made.getOrNull(s.active)?.let { current = tabs.indexOf(it) }
+        } catch (e: Throwable) {
+            restored = true
+            com.blaze.assistant.device.CrashLog.error("Browser tabs not restored", e)
+        }
+    }
+
+    /** Loads a restored tab: its back/forward list when the WebView accepts it, else just its page. */
+    private fun wake(t: Tab) {
+        val p = t.pending ?: return
+        t.pending = null
+        if (p.url.isBlank()) return
+        allowFiles(t, p.url)
+        if (p.state.isNotEmpty()) {
+            try {
+                val b = android.os.Bundle()
+                p.state.forEach { (k, v) ->
+                    if (v.startsWith("b:")) b.putByteArray(k, java.util.Base64.getDecoder().decode(v.substring(2)))
+                    else if (v.startsWith("s:")) b.putString(k, v.substring(2))
+                }
+                val r = t.web.restoreState(b)
+                if (r != null && r.size > 0) { t.canBack = t.web.canGoBack(); t.canForward = t.web.canGoForward(); if (t.loaded.isCompleted) t.loaded = CompletableDeferred(); return }
+            } catch (_: Throwable) { }
+        }
+        load(t, p.url)
+    }
+
+    /** Saved pages are file:// archives; only tabs that open one may read files (and only our own folder is ever opened). */
+    private fun allowFiles(t: Tab, url: String) { if (SavedPages.isSavedUrl(url)) t.web.settings.allowFileAccess = true }
 
     // ---------- private tabs ----------
     /** Private tabs get their own WebView profile: separate cookies, storage and cache, wiped when the last one closes. */
@@ -146,7 +237,7 @@ object BrowserEngine {
 
     // ---------- tabs ----------
     @SuppressLint("SetJavaScriptEnabled")
-    fun newTab(ctx: Context, url: String? = null, isPrivate: Boolean = false): Tab {
+    fun newTab(ctx: Context, url: String? = null, isPrivate: Boolean = false, restore: TabStore.Snap? = null): Tab {
         init(ctx)
         val wrap = MutableContextWrapper(app)
         val w = WebView(wrap)
@@ -166,6 +257,7 @@ object BrowserEngine {
         }
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
         layoutOffscreen(w)
+        var captureLate = false   // set below: inject the sign-in watcher after each load (old WebView)
         w.webViewClient = object : WebViewClient() {
             // v0.20.0: a dead page renderer (Android reclaims it on a 3 GB phone, or it crashes) used to take the
             // whole app down with it, and Samsung then switches Blaze's phone control off. Reopen the tab instead.
@@ -193,6 +285,7 @@ object BrowserEngine {
                 t.pulls = 0; t.pulling = ""; t.loadStart = System.currentTimeMillis(); t.lastPull = t.loadStart
                 if (t.loaded.isCompleted) t.loaded = CompletableDeferred()
                 t.maskJs?.let { v.evaluateJavascript(it, null) }
+                t.fillAccounts = emptyList()
             }
             override fun onLoadResource(v: WebView, url: String?) {
                 if (t.progress >= 100 || url.isNullOrBlank() || url.startsWith("data:")) return
@@ -201,10 +294,16 @@ object BrowserEngine {
             override fun onPageFinished(v: WebView, url: String?) {
                 t.url = url.orEmpty(); t.progress = 100; t.canBack = v.canGoBack(); t.canForward = v.canGoForward()
                 t.loaded.complete(Unit)
-                if (!t.isPrivate && !url.isNullOrBlank() && url != "about:blank") BrowserData.addHistory(app, v.title ?: url, url)
+                if (!t.isPrivate && !url.isNullOrBlank() && url != "about:blank" && !SavedPages.isSavedUrl(url)) BrowserData.addHistory(app, v.title ?: url, url)
+                if (!t.isPrivate) {
+                    if (captureLate) v.evaluateJavascript(BrowserLogins.CAPTURE_JS, null)
+                    offerSoon(t, 700)
+                    scheduleSave(); flushCookies()
+                }
             }
             override fun doUpdateVisitedHistory(v: WebView, url: String?, isReload: Boolean) {
                 t.url = url.orEmpty(); t.canBack = v.canGoBack(); t.canForward = v.canGoForward()
+                if (!t.isPrivate) { offerSoon(t, 1200); scheduleSave() }
             }
         }
         w.webChromeClient = object : WebChromeClient() {
@@ -235,9 +334,128 @@ object BrowserEngine {
         }
         w.setDownloadListener { dl, userAgent, disposition, mime, _ -> download(dl, userAgent, disposition, mime) }
         installMask(t)
-        tabs.add(t); current = tabs.lastIndex
+        // v0.29.7 saved passwords: normal tabs only. Private tabs never get the capture script or the bridge.
+        captureLate = !isPrivate && installLoginBridge(t)
+        if (restore != null && restore.url.isNotBlank()) {
+            t.url = restore.url; t.title = restore.title.ifBlank { display(restore.url) }; t.pending = restore
+        }
+        tabs.add(t)
+        if (t.pending != null) currentIndex = tabs.lastIndex else current = tabs.lastIndex
         if (!url.isNullOrBlank()) load(t, url)
         return t
+    }
+
+    private fun display(u: String) = u.removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore('/')
+
+    // ---------- v0.29.7 saved passwords ----------
+    /**
+     * Listens for the page's sign-in forms (origin-checked WebMessageListener, main frame only). Returns true when the
+     * capture script has to be injected after each load (WebView too old for document-start scripts).
+     */
+    private fun installLoginBridge(t: Tab): Boolean {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return false
+        try {
+            WebViewCompat.addWebMessageListener(t.web, BrowserLogins.BRIDGE, setOf("*")) { _, msg, origin, mainFrame, _ ->
+                if (mainFrame) onLoginMessage(t, msg.data.orEmpty(), origin)
+            }
+        } catch (_: Throwable) { return false }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try { WebViewCompat.addDocumentStartJavaScript(t.web, BrowserLogins.CAPTURE_JS, setOf("*")); return false } catch (_: Throwable) { }
+        }
+        return true
+    }
+
+    private fun onLoginMessage(t: Tab, data: String, origin: Uri) {
+        if (t.isPrivate || !tabs.contains(t)) return
+        val originUrl = origin.toString()
+        if (!com.blaze.assistant.connect.UrlSafety.autofillAllowed("$originUrl/")) return   // https (or the LAN) only
+        val host = origin.host?.lowercase()?.removePrefix("www.").orEmpty()
+        if (host.isEmpty() || !SiteDomain.sameSite(host, SiteDomain.hostOf(t.url).ifEmpty { host })) return
+        val o = try { JSONObject(data) } catch (_: Exception) { return }
+        when (o.optString("t")) {
+            "form" -> {
+                val acc = try { BrowserLogins.forHost(host) } catch (_: Throwable) { emptyList() }
+                if (acc.isNotEmpty()) t.fillAccounts = acc
+            }
+            "submit" -> {
+                val user = o.optString("u").trim().take(200); val pass = o.optString("p").take(500)
+                if (pass.isEmpty()) return
+                SecureInput.hide(pass)   // never echoed to the agent in page text
+                if (BrowserLogins.isNever(host)) return
+                when (val d = BrowserLogins.decide(host, user, pass)) {
+                    is BrowserLogins.Decision.Same -> BrowserLogins.touch(d.id)
+                    is BrowserLogins.Decision.Save, is BrowserLogins.Decision.Update -> {
+                        offerWaiting = LoginOffer(t.id, host, SiteDomain.registrable(host), user, pass, d is BrowserLogins.Decision.Update)
+                        offerSoon(t, 3500)   // shown after the next page (or in 3.5 s on single-page sign-ins)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun offerSoon(t: Tab, ms: Long) {
+        if (offerWaiting?.tabId != t.id) return
+        main.postDelayed({ offerWaiting?.takeIf { it.tabId == t.id }?.let { loginOffer = it; offerWaiting = null } }, ms)
+    }
+
+    /** "Save" / "Update" on the prompt. */
+    fun acceptLoginOffer() {
+        val o = loginOffer ?: return; loginOffer = null
+        val ok = try { BrowserLogins.save(o.host, o.user, o.pass) != null } catch (_: Throwable) { false }
+        toast(if (!ok) "Couldn't save the password." else if (o.update) "Password updated" else "Password saved for ${o.site}")
+    }
+    fun neverForSite() { val o = loginOffer ?: return; loginOffer = null; BrowserLogins.addNever(o.host); toast("Blaze won't offer to save passwords on ${o.site}.") }
+    fun dismissLoginOffer() { loginOffer = null }
+
+    /** Fills a saved account into the page (never submits). https (or LAN) and the same site only. */
+    fun fillLogin(t: Tab, l: BrowserLogins.Login) {
+        t.fillAccounts = emptyList()
+        if (t.isPrivate) return
+        if (!com.blaze.assistant.connect.UrlSafety.autofillAllowed(t.url)) { toast("This page isn't secure (http), so Blaze won't fill a password here."); return }
+        if (!SiteDomain.sameSite(l.host, SiteDomain.hostOf(t.url))) return
+        val pass = l.password
+        if (pass.isEmpty()) { toast("This password can't be read on this phone. Save it again."); return }
+        SecureInput.hide(pass)
+        t.web.evaluateJavascript(BrowserLogins.fillJs(l.user, pass), null)
+        try { BrowserLogins.touch(l.id) } catch (_: Throwable) { }
+    }
+
+    // ---------- v0.29.7 saved pages ----------
+    /** Saves the tab's page as a web archive plus a text copy. [done] gets a message for the user (main thread). */
+    fun savePage(t: Tab, done: (String) -> Unit) {
+        val dir = SavedPages.dir() ?: return done("Couldn't save this page.")
+        val url = t.url; val title = t.title.ifBlank { url }
+        if (!url.startsWith("http")) return done("Only web pages can be saved.")
+        try { dir.mkdirs() } catch (_: Throwable) { }
+        val id = SavedPages.newId(System.currentTimeMillis(), SavedPages.list().map { it.id })
+        val f = File(dir, SavedPages.archiveName(id))
+        try {
+            t.web.saveWebArchive(f.absolutePath, false) { path ->
+                if (path == null || !f.exists() || f.length() == 0L) { f.delete(); done("Couldn't save this page."); return@saveWebArchive }
+                t.web.evaluateJavascript("(function(){return document.body?document.body.innerText:''})()") { r ->
+                    val body = try { JSONTokener(r ?: "\"\"").nextValue() as? String } catch (_: Exception) { null }.orEmpty()
+                    Thread {
+                        var hasText = false
+                        if (body.isNotBlank()) try {
+                            val whenText = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date())
+                            File(dir, SavedPages.textName(id)).writeText(SavedPages.textCopy(title, url, whenText, SecureInput.scrub(body))); hasText = true
+                        } catch (_: Throwable) { }
+                        SavedPages.add(SavedPages.Page(id, title, url, System.currentTimeMillis(), f.length(), hasText))
+                        main.post { done("Saved for offline: ${title.take(60)}") }
+                    }.start()
+                }
+            }
+        } catch (e: Throwable) { done("Couldn't save this page: ${e.message}") }
+    }
+
+    /** Opens a saved page in a new normal tab, from the file on the phone (works offline). */
+    fun openSaved(ctx: Context, p: SavedPages.Page): Boolean {
+        val f = SavedPages.archive(p.id)?.takeIf { it.exists() } ?: return false
+        val t = newTab(ctx)
+        t.web.settings.allowFileAccess = true
+        t.title = p.title
+        load(t, Uri.fromFile(f).toString())
+        return true
     }
 
     /** True while the Browser screen shows this tab (an Activity is attached to its dialogs). */
@@ -279,6 +497,8 @@ object BrowserEngine {
         tabs.removeAt(i)
         if (current >= tabs.size) current = (tabs.size - 1).coerceAtLeast(0)
         if (t.isPrivate && tabs.none { it.isPrivate }) clearPrivateData()
+        if (loginOffer?.tabId == t.id) loginOffer = null
+        if (!t.isPrivate) scheduleSave()
     }
 
     /** Closes every tab on one side of the tab grid. */
@@ -311,6 +531,9 @@ object BrowserEngine {
 
     fun load(t: Tab, input: String) {
         val u = toUrl(input)
+        t.pending = null
+        if (u.startsWith("file:") && !SavedPages.isSavedUrl(u)) { toast("Blaze only opens its own saved pages from the phone."); return }
+        allowFiles(t, u)
         t.url = u; t.loaded = CompletableDeferred()
         t.web.loadUrl(u)
     }

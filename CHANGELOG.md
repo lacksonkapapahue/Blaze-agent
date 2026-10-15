@@ -2,6 +2,16 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.7: Browser remembers: saved passwords, tabs that come back, offline pages
+
+- **Saved passwords.** Sign in on a site in Blaze Browser and a Blaze card asks "Save password?" (or "Update password?" when the password changed), with Save, Not now and Never for this site. Passwords are encrypted with the phone's Android Keystore (AES-256-GCM, the key never leaves the phone) in `browser_logins.json`, one entry per site and username, several accounts per site. Sites are matched by registrable domain (accounts.google.com and www.google.com are one site; bob.github.io and alice.github.io are not). Next time a sign-in form appears, a "Use your saved password" bar offers the accounts for that site; one tap fills them (it never presses Sign in for you). https pages (and the LAN) only. Two-step sign-ins (email first, password next) keep the email.
+- **Private tabs never save passwords**: they don't get the sign-in watcher at all.
+- **⋯ › Saved passwords**: every site and account. Show, copy or edit a password after your fingerprint, face or PIN (unlocked for 2 minutes); delete with a second tap; undo "Never for this site".
+- **Sign-ins stay signed in**: cookies are flushed to disk after each page and when you leave the browser, so a killed app keeps you logged in.
+- **Tabs come back.** All normal tabs (address, title, order, the tab you were on, and each tab's back/forward history) are saved and reopen after closing the browser or Android killing Blaze. Only the tab you were on loads straight away; the others load when you open them. Private tabs are never restored.
+- **⋯ › Save page for offline** saves the page as a web archive (.mht with its pictures and styles) plus a readable text copy. **⋯ › Saved pages** lists them (newest first, size and date); tap to open offline in a new tab, the text icon for the text copy, delete with a second tap.
+- Code: `browser/SiteDomain.kt`, `BrowserLogins.kt`, `TabStore.kt`, `SavedPages.kt`, `BrowserVaultUi.kt`; tests `BrowserPersistenceTest`.
+
 ## v0.29.5: Truly see-through chat
 
 - Chat bubbles are nearly clear now (a faint tint, no grey slab) with a crisp outline; the work card and follow-up chips are clear with a hairline too.

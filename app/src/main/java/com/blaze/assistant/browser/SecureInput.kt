@@ -87,6 +87,8 @@ object SecureInput {
 
     fun put(name: String, value: String) { if (value.isEmpty()) return; slots[name] = value; if (value.length >= 4) seen.add(value) }
     fun clear() { slots.clear(); seen.clear() }
+    /** v0.29.7: a value the browser typed or saw (a saved password) that must never reach the model in page text. */
+    fun hide(value: String) { if (value.length >= 4) seen.add(value) }
 
     /**
      * Swaps placeholders for real values: this run's values first, then the vault for [host].
