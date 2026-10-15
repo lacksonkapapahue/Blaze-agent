@@ -200,6 +200,9 @@ fun FileChip(name: String, onRemove: (() -> Unit)? = null) {
 fun AttachmentThumbs(files: List<com.blaze.assistant.agent.Attachment>, loading: Boolean, onRemove: (com.blaze.assistant.agent.Attachment) -> Unit) {
     val c = LocalBlaze.current
     var preview by remember { mutableStateOf<String?>(null) }
+    // v0.28.1: with several pictures, tapping one opens the full-screen viewer at it (swipe between them). The row of
+    // thumbnails stays (each needs its own ×), so the composer keeps its height.
+    val pics = files.filter { it.thumb != null && !AttachView.isPdfName(it.name) }.mapNotNull { it.thumb }
     Row(Modifier.fillMaxWidth().background(c.paper).horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         files.forEach { f ->
@@ -208,19 +211,14 @@ fun AttachmentThumbs(files: List<com.blaze.assistant.agent.Attachment>, loading:
         }
         if (loading) Label("Reading\u2026", color = c.accent, size = 10.sp)
     }
-    preview?.let { p -> ImagePreview(p) { preview = null } }
+    preview?.let { p -> if (pics.size > 1 && p in pics) ImagePager(pics, pics.indexOf(p)) { preview = null } else ImagePreview(p) { preview = null } }
 }
 
 /** Full-screen picture preview with a round close button. */
 @Composable
 fun ImagePreview(path: String, onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val bmp = rememberBitmap(path, 1600)
-        Box(Modifier.fillMaxSize().background(Color.Black).clickable { onDismiss() }, contentAlignment = Alignment.Center) {
-            if (bmp != null) Image(bmp, contentDescription = "Picture preview", contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize().padding(8.dp))
-            GlassIconButton(Icons.Rounded.Close, "Close preview", modifier = Modifier.align(Alignment.TopEnd).padding(16.dp), onClick = onDismiss)
-        }
-    }
+    // v0.28.1: one viewer for one or many pictures: close (X) top left, save top right, pinch to zoom.
+    ImagePager(listOf(path), 0, onDismiss)
 }
 
 /**
@@ -231,13 +229,16 @@ fun ImagePreview(path: String, onDismiss: () -> Unit) {
 fun SentBubble(text: String, quoted: String, media: List<String>, files: List<String>, pos: GroupPos, bitmaps: List<ImageBitmap?>? = null) {
     val c = LocalBlaze.current
     var preview by remember { mutableStateOf<String?>(null) }
+    var previewAt by remember { mutableStateOf(-1) }
     val words = AttachView.bubbleText(text, media)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         if (media.isNotEmpty()) {
             Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(Bubbles.shape(Side.ME, pos)).background(c.ink).padding(4.dp),
                 horizontalAlignment = Alignment.End) {
                 val single = media.size == 1
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // v0.28.1: several pictures = a fanned card stack (swipe to flip, tap or ⤢ for the full-screen viewer).
+                if (!single) ImageStack(media.take(12), bitmaps, onOpen = { previewAt = it })
+                else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     media.take(6).forEachIndexed { i, p ->
                         val bmp = bitmaps?.getOrNull(i) ?: rememberBitmap(p, if (single) 720 else 300)
                         val shape = RoundedCornerShape(16.dp)
@@ -260,6 +261,7 @@ fun SentBubble(text: String, quoted: String, media: List<String>, files: List<St
         if (chips.isNotEmpty()) Row(Modifier.padding(start = 48.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { chips.take(4).forEach { FileChip(it) } }
     }
     preview?.let { p -> ImagePreview(p) { preview = null } }
+    if (previewAt >= 0) ImagePager(media.take(12), previewAt) { previewAt = -1 }
 }
 
 /** "Open in Design?": the chip Blaze shows instead of switching views on its own. */
