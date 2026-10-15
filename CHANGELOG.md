@@ -2,6 +2,11 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.5: Truly see-through chat
+
+- Chat bubbles are nearly clear now (a faint tint, no grey slab) with a crisp outline; the work card and follow-up chips are clear with a hairline too.
+- The blue particles drift over the thread, so they pass through the bubbles and text instead of hiding behind them.
+
 ## v0.29.4: Blue particles, glass chat bubbles
 
 - Background particles are blue in both themes (deep sky blue on light, periwinkle on dark), slightly bigger and much easier to see.

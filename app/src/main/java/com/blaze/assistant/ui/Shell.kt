@@ -454,7 +454,8 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
     val pulse = if (live) rememberInfiniteTransition(label = "p").animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a").value else 1f
     // v0.24.0: inline with the thread, no outline: a soft rounded strip on Blaze's side; a live one gets an accent wash.
     Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
-        .background(if (live) c.accentSoft else c.bubble.copy(alpha = 0.6f))) {
+        .background(if (live) c.accent.copy(alpha = 0.08f) else GlassBubble.stripFill(c))
+        .border(1.dp, if (live) c.accent.copy(alpha = 0.45f) else GlassBubble.stripEdge(c), RoundedCornerShape(16.dp))) {
         Row(Modifier.fillMaxWidth().clickable(enabled = n > 0) { open = !open }.padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(7.dp).alpha(pulse).clip(CircleShape).background(if (live) c.accent else c.weak))
