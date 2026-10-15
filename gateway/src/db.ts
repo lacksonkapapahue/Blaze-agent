@@ -34,6 +34,21 @@ export interface Config {
   assignments: Map<string, string>;
   /** "provider|model" of discovered models flagged paid-only: never routed to. */
   paid: Set<string>;
+  /** Gateway switches from the D1 `settings` table (migration 0003). */
+  settings: Settings;
+}
+
+export interface Settings {
+  /** New accounts wait for approval in /admin before they get model answers. Default on. */
+  require_approval: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = { require_approval: true };
+
+export function parseSettings(rows: { key: string; value: string }[]): Settings {
+  const s: Settings = { ...DEFAULT_SETTINGS };
+  for (const r of rows) if (r.key === "require_approval") s.require_approval = r.value !== "0";
+  return s;
 }
 
 const CONFIG_TTL_MS = 15_000;
@@ -110,7 +125,11 @@ export async function loadConfig(db: D1Database, now = Date.now()): Promise<Conf
     const pr = await db.prepare("SELECT provider_id, model_id FROM models WHERE free = 0").all<any>();
     for (const x of pr.results) paid.add(`${x.provider_id}|${x.model_id}`);
   } catch { /* no models table yet */ }
-  const cfg: Config = { providers, keys, routes, plans, assignments, paid };
+  let settings = { ...DEFAULT_SETTINGS };
+  try {
+    settings = parseSettings((await db.prepare("SELECT key, value FROM settings").all<{ key: string; value: string }>()).results);
+  } catch { /* no settings table yet (migration 0003 not applied): approval stays on */ }
+  const cfg: Config = { providers, keys, routes, plans, assignments, paid, settings };
   cached = { at: now, db, cfg };
   return cfg;
 }

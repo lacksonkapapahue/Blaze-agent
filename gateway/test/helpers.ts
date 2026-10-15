@@ -32,9 +32,13 @@ class FakeStmt {
 
 export class FakeD1 {
   sqlite = new DatabaseSync(":memory:");
-  constructor() {
+  /** [beforeMigration] runs before each migration file (to put old data in place, e.g. for grandfathering). */
+  constructor(beforeMigration?: (file: string, sqlite: DatabaseSync) => void) {
     const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-    for (const f of readdirSync(dir).filter(f => f.endsWith(".sql")).sort()) this.sqlite.exec(readFileSync(join(dir, f), "utf8"));
+    for (const f of readdirSync(dir).filter(f => f.endsWith(".sql")).sort()) {
+      beforeMigration?.(f, this.sqlite);
+      this.sqlite.exec(readFileSync(join(dir, f), "utf8"));
+    }
   }
   prepare(sql: string) {
     return new FakeStmt(this.sqlite, sql);

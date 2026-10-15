@@ -1,5 +1,6 @@
-// POST /v1/chat/completions: Blaze account → quota → task → ordered models → failover.
+// POST /v1/chat/completions: Blaze account → waiting list → quota → task → ordered models → failover.
 
+import { checkAccess } from "./access";
 import { requireUser } from "./auth";
 import { isRoutable } from "./catalog";
 import { decryptKey } from "./crypto";
@@ -160,6 +161,7 @@ export async function route(
 
 export async function chatCompletions(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const user = await requireUser(env, req);
+  await checkAccess(env, user, ctx, true); // 403 waitlisted / access_rejected
   const body = await readJSON(req);
   if (!Array.isArray(body.messages) || body.messages.length === 0) throw new HttpError(400, "invalid_request_error", "'messages' must be a non-empty array");
   if (!env.KEY_ENCRYPTION_SECRET) throw new HttpError(503, "not_configured", "The gateway isn't set up yet (KEY_ENCRYPTION_SECRET missing)");

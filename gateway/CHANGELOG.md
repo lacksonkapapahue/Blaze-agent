@@ -1,5 +1,29 @@
 # Blaze Gateway changelog
 
+## 0.3.0 (2026-10-15)
+
+- **Waiting list.** Every Blaze account that reaches the gateway is recorded in D1 `accounts`
+  (email, name, first / last seen, request count). With the new admin switch **Require approval
+  for new accounts** (D1 `settings`, default on), accounts that aren't approved get
+  `403 waitlisted` ("You're on the Blaze waiting list. You'll get access as soon as you're
+  approved.") instead of model answers, and cost no quota; rejected accounts get
+  `403 access_rejected`. Admins are always allowed. New admin tab **Waiting list**: pending people
+  with Approve (pick a plan, the default plan preselected) / Reject, and the approved and rejected
+  lists with undo. `GET /v1/models` records the account but still lists models.
+- Migration `0003_access.sql` (`settings`, `accounts`) grandfathers everyone already using Blaze:
+  every email with a plan assignment and every account with usage is approved, so nobody is locked
+  out. A Worker running before the migration is applied behaves like 0.2.x (no lock-out).
+- **Fix: assigning a plan only seemed to work for non-default plans** ("can't add emails on plans
+  other than pro"). Choosing the default plan (basic, the dropdown's first and preselected option)
+  deleted the email's row, so "saved" showed and the email never appeared. Now every plan, the
+  default included, is stored and listed; "remove" puts an account back on the default. The plan
+  dropdown is rebuilt on every render (it used to be filled once, so plans added later never
+  showed), assignments are grouped by plan, and errors / confirmations show inside the card
+  (e.g. "No such plan: gold", "Saved: x@y.com is on standard and approved").
+  Assigning a plan also approves that email.
+- New admin API: `PUT /admin/api/settings`, `POST /admin/api/access/{approve,reject,pending}`;
+  `PUT /admin/api/assignments` takes `{remove: true}`; `/admin/api/state` adds `settings` and `accounts`.
+
 ## 0.2.2 (2026-10-14)
 
 - `blaze_avoid` (app v0.26.2): up to 8 "provider/model" routes the app just got an empty (reasoning-only)

@@ -13,6 +13,7 @@ object PlainError {
     fun of(raw: String): String {
         val t = raw.trim()
         if (t.isEmpty()) return "Something went wrong. Tap Retry."
+        Cloud.access(403, t)?.let { line -> if ("403" in t || line == t || "waitlisted" in t || "access_rejected" in t) return line }
         val looksRaw = t.contains('{') || t.contains("\"error\"") || t.contains("http", true) || t.length > 220 || t.contains("Exception")
         if (!looksRaw) return t
         try { com.blaze.assistant.device.CrashLog.error("chat error", RuntimeException(t.take(1500))) } catch (_: Throwable) { }
