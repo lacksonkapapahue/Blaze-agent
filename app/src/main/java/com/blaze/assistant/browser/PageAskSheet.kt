@@ -202,7 +202,7 @@ fun PageAskSheet(title: String, initial: String?, readPage: suspend () -> PageAs
                                 // A pasted link is a compact chip, never a giant URL bubble.
                                 line.link?.let { LinkChip(PageQuestion.chip(it)) }
                                 if (line.text.isNotBlank()) SelectionContainer {
-                                    Text(line.text, modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp))
+                                    Text(com.blaze.assistant.ui.Md.render(line.text, Glass.cyan, Glass.raised2), modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp))
                                         .background(if (me) Glass.blue else Glass.raised).padding(horizontal = 12.dp, vertical = 9.dp),
                                         style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = Glass.text))
                                 }

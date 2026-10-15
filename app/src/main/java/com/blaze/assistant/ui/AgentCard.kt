@@ -55,11 +55,11 @@ fun AgentCard(id: String) {
             Label("$time · ${bg.steps} steps", size = 9.sp)
         }
         Spacer(Modifier.height(6.dp))
-        Text(bg.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        Text(Md.plain(bg.title), maxLines = 2, overflow = TextOverflow.Ellipsis,
             style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink))
         Spacer(Modifier.height(6.dp))
         val line = when {
-            bg.live -> bg.last.ifBlank { if (bg.status == BgAgents.QUEUED) "Starts when a slot is free" else "Getting started" }
+            bg.live -> Md.plain(bg.last).ifBlank { if (bg.status == BgAgents.QUEUED) "Starts when a slot is free" else "Getting started" }
             else -> Md.plain(bg.result).ifBlank { head }
         }
         if (bg.status == BgAgents.RUNNING && !bg.waiting) Shimmer("$head: ${line.take(80)}", Modifier.fillMaxWidth())

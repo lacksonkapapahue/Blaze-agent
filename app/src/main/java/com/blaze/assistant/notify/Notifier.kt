@@ -203,7 +203,9 @@ object Notifier {
     private const val CH_PROACTIVE = "blaze_proactive"
 
     /** Blaze speaking up on its own, with a one-tap suggestion and an inline reply. */
-    fun proactive(text: String, suggest: String, urgent: Boolean) {
+    fun proactive(text0: String, suggest: String, urgent: Boolean) {
+        // v0.28.1: notification text never shows markdown symbols.
+        val text = com.blaze.assistant.ui.Md.plain(text0)
         // Kept in the Heads-ups chat (even when notifications are off) so a reply has the context (v0.8.0).
         val chatId = try { Agent.recordHeadsUp(text) } catch (_: Exception) { null }
         if (!allowed()) return
@@ -225,7 +227,8 @@ object Notifier {
     }
 
     private const val ID_QUESTION = 7
-    fun question(q: String) {
+    fun question(q0: String) {
+        val q = com.blaze.assistant.ui.Md.plain(q0)
         needs(q)
         if (!allowed()) return
         val n = NotificationCompat.Builder(app, CH_REPLY).setSmallIcon(R.drawable.ic_stat_blaze).setColor(ACCENT)
@@ -239,7 +242,8 @@ object Notifier {
     fun clearReplies() = NotificationManagerCompat.from(app).cancel(ID_REPLY)
 
     /** Approval request with Allow / Don't buttons. */
-    fun confirm(title: String, detail: String, action: String) {
+    fun confirm(title: String, detail0: String, action: String) {
+        val detail = com.blaze.assistant.ui.Md.plain(detail0)
         needs(title)
         if (!allowed()) return
         val n = NotificationCompat.Builder(app, CH_REPLY)

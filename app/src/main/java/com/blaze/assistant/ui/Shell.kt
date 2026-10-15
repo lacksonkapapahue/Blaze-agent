@@ -394,7 +394,7 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
                             if (running) m.alpha(pulse).border(1.5.dp, c.accent, CircleShape) else m.background(c.accent.copy(alpha = 0.85f)) })
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(s.text, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = if (running) c.sub else c.body))
+                            Text(Md.inline(s.text, c.accent, c.hair.copy(alpha = 0.35f)), style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = if (running) c.sub else c.body))
                             if (exact && s.meta.isNotBlank()) Text(s.meta, maxLines = 3, overflow = TextOverflow.Ellipsis,
                                 style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.sub))
                         }

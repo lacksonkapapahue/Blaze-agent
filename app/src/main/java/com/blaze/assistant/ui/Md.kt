@@ -26,8 +26,8 @@ object Md {
                 withStyle(SpanStyle(fontFamily = Type.Mono, fontSize = 13.sp, background = codeBg)) { append(raw) }
                 if (i < lines.lastIndex) append('\n'); return@forEachIndexed
             }
-            var line = raw
-            val heading = Regex("^\\s{0,3}(#{1,6})\\s+(.*)$").find(line)
+            var line = tidy(raw)
+            val heading = Regex("^\\s{0,3}(#{1,6})\\s+(.*)$").find(line) ?: Regex("^\\s{0,3}(#{2,6})(?=[^#\\s])(.*)$").find(line)
             when {
                 heading != null -> {
                     val level = heading.groupValues[1].length
@@ -73,6 +73,23 @@ object Md {
         }
         append(s.substring(last))
     }
+
+    /**
+     * v0.28.1: a marker left open (a reply still streaming "**Offline mo", or a stray "**") is hidden instead of
+     * shown raw: an odd number of `**` / `__` / `` ` `` / `~~` drops the last unmatched one.
+     */
+    fun tidy(line: String): String {
+        var t = line
+        for (m in listOf("**", "__", "~~")) {
+            val n = Regex(Regex.escape(m)).findAll(t).count()
+            if (n % 2 == 1) { val i = t.lastIndexOf(m); t = t.removeRange(i, i + m.length) }
+        }
+        if (t.count { it == '`' } % 2 == 1) { val i = t.lastIndexOf('`'); t = t.removeRange(i, i + 1) }
+        return t
+    }
+
+    /** One line or a short label (step lines, card titles) with its inline markdown rendered. */
+    fun inline(src: String, accent: Color, codeBg: Color): AnnotatedString = render(src.replace('\n', ' '), accent, codeBg)
 
     /** Plain text for copy, speech and notifications. */
     fun plain(src: String): String = render(src, Color.Unspecified, Color.Unspecified).text

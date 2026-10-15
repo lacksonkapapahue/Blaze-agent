@@ -100,7 +100,8 @@ object AndroidControl {
 
     private var nextNote = 500
 
-    private fun notify(ctx: Context, title: String, text: String, progress: Int, onTap: String): String {
+    private fun notify(ctx: Context, title: String, text0: String, progress: Int, onTap: String): String {
+        val text = com.blaze.assistant.ui.Md.plain(text0)
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel("blaze_custom", "Blaze notes", NotificationManager.IMPORTANCE_DEFAULT))
         val b = NotificationCompat.Builder(ctx, "blaze_custom").setSmallIcon(R.drawable.ic_stat_blaze)

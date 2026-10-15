@@ -216,7 +216,7 @@ private fun AssistPanelBody(autoListen: Boolean, onClose: () -> Unit, onPin: () 
                                     style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = Glass.sub))
                             }
                             else -> SelectionContainer {
-                                Text(if (m.role == Role.BLAZE) Md.render(m.text, Glass.cyan, Glass.raised2) else AnnotatedString(m.text),
+                                Text(if (m.role == Role.BLAZE || m.role == Role.USER) Md.render(m.text, Glass.cyan, Glass.raised2) else AnnotatedString(m.text),
                                     style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 22.sp,
                                         color = if (m.role == Role.ERROR) Glass.orange else Glass.text))
                             }

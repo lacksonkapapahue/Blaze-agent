@@ -251,7 +251,7 @@ fun SentBubble(text: String, quoted: String, media: List<String>, files: List<St
                     }
                 }
                 if (words.isNotBlank() || quoted.isNotBlank()) {
-                    Text(words, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
+                    Text(remember(words, c.paper) { Md.render(words, c.paper, c.paper.copy(alpha = 0.16f)) }, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
                         style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.paper))
                 }
             }
