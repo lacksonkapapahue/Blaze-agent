@@ -57,7 +57,7 @@ object BrowserTools {
     )
 
     fun describe(name: String, a: JSONObject): String = when (name) {
-        "browser_open" -> "Browsing ${a.optString("url").take(50)}"
+        "browser_open" -> "Browsing ${com.blaze.assistant.agent.ToolLeak.fixBlazeUrl(a.optString("url")).take(50)}"
         "browser_read" -> "Reading the page"
         "browser_click" -> "Clicking ${a.optString("text").ifBlank { "#" + a.optInt("number") }}"
         "browser_type" -> "Typing in the page"
@@ -73,7 +73,8 @@ object BrowserTools {
 
     suspend fun run(ctx: Context, name: String, a: JSONObject): String = try {
         when (name) {
-            "browser_open" -> BrowserEngine.open(ctx, a.optString("url"), a.optBoolean("new_tab", false), a.optBoolean("private", false)).also { if (a.optBoolean("show")) show(ctx) }
+            // v0.28.2: a guessed Blaze repo URL (wrong owner / case) opens the real repo.
+            "browser_open" -> BrowserEngine.open(ctx, com.blaze.assistant.agent.ToolLeak.fixBlazeUrl(a.optString("url")), a.optBoolean("new_tab", false), a.optBoolean("private", false)).also { if (a.optBoolean("show")) show(ctx) }
             "browser_read" -> BrowserEngine.read(ctx)
             "browser_click" -> BrowserEngine.click(ctx, if (a.has("number")) a.optInt("number") else null, a.optString("text").ifBlank { null })
             "browser_type" -> BrowserEngine.type(ctx, if (a.has("number")) a.optInt("number") else null, a.optString("label").ifBlank { null },

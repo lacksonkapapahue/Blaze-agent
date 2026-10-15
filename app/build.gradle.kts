@@ -11,8 +11,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 97
-        versionName = "0.28.1"
+        versionCode = 98
+        versionName = "0.28.2"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -67,6 +67,137 @@ android {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- v0.28.2 blaze-docs
+// Blaze's knowledge about itself, generated from this repo at build time into assets/blaze-docs/ (README, CHANGELOG split
+// per version, STATUS, docs/, the hand-written app/blaze-docs/about.md with the build's version, commit and SDK levels, and
+// a manifest). On the first launch after an update the app chunks it into blaze.db (blaze_docs + blaze_docs_fts) and the
+// model looks it up with blaze_docs_search / blaze_docs_read; none of it goes into the prompt. Secrets, account IDs and
+// e-mail addresses are scrubbed here and again when indexing (agent/BlazeDocs.kt, BlazeDocsTest).
+abstract class BlazeDocsTask : DefaultTask() {
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE) abstract val sources: ConfigurableFileCollection
+    @get:Input abstract val versionName: Property<String>
+    @get:Input abstract val versionCode: Property<Int>
+    @get:Input abstract val minSdk: Property<Int>
+    @get:Input abstract val targetSdk: Property<Int>
+    @get:Input abstract val compileSdk: Property<Int>
+    @get:Input abstract val commit: Property<String>
+    @get:Input abstract val built: Property<String>
+    @get:Internal abstract val repoDir: DirectoryProperty
+    @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+    private fun scrub(s: String): String {
+        var t = s
+        val rules = listOf(
+            Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""") to "[email]",
+            Regex("""\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b""") to "[token]",
+            Regex("""\bsk-[A-Za-z0-9_\-]{16,}\b|\bAIza[0-9A-Za-z_\-]{30,}\b|\bxox[abprs]-[A-Za-z0-9\-]{10,}\b""") to "[key]",
+            Regex("""\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b""") to "[token]",
+            Regex("""\b\d{6,}-[a-z0-9]{20,}\.apps\.googleusercontent\.com\b""") to "[client-id]",
+            Regex("""\b[a-z][a-z0-9\-]{2,24}-\d{6}\b""") to "[project-id]",
+            Regex("""\b[0-9a-fA-F]{32,}\b""") to "[id]",
+            Regex("""(?i)\b(store|key)Password\s*=\s*"[^"]*"""") to "$1Password = \"[redacted]\"",
+        )
+        for ((re, rep) in rules) t = re.replace(t, rep)
+        return t
+    }
+
+    @TaskAction fun run() {
+        val root = repoDir.get().asFile
+        val out = outputDir.get().asFile.resolve("blaze-docs")
+        out.deleteRecursively(); out.mkdirs()
+        val files = LinkedHashMap<String, String>()
+        fun put(name: String, text: String) { if (text.isNotBlank()) files[name] = scrub(text.replace("\r\n", "\n")) }
+        val about = root.resolve("app/blaze-docs/about.md")
+        if (about.isFile) put("about.md", about.readText()
+            .replace("{{VERSION}}", versionName.get()).replace("{{VERSION_CODE}}", versionCode.get().toString())
+            .replace("{{COMMIT}}", commit.get()).replace("{{BUILT}}", built.get())
+            .replace("{{MIN_SDK}}", minSdk.get().toString()).replace("{{TARGET_SDK}}", targetSdk.get().toString())
+            .replace("{{COMPILE_SDK}}", compileSdk.get().toString()))
+        root.resolve("README.md").takeIf { it.isFile }?.let { put("readme.md", it.readText()) }
+        root.resolve("STATUS.md").takeIf { it.isFile }?.let { put("status.md", it.readText()) }
+        // CHANGELOG: one file per version ("## v0.28.1: …"), plus an index of every version, newest first.
+        root.resolve("CHANGELOG.md").takeIf { it.isFile }?.let { f ->
+            val index = StringBuilder("# Changelog: every version, newest first\n\n")
+            var head: String? = null; val body = StringBuilder(); val used = HashSet<String>()
+            fun flush() {
+                val h = head ?: return
+                val ver = Regex("""^##\s+(v?\d[0-9A-Za-z.\-]*)""").find(h)?.groupValues?.get(1)?.trimEnd('.', ':') ?: "entry"
+                var slug = ver.lowercase().let { if (it.startsWith("v") || it == "entry") it else "v$it" }
+                var n = 2; val base = slug
+                while (!used.add(slug)) slug = "$base-${n++}"
+                put("changelog/$slug.md", "# Changelog " + h.removePrefix("##").trim() + "\n" + body.toString())
+                index.append("- ").append(h.removePrefix("##").trim()).append('\n')
+            }
+            for (line in f.readText().replace("\r\n", "\n").lines()) {
+                if (line.startsWith("## ")) { flush(); head = line; body.setLength(0) } else if (head != null) body.append(line).append('\n')
+            }
+            flush()
+            put("changelog/index.md", index.toString())
+        }
+        root.resolve("docs").takeIf { it.isDirectory }?.walkTopDown()?.filter { it.isFile && it.extension == "md" }?.sortedBy { it.path }?.forEach {
+            put("docs/" + it.relativeTo(root.resolve("docs")).invariantSeparatorsPath, it.readText())
+        }
+        val md = java.security.MessageDigest.getInstance("SHA-1")
+        for ((n, t) in files) {
+            val f = out.resolve(n); f.parentFile.mkdirs(); f.writeText(t)
+            md.update(n.toByteArray()); md.update(0); md.update(t.toByteArray()); md.update(1)
+        }
+        val hash = md.digest().joinToString("") { "%02x".format(it) }
+        fun q(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        out.resolve("manifest.json").writeText("{\n  \"version\": ${q(versionName.get())},\n  \"versionCode\": ${versionCode.get()},\n" +
+            "  \"commit\": ${q(commit.get())},\n  \"built\": ${q(built.get())},\n  \"hash\": ${q(hash)},\n" +
+            "  \"files\": [" + files.keys.joinToString(", ") { q(it) } + "]\n}\n")
+    }
+}
+
+val repoRoot: File = rootProject.projectDir
+val gitOut: (List<String>) -> String = { args ->
+    try {
+        val p = ProcessBuilder(listOf("git") + args).directory(repoRoot).redirectErrorStream(true).start()
+        val s = p.inputStream.bufferedReader().readText().trim()
+        if (p.waitFor() == 0) s.lines().lastOrNull().orEmpty().trim() else ""
+    } catch (_: Exception) { "" }
+}
+val docVersionName = android.defaultConfig.versionName ?: "unknown"
+val docVersionCode = android.defaultConfig.versionCode ?: 0
+val docMinSdk = android.defaultConfig.minSdk ?: 0
+val docTargetSdk = android.defaultConfig.targetSdk ?: 0
+val docCompileSdk = android.compileSdk ?: 0
+val docCommit = (System.getenv("GITHUB_SHA") ?: "").ifBlank { gitOut(listOf("rev-parse", "HEAD")) }.take(12).ifBlank { "unknown" }
+val docBuilt = gitOut(listOf("log", "-1", "--format=%cs")).ifBlank { "unknown" }
+val docSources = listOf(rootProject.file("README.md"), rootProject.file("CHANGELOG.md"), rootProject.file("STATUS.md"),
+    rootProject.fileTree("docs") { include("**/*.md") }, file("blaze-docs"))
+val repoDirectory = rootProject.layout.projectDirectory
+val fromRepo: BlazeDocsTask.() -> Unit = {
+    sources.from(docSources)
+    versionName.set(docVersionName)
+    versionCode.set(docVersionCode)
+    minSdk.set(docMinSdk)
+    targetSdk.set(docTargetSdk)
+    compileSdk.set(docCompileSdk)
+    commit.set(docCommit)
+    built.set(docBuilt)
+    repoDir.set(repoDirectory)
+}
+
+// One generator per variant, wired as a generated assets folder (AGP owns its output path).
+androidComponents {
+    onVariants { v ->
+        val t = tasks.register<BlazeDocsTask>("generate" + v.name.replaceFirstChar { it.uppercase() } + "BlazeDocs") { fromRepo() }
+        v.sources.assets?.addGeneratedSourceDirectory(t, BlazeDocsTask::outputDir)
+    }
+}
+
+// BlazeDocsTest reads the generated docs exactly as they ship (same generator, its own output folder).
+val blazeDocsForTests = tasks.register<BlazeDocsTask>("generateBlazeDocsForTests") {
+    fromRepo()
+    outputDir.set(layout.buildDirectory.dir("generated/blazeDocsTest"))
+}
+tasks.withType<Test>().configureEach {
+    dependsOn(blazeDocsForTests)
+    systemProperty("blaze.docs.dir", layout.buildDirectory.dir("generated/blazeDocsTest/blaze-docs").get().asFile.path)
 }
 
 dependencies {

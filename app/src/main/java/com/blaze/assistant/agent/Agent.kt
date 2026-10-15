@@ -32,7 +32,9 @@ data class ChatMessage(val id: Long, val role: Role, val text: String, val files
                        /** When it was added (ms); 0 for chats saved before v1.13. */
                        val at: Long = System.currentTimeMillis(),
                        /** v0.26.1: how long the model's reasoning streamed (ms), for "Thought it through · 4 s"; 0 = not measured. */
-                       val thinkMs: Long = 0L)
+                       val thinkMs: Long = 0L,
+                       /** v0.28.2: on the first step of a turn, when that turn really started (ms; a retry or a wake starts a new one); 0 = unknown. */
+                       val startAt: Long = 0L)
 
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
 object ReplyParts {
@@ -83,7 +85,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "memory_search", "search_past_chats", "gmail_search", "gmail_read",
         "gcal_events", "calendar_events", "drive_search", "gcontacts_search", "find_contact", "recent_notifications", "read_messages",
         "recent_calls", "device_status", "battery_level", "github_issues", "github_my_prs", "github_notifications", "github_search_repos",
-        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing")
+        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing", BlazeDocs.TOOL_SEARCH, BlazeDocs.TOOL_READ)
 
     private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url", "search_in_app")
     private val ids = AtomicLong(1)
@@ -223,6 +225,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     /** Every chat that's open or still working, by id. */
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
     @Volatile private var cur: Session = Session("boot")
+
+    /** v0.28.2: when the open chat's current turn started (the live work card's clock before its first step). */
+    val turnStartAt: Long get() = cur.turnAt
 
     private fun show(s: Session) {
         cur = s
@@ -404,7 +409,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             val files = m.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { java.io.File(it).exists() } ?: emptyList()
-            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"), thinkMs = m.optLong("think_ms"))
+            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"), thinkMs = m.optLong("think_ms"), startAt = m.optLong("start_at"))
             if (m.has("mark")) s.historyMark[mid] = m.getInt("mark")
         }
         ids.set(maxOf(ids.get(), maxId + 1))
@@ -694,6 +699,8 @@ When you finish, say what you did in one short sentence.
             append("\nIf a tool you need isn't in your list, call load_tools with its group, then carry on.")
             // v0.28.1: models sometimes wrote "[/find_tool need=…]" as the reply instead of calling the tool.
             append("\n" + ToolLeak.PROMPT_RULE)
+            // v0.28.2 blaze-docs: one static line + the repo URL; the docs themselves are looked up (blaze_docs_search), never pasted here.
+            append(BlazeDocs.PROMPT_LINE)
             append("\nEverything you create that keeps running (alarms, timers, routines, triggers, calendar events, jobs) gets an ID like R4. To change, stop or delete one, call processes to find the ID, then process(id, action). Only use action=details when the user asks for specifics.")
             // v0.24.3: the core skills' pinned rules (voice, task workflow, views, specialists, workflows, coding), every turn,
             // read from the shipped assets and static, so they stay in the cached prefix.
@@ -776,6 +783,7 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.update.Updater.tool())
         t.put(com.blaze.assistant.ui.Views.tool())
         t.put(SelfKnowledge.tool())
+        BlazeDocs.tools().forEach { t.put(it) }
         t.put(BlazeRouter.tool())
         t.put(com.blaze.assistant.desktop.LinuxDesktop.tool())
         if (Settings.longChat || Mind.ready) LongChat.tools().forEach { t.put(it) }
@@ -818,8 +826,11 @@ When you finish, say what you did in one short sentence.
         com.blaze.assistant.routine.Routines.tools().forEach { t.put(it) }
         com.blaze.assistant.phone.Skills.definitions().forEach { t.put(it) }
         if (Settings.phoneControl) { val p = PhoneTools.definitions(); for (i in 0 until p.length()) t.put(p.get(i)) }
-        return ToolGuide.apply(t)
+        return ToolGuide.apply(t).also { try { BlazeDocs.noteTools(it) } catch (_: Throwable) { } }
     }
+
+    /** v0.28.2: the real tool list (for the blaze-docs tool reference, indexed at startup). */
+    suspend fun toolCatalog(): JSONArray = tools()
 
     /** True while Blaze's own screen is visible. */
     @Volatile var inForeground = false
@@ -935,6 +946,16 @@ When you finish, say what you did in one short sentence.
         /** The generic step just added for the running tool; a tool's own step line replaces its text. */
         var autoStepId = -1L
 
+        /**
+         * v0.28.2 (Luke's "Worked · 4 steps · 97m 45s" for 33 s of steps): when the turn in progress started. The work card
+         * used to time a turn from the message before its steps, so a Retry or a background agent's wake ran the clock
+         * from a message sent long before. The first step of each turn now carries this ([ChatMessage.startAt]).
+         */
+        @Volatile var turnAt = 0L
+        @Volatile private var turnStamped = true
+
+        fun beginTurn(at: Long = System.currentTimeMillis()) { turnAt = at; turnStamped = false }
+
         fun add(role: Role, text: String, files: List<String> = emptyList()): Long {
             if (role == Role.STEP && autoStepId >= 0 && msgs.lastOrNull()?.id == autoStepId) {
                 val sid = autoStepId; autoStepId = -1L
@@ -944,7 +965,8 @@ When you finish, say what you did in one short sentence.
             }
             autoStepId = -1L
             val id = ids.getAndIncrement()
-            msgs = msgs + ChatMessage(id, role, if (role == Role.ERROR) PlainError.of(text) else text, files)
+            val start = if (role == Role.STEP && !turnStamped && turnAt > 0) { turnStamped = true; turnAt } else 0L
+            msgs = msgs + ChatMessage(id, role, if (role == Role.ERROR) PlainError.of(text) else text, files, startAt = start)
             if (role == Role.STEP && mood != Mood.IDLE) status = text
             if (role == Role.STEP && !inForeground && mood != Mood.IDLE) Notifier.working(if (currentStep > 0) "Step $currentStep · $text" else text)
             return id
@@ -1013,6 +1035,7 @@ When you finish, say what you did in one short sentence.
                         if (m.at > 0) put("at", m.at)
                         if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
                         if (m.thinkMs > 0) put("think_ms", m.thinkMs)
+                        if (m.startAt > 0) put("start_at", m.startAt)
                     })
             }
             val hist = JSONArray()
@@ -1072,6 +1095,7 @@ When you finish, say what you did in one short sentence.
             LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
             // Files with a thumbnail first, so the bubble pairs thumbnails with their names (v0.24.6).
             val id = add(Role.USER, shown, attachments.sortedBy { if (it.thumb != null) 0 else 1 }.map { it.name })
+            beginTurn(msgs.lastOrNull { it.id == id }?.at ?: System.currentTimeMillis())
             attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
             historyMark[id] = history.length()
             // Heads-ups Blaze posted into this chat as notifications, and the one being replied to: the model
@@ -1181,6 +1205,7 @@ When you finish, say what you did in one short sentence.
             list.drop(userIdx + 1).forEach { historyMark.remove(it.id) }
             msgs = list.take(userIdx + 1)
             Voice.lastTurnByVoice = false
+            beginTurn()
             job = scope.launch(ctxTag) { runLoop() }
         }
 
@@ -1193,6 +1218,7 @@ When you finish, say what you did in one short sentence.
             history.put(JSONObject().put("role", "user").put("content", text))
             mood = Mood.THINKING
             Voice.lastTurnByVoice = false
+            beginTurn()
             job = scope.launch(ctxTag) { runLoop() }
         }
 
@@ -1230,6 +1256,8 @@ When you finish, say what you did in one short sentence.
                 (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs) +
                 // v0.27.x: "how do I install X" → lead with the action and end with one concrete offer to do it.
                 AnswerStyle.turnHint(lastUserText()) +
+                // v0.28.2: "take me to the blaze-agent repo" / "what version are you": look it up in Blaze's docs, never guess.
+                (if (BlazeDocs.isAboutBlaze(lastUserText())) BlazeDocs.TURN_HINT else "") +
                 // v0.26.1: an in-chat diagram / chart is drawn in the reply itself (no files, preview or use_skill).
                 (if (turnView == null && turnDesignNote.isEmpty() && Settings.bool("rich_replies", true) && VisualRoute.inChat(lastUserText())) VisualRoute.HINT else "")
             val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", sys))
@@ -1384,9 +1412,12 @@ When you finish, say what you did in one short sentence.
                 turnSkills = SkillMatch.forTurn(userNow)
                 // v0.26.2: a phone-state question ("am I on mute?") is answered from the Phone now line: no skill packs, no tool loop.
                 val stateQ = !routine && PhoneState.kind(userNow) != null
-                if (stateQ) turnSkills = SkillMatch.Result.NONE
+                // v0.28.2: a question about Blaze itself ("take me to blaze-agent repo in github") is a docs lookup: no coding skills
+                // (≈ 6,000 chars of them were pulled in by "repo" / "github") and no Coder specialist.
+                val selfQ = !routine && BlazeDocs.isAboutBlaze(userNow)
+                if (stateQ || selfQ) turnSkills = SkillMatch.Result.NONE
                 // v0.24.3 specialists: the matching specialist(s) bring their skill packs and the delegate tool.
-                turnSpecs = if (routine || stateQ || agentId != null || !Settings.bool("specialists_on", true)) emptyList()
+                turnSpecs = if (routine || stateQ || selfQ || agentId != null || !Settings.bool("specialists_on", true)) emptyList()
                     else try { SpecialistMatch.match(userNow, Specialists.all()) } catch (_: Exception) { emptyList() }
                 if (turnSpecs.isNotEmpty()) {
                     turnSkills = SpecialistMatch.attach(turnSkills, turnSpecs, SkillMatch.cached())
@@ -2124,7 +2155,7 @@ When you finish, say what you did in one short sentence.
                     L.askPc(args.optString("task"), args.optBoolean("new_conversation")) { line -> add(Role.STEP, "${L.pcName}: ${line.take(90)}") }
                 }
                 "web_search" -> { add(Role.STEP, "Searching the web for \u201c${args.optString("query").take(50)}\u201d"); Web.search(args.optString("query")) }
-                "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(args.optString("url")) }
+                "fetch_page" -> { add(Role.STEP, "Reading ${args.optString("url").removePrefix("https://").take(50)}"); Web.fetch(ToolLeak.fixBlazeUrl(args.optString("url"))) }
                 "blazerouter" -> { add(Role.STEP, "BlazeRouter: " + args.optString("action")); BlazeRouter.run(app, args) }
                 "desktop" -> {
                     // v0.25.5: the step line comes from Friendly.say (DesktopNarration), the same words as the live desktop card.
@@ -2132,6 +2163,8 @@ When you finish, say what you did in one short sentence.
                         confirm = { title, detail -> confirm(title, detail, "Allow") },
                         open = { com.blaze.assistant.ui.Views.open("linux") })
                 }
+                BlazeDocs.TOOL_SEARCH -> { add(Role.STEP, "Looking it up in Blaze's docs"); kotlinx.coroutines.withContext(Dispatchers.IO) { BlazeDocs.search(args) } }
+                BlazeDocs.TOOL_READ -> { add(Role.STEP, "Reading Blaze's docs"); kotlinx.coroutines.withContext(Dispatchers.IO) { BlazeDocs.read(args) } }
                 SelfKnowledge.TOOL -> { add(Role.STEP, "Checking my own setup"); kotlinx.coroutines.withContext(Dispatchers.IO) { SelfKnowledge.report(app, args.optString("section")) } }
                 com.blaze.assistant.ui.Views.TOOL -> {
                     val v = com.blaze.assistant.ui.Views.find(args.optString("view"))

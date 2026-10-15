@@ -26,7 +26,7 @@ Phones already on a rotated build won't accept an APK signed only with the local
 - `voice/`, `routine/`, `widget/`, `notify/`, `assist/`, `proactive/`, `update/`
 
 ## Status
-v0.28.1 (versionCode 97) is the current build on `main` (batch 1 fixes: instant Magic Hand grab card, no leaked tool calls, resumable updates, Markdown everywhere, picture stack + 3D viewer, table cards). Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
+v0.28.2 (versionCode 98) is the current build on `main` (blaze-docs: Blaze looks up its own docs (repos, versions, features, settings) in blaze.db instead of guessing; the work card shows the real run time). Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release. CI (GitHub Actions) builds the signed release APK on every push and
 publishes it as `Blaze-v<version>.apk` on the `apk` branch.
 
 **Version numbers.** From v0.8.0 Blaze for Android uses the same 0.x numbering as Blaze Desktop and Blaze CLI. The builds
@@ -39,6 +39,9 @@ The browser's VPN (⋯ › VPN & privacy, or the `browser_vpn` tool) works with 
 
 ## Linux desktop (v0.25.1)
 Settings › Advanced › Desktop (Linux) installs and runs a real XFCE desktop inside Blaze's Alpine Linux, shown full screen with touch-mouse and keyboard. Blaze can use it too (`desktop` tool). See CHANGELOG.md.
+
+## Blaze docs (v0.28.2)
+Blaze knows itself by looking it up, not from prompt text. At build time `BlazeDocsTask` (`app/build.gradle.kts`) writes `assets/blaze-docs/` from this repo: README, CHANGELOG (one file per version), STATUS, `docs/`, and `app/blaze-docs/about.md` (repos and exact URLs, releases, /update, tech stack, feature and settings maps, privacy, limits) filled in with the build's version, commit and SDK levels; secrets, account IDs and e-mail addresses are scrubbed. On the first launch after an update the app chunks it by heading into blaze.db (`blaze_docs` + FTS5 `blaze_docs_fts`, with a tool reference built from the real tool list) and the model uses `blaze_docs_search` / `blaze_docs_read`. The system prompt only gets one line and the repo URL. Edit `app/blaze-docs/about.md` when something it states changes.
 
 ## One mind
 One continuous conversation instead of separate chats (projects keep their own threads; **Fresh start** clears the context, nothing is deleted). `filesDir/blaze.db` (the same schema as Desktop and CLI; before v0.26.3 it was `databases/mind.db`, kept as is after the upgrade) holds the **journal** (every turn, old chats imported once) and the **memories** table (profile, preference, person, project, decision, fact), both searchable. The prompt carries only a pinned core and a subject index; Blaze looks the rest up with `memory_search` / `search_chat`. Old chats stay on disk and in the journal (Blaze finds them with `search_chat`); since v0.24.0 there is no chat list or Archive screen, and `/clear` empties the screen without forgetting anything. Settings › Memory & learning › *Review past conversations when idle*. Shared schema and prompt text: `docs/plans/plan-one-mind.md` in Blaze-dekstop.

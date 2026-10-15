@@ -922,4 +922,18 @@ class ShotsTest {
             }
         }
     }
+
+    // ---------- v0.28.2 blaze-docs ----------
+    // "where is your source code": one docs lookup, the exact repo link, and the work card's real run time (2 s, not 97 min).
+    @Test fun blazeDocsRepo() = shot("71-blaze-docs-repo") {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            UserBubble("where is your source code")
+            WorkCard(listOf(ChatMessage(71, Role.STEP, "Looking it up in Blaze's docs", at = t0 + 1_000, startAt = t0)), live = false,
+                startAt = WorkTime.start(listOf(ChatMessage(71, Role.STEP, "x", at = t0 + 1_000, startAt = t0)), t0 - 97 * 60_000L),
+                endAt = t0 + 2_000, open0 = true)
+            BlazeReply(72, "My source code is on GitHub: [lacksonkapapahue/Blaze-agent](https://github.com/lacksonkapapahue/Blaze-agent). " +
+                "It's Kotlin with Jetpack Compose. Blaze Desktop is [Blaze-dekstop](https://github.com/lacksonkapapahue/Blaze-dekstop) and the CLI is " +
+                "[Blaze-cli](https://github.com/lacksonkapapahue/Blaze-cli).", GroupPos.SINGLE)
+        }
+    }
 }

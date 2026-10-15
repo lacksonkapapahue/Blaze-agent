@@ -22,7 +22,7 @@ import org.json.JSONArray
  * The behaviour is Mind.Db's (dedupe through [Mind.decide], the same search ranking, the same journal rules); only
  * the storage moved. Pure JVM over [Sql]: the phone runs it on the bundled SQLite (AndroidSql), tests on sqlite-jdbc.
  */
-class MindStore(val blaze: BlazeDb, private val sql: Sql) : Mind.Store {
+class MindStore(val blaze: BlazeDb, val sql: Sql) : Mind.Store {
 
     override val fts: Boolean get() = true
 
