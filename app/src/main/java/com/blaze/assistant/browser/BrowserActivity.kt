@@ -50,6 +50,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.Icon
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -332,7 +333,7 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
         // Bottom bar: back, forward, home, the mascot (pointer), tabs, menu.
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween) {
-            GlassIconButton(Icons.Rounded.ArrowBack, "Back", size = 42.dp, bg = Color.Transparent, enabled = tab?.canBack == true) { tab?.web?.goBack() }
+            GlassIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", size = 42.dp, bg = Color.Transparent, enabled = tab?.canBack == true) { tab?.web?.goBack() }
             GlassIconButton(Icons.Rounded.ArrowForward, "Forward", size = 42.dp, bg = Color.Transparent, enabled = tab?.canForward == true) { tab?.web?.goForward() }
             GlassIconButton(Icons.Rounded.Home, "Start page", size = 42.dp, bg = Color.Transparent) { tab?.let { BrowserEngine.load(it, "about:blank") }; panel = Panel.NONE; pointer = false }
             Box(Modifier.size(50.dp).clip(CircleShape).background(if (pointer) Glass.raised2 else Glass.raised)

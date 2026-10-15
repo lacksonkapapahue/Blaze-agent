@@ -922,4 +922,54 @@ class ShotsTest {
             }
         }
     }
+
+    // v0.28.3 project chats: the project page with the round back button (Luke's A12, dark), a project chat screen inside
+    // Projects (project name over the chat title, same thread and composer as Chat), and main Chat unchanged after it.
+    private val pcChats = listOf(ChatMeta("pc1", "Store Feature Preferences", t0, false, "[github_open repo=\"LacksonKapapa/Blaze-Agent\"]"),
+        ChatMeta("pc2", "Launch checklist", t0, false, "Five steps left before the beta"))
+    @Test fun projectPageBack() = shot("71-project-page-back", dark = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("projects", {}, {}, {}, true, {}, "Luke", {})
+            ProjectsPane(listOf(Project("p9", "New project", chats = listOf("pc1", "pc2"))), pcChats, busy = emptySet(), needsYou = emptySet(), openId = "p9",
+                onOpen = {}, onBack = {}, onCreate = {}, onChat = {}, onNewChat = {}, onInstructions = { _, _ -> }, onDelete = {})
+        }
+    }
+    @Test fun projectChatScreen() = shot("72-project-chat", dark = true) {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("projects", {}, {}, {}, true, {}, "Luke", {})
+            ProjectChatHeader("New project", "Launch checklist", onBack = {}, onRename = {}, onDelete = {}, onNewChat = {})
+            Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp)) {
+                UserBubble("What's left before the beta?", pos = GroupPos.SINGLE)
+                MetaLine(Side.ME, "17:31", listOf("Copy" to {}, "Retry" to {}))
+                Spacer(Modifier.height(16.dp))
+                BlazeReply(81, "Five things:\n\n1. **Sign-in** on the A12\n2. Store screenshots\n3. Privacy page\n4. Crash check\n5. Beta invite text", GroupPos.SINGLE)
+                MetaLine(Side.BLAZE, "17:31", listOf("Copy" to {}, "Quote" to {}, "Retry" to {}))
+            }
+            Composer(TextFieldValue(""), {}, busy = false, canSend = false, plusOpen = false, chip = "", agents = 0,
+                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {}, hints = listOf("Ask about this project…"))
+        }
+    }
+    @Test fun projectChatEmpty() = shot("73-project-chat-new") {
+        Column(Modifier.fillMaxSize()) {
+            ShellTopBar("projects", {}, {}, {}, true, {}, "Luke", {})
+            ProjectChatHeader("HomeGlow store", "", onBack = {}, onRename = {}, onDelete = {}, onNewChat = {}, canEdit = false)
+            Box(Modifier.weight(1f).fillMaxWidth()) { ProjectChatEmpty("HomeGlow store", hasInstructions = true) }
+            Composer(TextFieldValue(""), {}, busy = false, canSend = false, plusOpen = false, chip = "", agents = 0,
+                listening = false, speaking = false, onPlus = {}, onMic = {}, onSend = {}, onStop = {})
+        }
+    }
+    // Main Chat after opening a project chat: still the one main thread (the Chat pill never shows a project chat).
+    @Test fun mainChatUnchanged() = shot("74-main-chat-unchanged", dark = true) {
+        val nav = com.blaze.assistant.agent.ChatNav().openChat("p9", "pc2").switchTab(com.blaze.assistant.agent.ChatNav.CHAT)
+        check(nav.visibleChat == com.blaze.assistant.agent.Mind.MAIN)
+        Chat(busy = false)
+    }
+    // Every page's back button: settings header, gallery-style header, search.
+    @Test fun backButtons() = shot("75-back-buttons") {
+        Column(Modifier.fillMaxSize().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            BackTitle("Settings", onBack = {})
+            BackTitle("Launch checklist", onBack = {}, eyebrow = "New project", size = 18.sp)
+            Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) { BackButton({}); Text("Decks") }
+        }
+    }
 }
