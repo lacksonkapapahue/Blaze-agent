@@ -275,7 +275,8 @@ fun RichDiagram(d: RichReplies.Block.Diagram) {
     val label = "${DiagramRender.label(d.kind)} diagram"
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(cardBg).semantics { contentDescription = label }) {
         when (s) {
-            null -> Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentAlignment = Alignment.Center) {
+            // v0.27.0: a soft shimmer while the diagram is drawn (a plain fill with Remove animations on).
+            null -> Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).shimmer(c.faint, c.paper.copy(alpha = 0.35f), RoundedCornerShape(16.dp)), contentAlignment = Alignment.Center) {
                 Text("Drawing the diagram\u2026", style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.sub))
             }
             is DiagramRenderer.Outcome.Picture -> {

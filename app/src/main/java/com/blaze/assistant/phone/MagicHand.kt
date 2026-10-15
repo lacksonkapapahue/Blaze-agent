@@ -85,6 +85,11 @@ object MagicHand {
     private var grabBox: MagicHandLogic.Box? = null
     private var regrabJob: Job? = null
     private var grabGen = 0
+    // v0.27.0: Grab mode's drawing layer (circle or drag with a finger anywhere) and the box's Undo history.
+    private var drawView: DrawLayer? = null
+    private var drawLp: WindowManager.LayoutParams? = null
+    private val drawPts = ArrayList<MagicHandLogic.P>()
+    private val boxHistory = MagicHandBox.History()
     private val lit = mutableStateOf(false)
     private val carryingState = mutableStateOf(false)
 
@@ -116,6 +121,7 @@ object MagicHand {
         val n = f(old); _ui.value = n
         // The grab box lives as long as the grabbed-text card.
         if (old.panel == Panel.GRAB && n.panel != Panel.GRAB) hideBox()
+        if (old.grabMode != n.grabMode) drawActive(n.grabMode)
         carryingState.value = n.carrying
         updateDockFocus(n.panel == Panel.TEACH_REVIEW)
     }
@@ -145,7 +151,9 @@ object MagicHand {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         _ui.value = MagicHandState.start(isPrivate())
         insets(s, w)
+        com.blaze.assistant.ui.MotionTokens.refresh(s)
         addHighlight(s, w)
+        addDraw(s, w)
         addBox(s, w)
         addDock(s, w)
         addHand(s, w)
@@ -241,7 +249,7 @@ object MagicHand {
 
     private fun stopNow() {
         run {
-            if (!on && hand == null && dock == null && hi == null && boxView == null) { _ui.value = MagicHandState.close(); return@run }
+            if (!on && hand == null && dock == null && hi == null && boxView == null && drawView == null) { _ui.value = MagicHandState.close(); return@run }
             watchdog?.interrupt(); watchdog = null
             probeJob?.cancel(); probeJob = null
             svc?.let { keyFilter(it, false) }
@@ -249,12 +257,12 @@ object MagicHand {
             dockFocusable = false
             if (askedAgent && askJob?.isActive == true && Agent.mood.value != Mood.IDLE) try { Agent.stop() } catch (_: Throwable) { }
             askJob?.cancel(); askJob = null; askedAgent = false
-            regrabJob?.cancel(); regrabJob = null; grabBox = null
+            regrabJob?.cancel(); regrabJob = null; grabBox = null; boxHistory.clear(); drawPts.clear()
             scope?.cancel(); scope = null
             recorder = null; lastHit = null; pendingHit = null
             val w = wm
-            listOf(hand, hi, dock, boxView).forEach { v -> if (v != null) try { w?.removeViewImmediate(v) } catch (_: Exception) { } }
-            hand = null; hi = null; dock = null; handLp = null; dockLp = null; boxView = null; boxLp = null
+            listOf(hand, hi, dock, boxView, drawView).forEach { v -> if (v != null) try { w?.removeViewImmediate(v) } catch (_: Exception) { } }
+            hand = null; hi = null; dock = null; handLp = null; dockLp = null; boxView = null; boxLp = null; drawView = null; drawLp = null
             handOwner?.destroy(); handOwner = null
             dockOwner?.destroy(); dockOwner = null
             _ui.value = MagicHandState.close()
@@ -291,6 +299,8 @@ object MagicHand {
             onTeachSave = ::saveTeach,
             onTeachDiscard = { recorder?.clear(); recorder = null; set { MagicHandState.endTeach(it, "Discarded. Nothing was saved.") } },
             onTeachStart = { startTeach() },
+            onGrabUndo = ::undoBox,
+            onGrabAgain = { grabMode(true) },
         )
         val inner = composeView(s, owner) {
             val u by ui.collectAsState()
@@ -386,6 +396,9 @@ object MagicHand {
                     try { w.updateViewLayout(frame, lp) } catch (_: Exception) { }
                     points += MagicHandLogic.trailPoint(lp.x, lp.y, size, e.eventTime)
                     hi?.trail(points)
+                    // v0.27.0: once the drag is turning into a circle, show the box it will grab (never while just pointing).
+                    val u = _ui.value
+                    hi?.live(if (u.mode == MagicHandLogic.Mode.POINT && !u.private && MagicHandLogic.looping(points, density)) MagicHandBox.liveBox(points, dp(24)) else null)
                     // Pointing still reads what's under the flame tip.
                     if (e.eventTime - lastProbe > 90) { lastProbe = e.eventTime; val (tx, ty) = tip(); probe(tx, ty) }
                 }
@@ -394,10 +407,10 @@ object MagicHand {
                     val g = MagicHandLogic.classify(points, density, lastTapUp)
                     lastTapUp = if (g == Gesture.TAP) e.eventTime else 0L
                     val pts = points.toList()
-                    hi?.trail(emptyList())
+                    hi?.trail(emptyList()); hi?.live(null)
                     onGesture(g, pts)
                 }
-                MotionEvent.ACTION_CANCEL -> hi?.trail(emptyList())
+                MotionEvent.ACTION_CANCEL -> { hi?.trail(emptyList()); hi?.live(null) }
             }
             true
         }
@@ -465,6 +478,7 @@ object MagicHand {
     // ---------- dock ----------
     private fun onDockButton(b: DockButton) {
         when (b) {
+            DockButton.GRAB -> grabMode(!_ui.value.grabMode)
             DockButton.CLOSE -> stop()
             DockButton.TEACH -> {
                 if (!MagicHandGuard.canTeach(isPrivate())) { set { MagicHandState.back(it.copy(private = true), MagicHandGuard.PRIVATE_NOTE) }; return }
@@ -609,21 +623,122 @@ object MagicHand {
 
     // ---------- circle to grab ----------
     private fun grab(pts: List<MagicHandLogic.P>) {
-        val s = svc ?: return
-        if (!MagicHandGuard.canGrab(isPrivate())) { set { MagicHandState.back(it, MagicHandGuard.PRIVATE_NOTE) }; return }
         val (sw, sh) = screen()
         val b0 = MagicHandLogic.loopBounds(pts, sw, sh, (8 * density).toInt()) ?: return
-        val b = MagicHandBox.fit(b0, boxBounds(), dp(MagicHandBox.MIN_DP))
+        grabArea(b0)
+    }
+
+    /**
+     * v0.27.0: grab what's in [b0] (a circle drawn with the hand, or a circle / drag in Grab mode). The box shows at
+     * once (haptic tick), snaps to the text blocks under it (a second tick when it moves; Undo goes back to the drawn
+     * shape), and the text is read for the snapped box.
+     */
+    private fun grabArea(b0: MagicHandLogic.Box) {
+        val s = svc ?: return
+        if (!MagicHandGuard.canGrab(isPrivate())) { set { MagicHandState.back(it.copy(grabMode = false), MagicHandGuard.PRIVATE_NOTE) }; return }
+        val drawn = MagicHandBox.fit(b0, boxBounds(), dp(MagicHandBox.MIN_DP))
         regrabJob?.cancel()
         val gen = ++grabGen
-        showBox(b)
-        set { it.copy(note = "Reading what you circled\u2026") }
+        boxHistory.clear()
+        showBox(drawn)
+        tick(confirm = true)
+        val tips = tipsShown()
+        set { it.copy(grabMode = false, note = "Reading what you grabbed\u2026", canUndo = false) }
         regrabJob = scope?.launch {
-            val text = readText(s, b)
+            val around = MagicHandBox.window(drawn, maxOf(drawn.w, drawn.h) / 2)
+            val nodes = withContext(Dispatchers.Default) {
+                kotlinx.coroutines.withTimeoutOrNull(700) { try { MagicHandScreen.textBoxes(s, around) } catch (_: Exception) { emptyList() } }.orEmpty()
+            }
             if (gen != grabGen) return@launch
-            set { MagicHandState.grabbed(it.copy(note = ""), text, grabSource(s)) }
-            if (_ui.value.panel != Panel.GRAB) hideBox()
+            val snapped = MagicHandBox.snap(drawn, nodes, dp(MagicHandBox.SNAP_PAD_DP), boxBounds(), dp(MagicHandBox.MIN_DP))
+            val b = if (MagicHandBox.snapped(drawn, snapped, dp(4))) { boxHistory.push(drawn); showBox(snapped); tick(confirm = false); snapped } else drawn
+            val text = readText(s, b)
+            if (gen != grabGen || grabBox != b) return@launch
+            set {
+                val g = MagicHandState.grabbed(it.copy(note = ""), text, grabSource(s))
+                if (g.panel == Panel.GRAB) g.copy(canUndo = boxHistory.canUndo, coach = MagicHandBox.showTip(tips)) else g
+            }
+            if (_ui.value.panel != Panel.GRAB) hideBox() else bumpTips(tips)
         }
+    }
+
+    /** Grab mode on / off (the dock's Grab button, "Grab again"). The hint is full for the first few times. */
+    private fun grabMode(on: Boolean) {
+        if (on) {
+            val n = hintsShown()
+            set { MagicHandState.grabMode(it.copy(private = isPrivate()), true, MagicHandBox.showTip(n)) }
+            if (_ui.value.grabMode) com.blaze.assistant.agent.Settings.setStr("mh_grab_hints", (n + 1).coerceAtMost(99).toString())
+        } else set { MagicHandState.grabMode(it, false) }
+    }
+
+    private fun hintsShown(): Int = com.blaze.assistant.agent.Settings.str("mh_grab_hints", "0").toIntOrNull() ?: 0
+    private fun tipsShown(): Int = com.blaze.assistant.agent.Settings.str("mh_grab_tips", "0").toIntOrNull() ?: 0
+    private fun bumpTips(n: Int) { if (n <= MagicHandBox.TIPS_TIMES) com.blaze.assistant.agent.Settings.setStr("mh_grab_tips", (n + 1).toString()) }
+
+    /** A light haptic: a confirm on grab, a tick when the box snaps or goes back. */
+    private fun tick(confirm: Boolean) {
+        val v: View = boxView ?: hand ?: return
+        try {
+            v.performHapticFeedback(if (confirm && android.os.Build.VERSION.SDK_INT >= 30) android.view.HapticFeedbackConstants.CONFIRM
+                else android.view.HapticFeedbackConstants.CLOCK_TICK)
+        } catch (_: Throwable) { }
+    }
+
+    /** Undo: the box goes back to its previous shape (the drawn one before a snap, or before a move / resize). */
+    private fun undoBox() {
+        if (_ui.value.panel != Panel.GRAB) return
+        val prev = boxHistory.undo() ?: return
+        showBox(prev)
+        tick(confirm = false)
+        set { it.copy(canUndo = boxHistory.canUndo) }
+        reread(prev)
+    }
+
+    // ---------- Grab mode's drawing layer (v0.27.0) ----------
+    /** Added once at start, under the box, the dock and the hand; takes touches only while Grab mode is on. */
+    private fun addDraw(s: Context, w: WindowManager) {
+        val v = DrawLayer(s)
+        v.visibility = View.GONE
+        v.onTouch = ::onDrawTouch
+        v.contentDescription = MagicHandState.GRAB_MODE_HINT
+        val lp = WindowManager.LayoutParams(1, 1, type(), MagicHandSafety.flags(MagicHandSafety.Win.DRAW, active = false),
+            PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
+        try { w.addView(v, lp); drawView = v; drawLp = lp } catch (e: Exception) { com.blaze.assistant.device.CrashLog.error("Magic Hand grab layer", e) }
+    }
+
+    /** The layer covers the screen above the navigation bar while Grab is on (never the bar itself). */
+    private fun drawActive(on: Boolean) {
+        val v = drawView ?: return; val lp = drawLp ?: return
+        drawPts.clear(); hi?.trail(emptyList()); hi?.live(null)
+        if (on) { val (sw, sh) = screen(); lp.width = sw; lp.height = (sh - bottomInset).coerceAtLeast(1) } else { lp.width = 1; lp.height = 1 }
+        lp.flags = MagicHandSafety.flags(MagicHandSafety.Win.DRAW, active = on)
+        v.visibility = if (on) View.VISIBLE else View.GONE
+        try { wm?.updateViewLayout(v, lp) } catch (_: Exception) { }
+    }
+
+    /** Grab mode: draw a circle or drag a rectangle with a finger; a live box follows; lift to grab. A tap turns Grab off. */
+    private fun onDrawTouch(e: MotionEvent): Boolean {
+        if (!_ui.value.grabMode) return false
+        touchAt = SystemClock.uptimeMillis()
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { drawPts.clear(); drawPts += MagicHandLogic.P(e.rawX, e.rawY, e.eventTime) }
+            MotionEvent.ACTION_MOVE -> {
+                drawPts += MagicHandLogic.P(e.rawX, e.rawY, e.eventTime)
+                hi?.trail(drawPts)
+                hi?.live(MagicHandBox.liveBox(drawPts, dp(24)))
+            }
+            MotionEvent.ACTION_UP -> {
+                drawPts += MagicHandLogic.P(e.rawX, e.rawY, e.eventTime)
+                val pts = drawPts.toList(); drawPts.clear()
+                hi?.trail(emptyList()); hi?.live(null)
+                val (sw, sh) = screen()
+                val b0 = MagicHandLogic.loopBounds(pts, sw, sh, dp(4), minPx = dp(24))
+                if (b0 == null) set { MagicHandState.grabMode(it, false).copy(note = "Grab is off. Tap Grab to try again.") }
+                else grabArea(b0)
+            }
+            MotionEvent.ACTION_CANCEL -> { drawPts.clear(); hi?.trail(emptyList()); hi?.live(null) }
+        }
+        return true
     }
 
     private fun grabSource(s: BlazeAccessibilityService): String = lastHit?.pkg?.let(::appLabel) ?: s.currentPkg().let(::appLabel)
@@ -656,7 +771,11 @@ object MagicHand {
         hi?.box(null)
         placeBox(b, active = true)
         v.box(b)
-        v.visibility = View.VISIBLE
+        if (v.visibility != View.VISIBLE) {
+            // v0.27.0: the box fades in (instant with Remove animations on).
+            v.alpha = 0f; v.visibility = View.VISIBLE
+            v.animate().alpha(1f).setDuration(com.blaze.assistant.ui.MotionTokens.ms(com.blaze.assistant.ui.MotionTokens.SHORT)).start()
+        }
     }
 
     private fun placeBox(b: MagicHandLogic.Box, active: Boolean) {
@@ -669,9 +788,9 @@ object MagicHand {
 
     private fun hideBox() {
         regrabJob?.cancel(); regrabJob = null; grabGen++
-        grabBox = null
+        grabBox = null; boxHistory.clear()
         val v = boxView ?: return; val lp = boxLp ?: return
-        v.box(null); v.visibility = View.GONE
+        v.animate().cancel(); v.box(null); v.visibility = View.GONE
         lp.width = 1; lp.height = 1
         lp.flags = MagicHandSafety.flags(MagicHandSafety.Win.BOX, active = false)
         try { wm?.updateViewLayout(v, lp) } catch (_: Exception) { }
@@ -706,6 +825,10 @@ object MagicHand {
                 val st = boxStart; boxStart = null
                 boxView?.dragging(MagicHandBox.Handle.NONE)
                 val now = grabBox
+                if (st != null && now != null && MagicHandBox.changed(st, now, dp(3))) {
+                    boxHistory.push(st)
+                    set { it.copy(canUndo = true, coach = false) }
+                }
                 if (st != null && now != null && (boxCancelledRead || MagicHandBox.changed(st, now, dp(3)))) reread(now)
                 boxCancelledRead = false
             }
@@ -933,12 +1056,19 @@ object MagicHand {
             c.drawLine(rf.centerX() - half, rf.bottom, rf.centerX() + half, rf.bottom, bar)
             c.drawLine(rf.left, rf.centerY() - half, rf.left, rf.centerY() + half, bar)
             c.drawLine(rf.right, rf.centerY() - half, rf.right, rf.centerY() + half, bar)
-            val kr = 6.5f * d
+            val kr = 9f * d   // v0.27.0: bigger corner knobs (the touch target around each is 48 dp)
             listOf(rf.left to rf.top, rf.right to rf.top, rf.left to rf.bottom, rf.right to rf.bottom).forEach { (x, y) ->
                 c.drawCircle(x, y, kr, knob); c.drawCircle(x, y, kr, knobRim)
             }
             c.restore()
         }
+    }
+
+    /** v0.27.0: Grab mode's drawing layer. Draws nothing itself (the highlight shows the trail and the live box). */
+    private class DrawLayer(ctx: Context) : View(ctx) {
+        var onTouch: (MotionEvent) -> Boolean = { false }
+        @SuppressLint("ClickableViewAccessibility")
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean = onTouch(ev)
     }
 
     /** Full-screen, not touchable: a rounded outline around what's under the tip and the trail of a circle being drawn. */
@@ -950,6 +1080,12 @@ object MagicHand {
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0x224C7DFF }
         private val trail = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f * d; color = 0xCC4C7DFF.toInt(); strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
         fun box(n: MagicHandLogic.Box?) { if (n != b) { b = n; invalidate() } }
+        // v0.27.0: the live box while drawing (dashed, follows the drawn shape's bounds).
+        private var liveBox: MagicHandLogic.Box? = null
+        private val dash = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f * d; color = 0xFF4C7DFF.toInt()
+            pathEffect = android.graphics.DashPathEffect(floatArrayOf(8f * d, 6f * d), 0f) }
+        private val liveFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = 0x184C7DFF }
+        fun live(n: MagicHandLogic.Box?) { if (n != liveBox) { liveBox = n; invalidate() } }
         fun trail(pts: List<MagicHandLogic.P>) {
             path.reset(); trailOn = pts.size > 2
             pts.forEachIndexed { i, p -> if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y) }
@@ -959,6 +1095,7 @@ object MagicHand {
             val loc = IntArray(2); getLocationOnScreen(loc)
             c.save(); c.translate(-loc[0].toFloat(), -loc[1].toFloat())
             b?.let { r -> val rf = RectF(r.l - 3 * d, r.t - 3 * d, r.r + 3 * d, r.b + 3 * d); c.drawRoundRect(rf, 12 * d, 12 * d, fill); c.drawRoundRect(rf, 12 * d, 12 * d, stroke) }
+            liveBox?.let { r -> val rf = RectF(r.l.toFloat(), r.t.toFloat(), r.r.toFloat(), r.b.toFloat()); c.drawRoundRect(rf, 12 * d, 12 * d, liveFill); c.drawRoundRect(rf, 12 * d, 12 * d, dash) }
             if (trailOn) c.drawPath(path, trail)
             c.restore()
         }

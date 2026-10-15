@@ -105,6 +105,24 @@ object MagicHandScreen {
         return out.sortedBy { it.first }.map { it.second }.distinct().joinToString("\n")
     }
 
+    /**
+     * v0.27.0: the screen boxes of the text blocks around [b] (nodes with text or a description, visible, not
+     * passwords), for snapping the grab box to the text on release. At most [max] boxes.
+     */
+    fun textBoxes(svc: BlazeAccessibilityService, b: MagicHandLogic.Box, max: Int = 200): List<MagicHandLogic.Box> {
+        val out = ArrayList<MagicHandLogic.Box>()
+        fun walk(n: AccessibilityNodeInfo, d: Int) {
+            if (d > 40 || out.size >= max || n.isPassword || !n.isVisibleToUser) return
+            val nb = box(n)
+            if (nb.r <= b.l || nb.l >= b.r || nb.b <= b.t || nb.t >= b.b) return
+            val hasText = !n.text.isNullOrBlank() || (n.childCount == 0 && !n.contentDescription.isNullOrBlank())
+            if (hasText && !nb.isEmpty()) out += nb
+            for (i in 0 until n.childCount) n.getChild(i)?.let { walk(it, d + 1) }
+        }
+        roots(svc).forEach { walk(it, 0) }
+        return out
+    }
+
     /** A full-resolution screenshot (Android 11+), or null. */
     suspend fun screenshot(svc: BlazeAccessibilityService): Bitmap? {
         if (android.os.Build.VERSION.SDK_INT < 30) return null

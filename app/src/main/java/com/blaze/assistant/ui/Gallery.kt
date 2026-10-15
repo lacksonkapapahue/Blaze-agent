@@ -107,7 +107,8 @@ fun MediaStrip(paths: List<String>) {
                     Box(Modifier.widthIn(max = 330.dp).fillMaxWidth().heightIn(min = 120.dp).clip(BlazeShapes.medium).background(c.hair.copy(alpha = 0.3f))
                         .clickable { try { ctx.startActivity(Media.viewIntent(f)) } catch (_: Exception) { } }) {
                         if (bmp != null) Image(bmp, contentDescription = f.nameWithoutExtension, modifier = Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
-                        else Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { Label("Loading picture\u2026", size = 10.sp) }
+                        else Box(Modifier.fillMaxWidth().height(200.dp).shimmer(c.hair.copy(alpha = 0.3f), c.paper.copy(alpha = 0.3f), BlazeShapes.medium),
+                            contentAlignment = Alignment.Center) { Label("Loading picture\u2026", size = 10.sp) }
                     }
                 }
                 "audio" -> Row(Modifier.widthIn(max = 330.dp).fillMaxWidth().hairline(c.hair).clickable { Player.toggle(p) }.padding(12.dp),

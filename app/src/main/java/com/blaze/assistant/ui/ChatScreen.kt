@@ -414,7 +414,10 @@ fun ChatScreen() {
                 isPrivate = isPrivate,
                 onGhost = { if (isPrivate) confirmLeavePrivate = true else { exitView(); shellMode = "chat"; Agent.enterPrivate() } })
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (shellMode == "projects") {
+                // v0.27.0: Chat and Projects cross-fade when you switch tabs.
+                androidx.compose.animation.Crossfade(shellMode == "projects", modifier = Modifier.fillMaxSize(),
+                    animationSpec = MotionTokens.medium(), label = "tab") { projectsTab ->
+                if (projectsTab) {
                     val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
                     ProjectsPane(projects, allChats, busyChats, needs, projectOpen,
                         onOpen = { projectOpen = it }, onBack = { projectOpen = "" },
@@ -441,6 +444,7 @@ fun ChatScreen() {
                             onQuote = { quote = it },
                             onFollowup = { send(it) })
                     }
+                }
                 }
                 if (clearedAt > 0L && shellMode == "chat") {
                     LaunchedEffect(clearedAt) { delay(com.blaze.assistant.agent.ClearScreen.UNDO_MS - 3_000); clearedAt = 0L }
@@ -482,12 +486,14 @@ fun ChatScreen() {
                     ActionText("Paste image", color = c.accent, size = 10.sp, modifier = Modifier.clickable { pasteImage() }.padding(8.dp))
                     ActionText("×", size = 12.sp, modifier = Modifier.clickable { clipHasImage = false }.padding(8.dp))
                 }
-                if (showViews) {
+                // v0.27.0: sheets slide open and closed (MotionTokens; instant with Remove animations on).
+                AnimatedVisibility(showViews, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
                     val badges = mapOf("agents" to bgAgents.count { it.live }.let { if (it > 0) "$it LIVE" else "" })
                     ViewsSheet(badges, onPick = { openView(it) }, onDismiss = { showViews = false })
-                    BackHandler { showViews = false }
                 }
-                if (plusOpen) {
+                if (showViews) BackHandler { showViews = false }
+                if (plusOpen) BackHandler { plusOpen = false }
+                AnimatedVisibility(plusOpen, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
                     val model = ""
                     PlusMenu(plusItems(work, approval, model, clipHasImage, com.blaze.assistant.agent.Projects.of(currentChat) != null)) { id ->
                         plusOpen = false
@@ -508,7 +514,6 @@ fun ChatScreen() {
                             "clear" -> clearScreen()
                         }
                     }
-                    BackHandler { plusOpen = false }
                 }
                 // v0.24.6: pictures straight from the keyboard (Samsung clipboard, GIFs, stickers) attach like picked photos.
                 AcceptImages(onImage = { uri, mime -> addUris(listOf(uri), mime) }) {
@@ -649,6 +654,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
     val lastBlazeId = messages.lastOrNull()?.takeIf { it.role == Role.BLAZE }?.id
     val meter by Agent.meter.collectAsState()
     val lastStepsKey = items.lastOrNull { it is Item.Steps }?.key
+    // v0.27.0: messages that arrive while the chat is open fade in with a slight rise, once (not the history).
+    val appear = remember { AppearOnce(items.map { it.key }) }
     Box(Modifier.fillMaxSize()) {
         // v0.24.0: a messaging thread. No uniform gaps: runs from one side sit 3dp apart, groups 16dp.
         // v0.26.1: choice buttons and forms in replies send through the same path as the follow-up chips (only when idle).
@@ -656,7 +663,8 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
         LazyColumn(state = state, modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 14.dp)) {
             itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
-                Box(Modifier.fillMaxWidth().padding(top = Bubbles.gapAbove(item.pos, i == 0))) {
+                val fresh = remember(item.key) { appear.fresh(item.key) }
+                Box(Modifier.fillMaxWidth().appearIn(fresh && i >= items.size - 3).padding(top = Bubbles.gapAbove(item.pos, i == 0))) {
                     when (item) {
                         is Item.Steps -> {
                             val st by Agent.status.collectAsState()
@@ -676,7 +684,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                 val status by Agent.status.collectAsState()
                 // One live card per turn: before the first step it's an empty "Working · 3s" card.
                 val hasLiveSteps = (items.lastOrNull() as? Item.Steps)?.live == true
-                AnimatedVisibility(mood != Mood.IDLE, enter = fadeIn(), exit = fadeOut()) {
+                AnimatedVisibility(mood != Mood.IDLE, enter = MotionTokens.enterUp(), exit = MotionTokens.fadeAway()) {
                     Column(Modifier.padding(top = if (hasLiveSteps || items.lastOrNull()?.side == Side.BLAZE) 3.dp else 16.dp)) {
                         if (!hasLiveSteps) WorkCard(emptyList(), live = true,
                             startAt = messages.lastOrNull { it.role == Role.USER }?.at ?: 0L, endAt = 0L,
@@ -690,7 +698,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
         }
         }
         AnimatedVisibility(!atBottom, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut()) {
+            enter = MotionTokens.enterUp(), exit = MotionTokens.fadeAway()) {
             Box(Modifier.size(44.dp).clip(CircleShape).background(c.ink).clickable { scope.launch { follow = true; toEnd(true) } }
                 .semantics { contentDescription = "Jump to the newest message" }, contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(14.dp)) {
@@ -723,7 +731,7 @@ private fun StepsGroup(steps: List<ChatMessage>, live: Boolean) {
             val rot by animateFloatAsState(if (open) 180f else 0f, label = "chev")
             Text("⌄", modifier = Modifier.padding(start = 6.dp).graphicsLayerRotation(rot), style = TextStyle(fontSize = 14.sp, color = c.sub))
         }
-        AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(open, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
             Column(Modifier.padding(start = 3.dp).hairlineStart(c.hair).padding(start = 13.dp, top = 2.dp, bottom = 2.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 steps.forEachIndexed { i, s ->
@@ -751,8 +759,9 @@ private fun Modifier.hairlineStart(color: Color) = this.drawBehind {
 private fun ThinkingLine(text: String, live: Boolean) {
     val c = LocalBlaze.current
     val tr = androidx.compose.animation.core.rememberInfiniteTransition(label = "think")
-    val a by tr.animateFloat(0.3f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900),
+    val pulse = tr.animateFloat(0.3f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900),
         androidx.compose.animation.core.RepeatMode.Reverse), label = "thinkA")
+    val a = if (MotionTokens.enabled) pulse.value else 1f   // v0.27.0: a still dot with Remove animations on
     Row(Modifier.padding(top = 6.dp, bottom = 4.dp).semantics { contentDescription = text }, verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(if (live) BlazeBrush.blue.copy(alpha = a) else c.weak))
         Spacer(Modifier.width(8.dp))

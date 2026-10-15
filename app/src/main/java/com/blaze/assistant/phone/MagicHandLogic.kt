@@ -115,6 +115,29 @@ object MagicHandLogic {
     }
 
     /**
+     * v0.27.0: true while a drag on the hand is turning into a circle (at least [LOOP_MIN_DP] each way and wound ~225°
+     * round its middle; a quarter arc or a straight drag winds at most ~180°), so the live grab box shows while drawing a circle but never while just pointing.
+     */
+    fun looping(points: List<P>, density: Float): Boolean {
+        if (points.size < 6) return false
+        val d = density.coerceAtLeast(0.5f)
+        val minX = points.minOf { it.x }; val maxX = points.maxOf { it.x }
+        val minY = points.minOf { it.y }; val maxY = points.maxOf { it.y }
+        if ((maxX - minX) / d < LOOP_MIN_DP || (maxY - minY) / d < LOOP_MIN_DP) return false
+        val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
+        var turn = 0.0
+        var prev = atan2((points[0].y - cy).toDouble(), (points[0].x - cx).toDouble())
+        for (i in 1 until points.size) {
+            val a = atan2((points[i].y - cy).toDouble(), (points[i].x - cx).toDouble())
+            var da = a - prev
+            while (da > Math.PI) da -= 2 * Math.PI
+            while (da < -Math.PI) da += 2 * Math.PI
+            turn += da; prev = a
+        }
+        return abs(turn) >= 1.25 * Math.PI
+    }
+
+    /**
      * The region a loop selects: its bounding box grown by [padPx] and clamped to the screen ([screenW] × [screenH]).
      * Null when nothing usable is left (smaller than [minPx] on a side, or no points).
      */
