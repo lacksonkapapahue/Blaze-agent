@@ -142,9 +142,14 @@ private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item
     val out = mutableListOf<Item>()
     var run = mutableListOf<ChatMessage>()
     var prevAt = 0L
-    fun flush(live: Boolean, endAt: Long) { if (run.isNotEmpty()) { out += Item.Steps(run, live, endAt, prevAt.takeIf { it > 0 } ?: run.first().at); run = mutableListOf() } }
-    messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false, m.at); out += Item.Msg(m); prevAt = m.at } }
-    flush(working, 0L)
+    // v0.28.4: the card's start is the turn's real start and a finished card's end is frozen (WorkTime).
+    fun flush(live: Boolean, next: ChatMessage?) {
+        if (run.isEmpty()) return
+        val end = WorkTime.end(run, live, next?.at ?: 0L, next != null && next.role != Role.USER, 0L)
+        out += Item.Steps(run, live, end, WorkTime.start(run, prevAt)); run = mutableListOf()
+    }
+    messages.forEach { m -> if (m.role == Role.STEP) run += m else { flush(false, m); out += Item.Msg(m); prevAt = m.at } }
+    flush(working, null)
     Bubbles.positions(out.map { it.side }, out.map { it.at }).forEachIndexed { i, p -> out[i].pos = p }
     return out
 }
@@ -754,7 +759,7 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                 AnimatedVisibility(mood != Mood.IDLE, enter = MotionTokens.enterUp(), exit = MotionTokens.fadeAway()) {
                     Column(Modifier.padding(top = if (hasLiveSteps || items.lastOrNull()?.side == Side.BLAZE) 3.dp else 16.dp)) {
                         if (!hasLiveSteps) WorkCard(emptyList(), live = true,
-                            startAt = messages.lastOrNull { it.role == Role.USER }?.at ?: 0L, endAt = 0L,
+                            startAt = com.blaze.assistant.agent.Agent.turnStartAt.takeIf { it > 0 } ?: messages.lastOrNull { it.role == Role.USER }?.at ?: 0L, endAt = 0L,
                             status = status.ifBlank { com.blaze.assistant.agent.Friendly.between(null) })
                         // v0.26.1: never the raw reasoning, only a calm "Thinking it through…" line.
                         com.blaze.assistant.agent.ThinkingLabel.label(live = true, hasThought = live.isNotBlank(), show = Settings.showReasoning)?.let { ThinkingLine(it, live = true) }

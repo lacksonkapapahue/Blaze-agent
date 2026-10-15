@@ -28,7 +28,7 @@ object SelfKnowledge {
         append(" You are Blaze for Android v").append(safe { version(ctx) }).append(".")
         append(" Paired PC: ").append(safe { if (com.blaze.assistant.link.DesktopLink.paired) com.blaze.assistant.link.DesktopLink.pcName else "none" }).append(".")
         append(" Blaze account: ").append(safe { com.blaze.assistant.connect.BlazeAccount.view.value.user?.let { "signed in" } ?: "not signed in" }).append(".")
-        append(" Questions about Blaze itself, its apps, settings, files, what's installed, or connecting phone and PC: answer from this and call about_blaze for details. Never ask the user what Blaze is or which apps they mean.")
+        append(" Questions about Blaze itself, its apps, settings, files, what's installed, or connecting phone and PC: answer from this, call about_blaze for live setup and blaze_docs_search for docs (repos, versions, features, settings). Never ask the user what Blaze is or which apps they mean.")
     }
 
     fun version(ctx: Context): String =

@@ -104,7 +104,7 @@ object PhoneTools {
                     if (args.has("element")) args.getInt("element") else null) ?: needSvc()
                 "press_button" -> svc?.press(args.getString("button")) ?: needSvc()
                 "open_url" -> {
-                    val raw = args.getString("url").trim()
+                    val raw = com.blaze.assistant.agent.ToolLeak.fixBlazeUrl(args.getString("url").trim())
                     val url = if (raw.startsWith("http://") || raw.startsWith("https://")) raw
                     else if (raw.contains('.') && !raw.contains(' ')) "https://$raw"
                     else "https://www.google.com/search?q=" + Uri.encode(raw)
