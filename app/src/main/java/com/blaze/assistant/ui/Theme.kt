@@ -226,6 +226,12 @@ fun Modifier.hairlineTop(color: Color) = drawBehind {
 fun Modifier.hairline(color: Color, shape: androidx.compose.ui.graphics.Shape = BlazeShapes.medium) =
     clip(shape).border(1.dp, color, shape)
 
+/** v0.29.4: the particle blues (light theme: a deep sky blue on paper; dark: a bright periwinkle on charcoal). */
+object ParticleBlue {
+    fun of(dark: Boolean): Color = if (dark) Color(0xFF6B8CFF) else Color(0xFF2F6BFF)
+    fun hot(dark: Boolean): Color = if (dark) Color(0xFF9DB4FF) else Color(0xFF1F4BD8)
+}
+
 private data class Dot(val x: Float, val y: Float, val r: Float, val vx: Float, val vy: Float)
 
 /** Faint drifting particle dots (the site's button-hover particles), livelier while Blaze works. */
@@ -261,9 +267,10 @@ fun ParticleField(mood: Mood, modifier: Modifier = Modifier) {
         dots.forEachIndexed { i, d ->
             val px = ((d.x + d.vx * time * speed) % 1f + 1f) % 1f
             val py = ((d.y + d.vy * time * speed) % 1f + 1f) % 1f
-            val a = 0.10f + 0.12f * energy + if (i % 7 == 0) 0.08f else 0f
-            val col = if (i % 9 == 0 && energy > 0.1f) c.accent.copy(alpha = 0.5f * energy) else c.ink.copy(alpha = a)
-            drawCircle(col, d.r * density, Offset(px * w, py * h))
+            // v0.29.4: blue in both themes and easier to see (they were faint grey ink).
+            val a = (if (c.dark) 0.34f else 0.30f) + 0.18f * energy + if (i % 7 == 0) 0.14f else 0f
+            val col = if (i % 9 == 0 && energy > 0.1f) ParticleBlue.hot(c.dark).copy(alpha = 0.75f * energy) else ParticleBlue.of(c.dark).copy(alpha = a.coerceAtMost(0.8f))
+            drawCircle(col, d.r * 1.35f * density, Offset(px * w, py * h))
         }
     }
 }

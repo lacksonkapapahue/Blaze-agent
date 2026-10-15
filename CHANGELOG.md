@@ -2,6 +2,11 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.4: Blue particles, glass chat bubbles
+
+- Background particles are blue in both themes (deep sky blue on light, periwinkle on dark), slightly bigger and much easier to see.
+- Chat bubbles are see-through: yours has a light blue tint, Blaze's a soft neutral one, and each has a clear outline so you can always tell where the message box is. Your text is now dark ink instead of white.
+
 ## v0.29.3: Glass Home
 - Home's new default background is a light daytime sky (drawn, nothing to download): blue to a pale horizon, a soft sun glow and clouds.
 - Over the sky or your own photo (Customise → Background → Image), cards, stacks, buttons and chips turn to frosted glass with a bright edge. Text uses dark ink on the sky in both app themes.
