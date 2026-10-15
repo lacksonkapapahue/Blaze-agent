@@ -40,7 +40,7 @@ object LongChat {
     const val PROMPT_LINE = "\nLONG CHATS\n- Older turns of this chat may be folded into a summary. If you need something older than the summary, call search_chat " +
         "(then read_turn for the full message). Never ask the user to repeat something they already said.\n" +
         "- A tool result that ends with artifact:<id> was set aside because it was long: read_artifact reads the lines you need.\n" +
-        "- In a project, update_brief keeps the project's pinned brief (purpose, rules, key files, in progress; under ~600 tokens). Update it when something lasting changes.\n"
+        "- In a project, update_brief keeps the project's brief (purpose and rules first, then key files, in progress; hard cap 600 tokens, only its top part is pinned). Update it when something lasting changes; details go to the searchable notes (project_docs_search).\n"
 
     /** Tools whose results always stay whole (reading them back must not be set aside again). */
     val keepWhole = setOf("use_skill", "skill_file", "read_artifact", "read_turn", "search_chat", "update_brief", "ask_user")
@@ -311,7 +311,7 @@ object LongChat {
         fn("read_turn", "Read one earlier message in full, by the turn id search_chat gave.", JSONObject().put("id", s("Turn id, e.g. 12 or <chat>#12")), listOf("id")),
         fn("read_artifact", "Read lines of a long tool output that was set aside (artifact:<id>).",
             JSONObject().put("id", s("The artifact id")).put("from", i("First line, 1-based (default 1)")).put("lines", i("How many lines (default 200, max 400)")), listOf("id")),
-        fn("update_brief", "Replace this project's pinned brief, sent with every turn of every chat in the project: purpose, rules, key files, what's in progress. Under ~600 tokens; write the whole brief each time.",
+        fn("update_brief", "Replace this project's brief: purpose and rules first, then key files and what's in progress. Hard cap 600 tokens (longer text is trimmed to its top part and kept whole as a searchable note); its top part is pinned in every chat of the project. Write the whole brief each time.",
             JSONObject().put("brief", s("The whole brief")), listOf("brief")),
     )
 }

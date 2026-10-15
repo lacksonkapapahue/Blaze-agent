@@ -21,7 +21,7 @@ import java.io.File
 class PromptBudgetTest {
     private val sqls = ArrayList<Sql>()
 
-    @After fun tearDown() { Mind.use(null); BlazeDocs.use(null); sqls.forEach { try { it.close() } catch (_: Exception) { } } }
+    @After fun tearDown() { Mind.use(null); BlazeDocs.use(null); Projects.use(emptyList()); ProjectDocs.use(null); sqls.forEach { try { it.close() } catch (_: Exception) { } } }
 
     private fun first(vararg paths: String): File? = paths.map { File(it) }.firstOrNull { it.isFile }
 
@@ -82,6 +82,46 @@ class PromptBudgetTest {
         // The docs line is the same, whatever is indexed.
         assertEquals(BlazeDocs.PROMPT_LINE, full.substring(full.length - BlazeDocs.PROMPT_LINE.length))
         assertTrue(BlazeDocs.PROMPT_LINE.contains(BlazeDocs.REPO_URL))
+    }
+
+    /**
+     * v0.28.5: a project with a 20k-char brief and 20k-char instructions adds at most ~700 tokens to the prompt (the top
+     * of each within 600, a header and one lookup line), none of the tail text, and the tail is found by project_docs_search.
+     */
+    @Test fun aHugeProjectBriefAndInstructionsStayOutOfThePrompt() {
+        fun big(word: String): String {
+            val sb = StringBuilder("Purpose: the $word project.\nRules: be brief.\n")
+            var i = 0
+            while (sb.length < 20_000) { sb.append("Line $i of $word: keep setting$i at value${i * 11} and file$i.kt untouched.\n"); i++ }
+            return sb.append("Last line of $word: platypusreef$word.").toString()
+        }
+        val brief = big("brief"); val ins = big("ins")
+        assertTrue(brief.length >= 20_000 && ins.length >= 20_000)
+        // As stored before v0.28.5 (unmigrated) and after the migration: both pin within the budget.
+        val raw = Project("p1", "Big", instructions = ins, chats = listOf("c1"), brief = brief)
+        for (p in listOf(raw, Projects.migrate(listOf(raw), 1L).single())) {
+            Projects.use(listOf(p))
+            val none = Projects.promptLine("other-chat")
+            assertEquals("", none)
+            val block = Projects.promptLine("c1")
+            val t = BlazeDb.tokens(block)
+            assertTrue("project adds $t tokens", t <= 700)
+            assertTrue(block.contains("Purpose: the ins project."))
+            assertTrue(block.contains("Purpose: the brief project."))
+            assertTrue(block.contains(Projects.LOOKUP_LINE))
+            assertFalse(block.contains("platypusreef"))
+            val tail = (brief.lines() + ins.lines()).takeLast(40)
+            assertFalse(tail.any { it.length > 20 && block.contains(it) })
+        }
+        // An empty project costs one short line.
+        assertTrue(BlazeDb.tokens(Projects.pinned(Project("p2", "Small"))) < 10)
+        // The tail is still reachable.
+        val sql = JdbcSql().also { sqls += it }; val meta = HashMap<String, String>()
+        val docs = ProjectDocs.Store(sql, { meta[it].orEmpty() }, { k, v -> meta[k] = v })
+        val p = Projects.migrate(listOf(raw), 1L).single()
+        assertTrue(docs.ensure(p))
+        assertTrue(docs.search(p.id, "platypusreefins", 3).isNotEmpty())
+        assertTrue(docs.search(p.id, "platypusreefbrief", 3).isNotEmpty())   // the full brief lives on as a note
     }
 
     @Test fun skillsAreLookedUpNotPasted() {
