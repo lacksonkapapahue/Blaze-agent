@@ -38,7 +38,7 @@ import kotlinx.coroutines.withContext
  * v0.29.2 Blaze Terminal: a full-screen, Termux-style terminal. Black screen, monospace text, Termux's two
  * extra-keys rows (ESC / ― HOME ↑ END PGUP · ⇥ CTRL ALT ← ↓ → PGDN), tabs along the top, pinch to zoom,
  * long-press to select and copy, paste from the menu. Tabs run the user's Alpine Linux (PRoot) or the phone shell.
- * v0.30.1: Blaze colours (blue accent, rounded key caps), ⋮ and + open a Blaze bottom sheet (TermSheetHost) instead of a
+ * v0.29.8: Blaze colours (blue accent, rounded key caps), ⋮ and + open a Blaze bottom sheet (TermSheetHost) instead of a
  * white Android pop-up, and a phone tab shows tappable example commands above the keys.
  */
 class BlazeTerminalActivity : ComponentActivity(), TermSessions.Listener {
@@ -96,7 +96,7 @@ class BlazeTerminalActivity : ComponentActivity(), TermSessions.Listener {
         term.setTerminalViewClient(viewClient)
         root.addView(term, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        // v0.30.1: tappable example commands (phone tabs only), so the phone shell explains itself.
+        // v0.29.8: tappable example commands (phone tabs only), so the phone shell explains itself.
         val examples = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(6), dp(4), dp(6), dp(4)) }
         for ((label, cmd) in TermLogic.PHONE_EXAMPLES) examples.addView(chip(label, false) { runExample(cmd) })
         examplesBar = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; setBackgroundColor(barBg); addView(examples) }

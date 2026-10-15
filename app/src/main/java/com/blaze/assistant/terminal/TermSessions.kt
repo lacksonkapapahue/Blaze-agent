@@ -40,7 +40,7 @@ object TermSessions {
         override fun onSessionFinished(s: TerminalSession) {
             val t = find(s)
             t?.finished = true
-            // v0.30.1: a phone tab killed by Android's sandbox (signal 31) says why, and the next start skips BusyBox.
+            // v0.29.8: a phone tab killed by Android's sandbox (signal 31) says why, and the next start skips BusyBox.
             if (t != null) {
                 val status = try { s.exitStatus } catch (_: Exception) { 0 }
                 if (t.busybox && TermLogic.signalOf(status) == TermLogic.SIGSYS) Terminal.markBusyboxBroken()
@@ -87,7 +87,7 @@ object TermSessions {
             val cmd = Linux.command(null, "xterm-256color", e.id)
             TerminalSession(cmd.first(), home, cmd.toTypedArray(), TermLogic.envArray(Terminal.env(), Linux.env()), 3000, client)
         } else {
-            // v0.30.1: BusyBox ash only when it passed Terminal.setup()'s probe, else Android's own sh (TermLogic.phoneLaunch).
+            // v0.29.8: BusyBox ash only when it passed Terminal.setup()'s probe, else Android's own sh (TermLogic.phoneLaunch).
             val bb = File(app.applicationInfo.nativeLibraryDir, "libbusybox.so").takeIf { it.exists() }?.absolutePath
             val l = TermLogic.phoneLaunch(bb, Terminal.busyboxOk)
             usedBusybox = l.busybox

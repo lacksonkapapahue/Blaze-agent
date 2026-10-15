@@ -54,7 +54,7 @@ object TermLogic {
     /** The distros this phone can install (Alpine has its own installer and works everywhere Linux does). */
     fun installable(abi: String?): List<Distro> = DISTROS.filter { it.id == "alpine" || cpu(abi)?.let { c -> it.urls[c] } != null }
 
-    /** v0.30.1: the "phone" tab, renamed so it says what it is: this phone's own command line, nothing to install. */
+    /** v0.29.8: the "phone" tab, renamed so it says what it is: this phone's own command line, nothing to install. */
     val PHONE = Env("phone", "Phone shell · built-in tools, no install", "phone sh")
     val ALPINE = DISTROS.first().env()
 
@@ -86,7 +86,7 @@ object TermLogic {
         if (busybox != null) busybox to listOf("ash", "-l") else "/system/bin/sh" to listOf("sh", "-l")
 
     /**
-     * v0.30.1: how the phone tab starts. BusyBox ash only when BusyBox is there AND passed the start-up probe
+     * v0.29.8: how the phone tab starts. BusyBox ash only when BusyBox is there AND passed the start-up probe
      * ([probeOk]); otherwise Android's own /system/bin/sh (mksh + toybox: ls, top, ping, ps… still work), so the tab
      * never opens as "[Process completed (signal 31)]". [busybox] is the path of libbusybox.so (argv[0] "ash" picks the applet).
      */
@@ -105,7 +105,7 @@ object TermLogic {
     fun signalOf(exitStatus: Int): Int? = if (exitStatus < 0) -exitStatus else null
 
     /**
-     * v0.30.1: the extra line under "[Process completed …]" when a phone tab dies at once. Signal 31 (SIGSYS) means
+     * v0.29.8: the extra line under "[Process completed …]" when a phone tab dies at once. Signal 31 (SIGSYS) means
      * Android's app sandbox (seccomp) killed it for a blocked system call; the next start uses Android's own shell.
      */
     fun finishNote(envId: String, usedBusybox: Boolean, exitStatus: Int): String? {
@@ -180,7 +180,7 @@ object TermLogic {
     )
 
     /**
-     * v0.30.1: the phone shell's start-up file (sourced through \$ENV by BusyBox ash and Android's mksh): a `help`
+     * v0.29.8: the phone shell's start-up file (sourced through \$ENV by BusyBox ash and Android's mksh): a `help`
      * command that explains the shell and lists its tools, plus a short prompt. [busybox] = BusyBox ash is the shell.
      */
     fun phoneRc(busybox: Boolean): String = buildString {

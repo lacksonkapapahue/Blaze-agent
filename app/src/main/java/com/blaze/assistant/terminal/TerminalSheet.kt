@@ -60,7 +60,7 @@ import com.blaze.assistant.ui.MotionTokens
 import com.blaze.assistant.ui.pressScale
 
 /**
- * v0.30.1: Blaze Terminal's menus as a Blaze bottom sheet (rounded, dark, Blaze blue, an icon per row, MotionTokens
+ * v0.29.8: Blaze Terminal's menus as a Blaze bottom sheet (rounded, dark, Blaze blue, an icon per row, MotionTokens
  * timing) instead of the plain white Android pop-up that clashed with the black terminal. Used for ⋮ and +.
  */
 object TermSheet {

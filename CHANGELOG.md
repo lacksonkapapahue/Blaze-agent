@@ -2,7 +2,7 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
-## v0.30.1: Terminal that explains itself, phone shell fixed
+## v0.29.8: Terminal that explains itself, phone shell fixed
 
 - **Phone shell starts again.** On phones like the Galaxy A12 the phone tab opened straight to "[Process completed (signal 31) - press Enter]". Signal 31 is SIGSYS: Android's app sandbox (seccomp) kills any app process that calls setgid/setuid, and the bundled BusyBox called both at the start of every tool (its `check_suid` privilege drop, a no-op for an app). Both BusyBox binaries now skip that drop (one instruction each, `tools/busybox/patch_setid.py`, README there).
 - BusyBox's tools are really on PATH now: setup ran `libbusybox.so --list`, which BusyBox answers with "applet not found", so nothing was ever linked. It now runs through a `busybox` link and is probed first; if a phone still refuses it, the tab opens Android's own shell (toybox) instead of a dead tab and says why. ping stays Android's (it works for apps).

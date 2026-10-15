@@ -11,7 +11,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * v0.30.1: the phone tab used to open as "[Process completed (signal 31) - press Enter]". Android's app seccomp filter
+ * v0.29.8: the phone tab used to open as "[Process completed (signal 31) - press Enter]". Android's app seccomp filter
  * kills setgid()/setuid() with SIGSYS, and the bundled BusyBox called both at the start of every applet (check_suid's
  * privilege drop). These pin the launch decision, the probe, the exit note and the binary patch that skips the drop.
  */

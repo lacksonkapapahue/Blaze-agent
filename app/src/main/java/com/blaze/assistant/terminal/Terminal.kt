@@ -33,8 +33,8 @@ object Terminal {
     fun init(ctx: Context) { app = ctx.applicationContext; Linux.init(ctx) }
 
     /**
-     * v0.30.1: false when BusyBox can't run on this phone (the start-up probe failed), so the phone tab uses Android's own
-     * sh and nothing BusyBox is linked onto PATH. Before v0.30.1 every BusyBox applet died at start with SIGSYS (signal 31):
+     * v0.29.8: false when BusyBox can't run on this phone (the start-up probe failed), so the phone tab uses Android's own
+     * sh and nothing BusyBox is linked onto PATH. Before v0.29.8 every BusyBox applet died at start with SIGSYS (signal 31):
      * the bundled builds drop privileges with setgid()/setuid(), which Android's app seccomp filter kills (the binaries
      * are now patched to skip that; see tools/busybox/README.md).
      */
@@ -51,7 +51,7 @@ object Terminal {
     fun phoneRc(): File = File(app.filesDir, "usr/etc/phonerc")
 
     /**
-     * Links every BusyBox applet into usr/bin once per app version (cheap, no root). v0.30.1: BusyBox is first run
+     * Links every BusyBox applet into usr/bin once per app version (cheap, no root). v0.29.8: BusyBox is first run
      * through a "busybox" link (argv[0] must be busybox: run as libbusybox.so it answered "applet not found", so
      * `--list` came back empty and no tool was ever linked), and probed (`busybox sh -c 'echo ok'`) before anything is linked.
      */
