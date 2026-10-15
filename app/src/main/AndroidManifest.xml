@@ -129,6 +129,16 @@
             android:theme="@style/Theme.Blaze.Transparent" />
 
         <activity
+            android:name=".terminal.BlazeTerminalActivity"
+            android:exported="false"
+            android:label="Blaze Terminal"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.blaze.assistant.terminal"
+            android:theme="@android:style/Theme.Black.NoTitleBar"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode"
+            android:windowSoftInputMode="adjustResize|stateVisible" />
+
+        <activity
             android:name=".browser.BrowserActivity"
             android:exported="true"
             android:supportsPictureInPicture="true"

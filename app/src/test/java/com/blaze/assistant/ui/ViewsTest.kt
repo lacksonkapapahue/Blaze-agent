@@ -28,7 +28,7 @@ class ViewsTest {
         assertEquals("schedule", Views.find("/routines")?.id)
         assertEquals("brain", Views.find("models")?.id)
         assertEquals("router", Views.find("blazerouter")?.id)
-        assertEquals("jobs", Views.find("Terminal")?.id)
+        assertEquals("terminal", Views.find("Terminal")?.id); assertEquals("terminal", Views.find("termux")?.id); assertEquals("jobs", Views.find("jobs")?.id)
         assertNull(Views.find("nope"))
     }
 
