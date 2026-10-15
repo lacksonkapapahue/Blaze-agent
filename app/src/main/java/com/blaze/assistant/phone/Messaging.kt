@@ -45,7 +45,7 @@ object Messaging {
                 ?: return "Couldn't find the picture \u201c$imageArg\u201d in the Gallery. Make it with generate_image first, then call message_contact with image=\"last\". Nothing was sent."
             items.first { it.file.name == name }.file
         }
-        if (to.isEmpty() || (text.isEmpty() && image == null)) return "Need who to message and what to send. Nothing was sent."
+        if (to.isEmpty() || (text.isEmpty() && image == null)) return "Couldn't send: need who to message and what to send. Nothing was sent."
 
         // 1) Live notification from them: reply in the background (text only).
         if (image == null) {
@@ -58,7 +58,7 @@ object Messaging {
 
         // 2) SMS: straight from the phone.
         if (app == "sms") {
-            if (image != null) return "SMS can't carry pictures here. Use app=whatsapp to send the image. Nothing was sent."
+            if (image != null) return "Couldn't send: SMS can't carry pictures here. Use app=whatsapp to send the image. Nothing was sent."
             return Skills.run(ctx, "send_sms", JSONObject().put("to", to).put("message", text))
         }
 

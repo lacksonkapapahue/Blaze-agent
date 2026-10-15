@@ -22,7 +22,7 @@ object ClaimGuard {
     /** Did a tool result say it worked? (Same failure words the rest of the agent uses.) */
     fun succeeded(result: String): Boolean {
         val r = result.trimStart()
-        return r.isNotEmpty() && !Regex("""^(Error|Couldn't|Could not|Not sent|Refused|Failed|No such|Unknown|Not in the|Nothing |There's no|The user did NOT|The user declined|The user chose|That MCP tool|That changed nothing)""", ic).containsMatchIn(r)
+        return r.isNotEmpty() && !Regex("""^(Error|Couldn't|Could not|I couldn't|Can't|Cannot|Not |No |Need |Missing|Permission denied|The user didn't|Refused|Failed|No such|Unknown|Not in the|Nothing |There's no|The user did NOT|The user declined|The user chose|That MCP tool|That changed nothing)""", ic).containsMatchIn(r)
     }
 
     /** Words that name each view's things in a claim. Archive is read-only, so nothing there can be claimed. */

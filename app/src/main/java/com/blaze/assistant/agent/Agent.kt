@@ -1472,6 +1472,7 @@ When you finish, say what you did in one short sentence.
                     ViewRouter.followOnHint(curDesign.title, curDesign.kind, curDesign.path) else ""
                 turnOk.clear()
                 var claimNudged = false
+                var proofNudged = false
                 var emptyNudged = false
                 var leakNudged = false
                 var lastOkStep = ""
@@ -1720,11 +1721,22 @@ When you finish, say what you did in one short sentence.
                             }
                         }
                     }
-                    // v0.28.7: "Message sent to Gabriel" with no send tool that succeeded this turn is replaced with the truth.
-                    if ((calls == null || calls.length() == 0) && !routine && ClaimGuard.asksToSend(lastUserText())) {
+                    // v0.28.8 proof for every action (v0.28.7 did sends): "Message sent", "Alarm set for 7", "I turned on Wi-Fi",
+                    // "Saved to memory" with no tool of that kind succeeding this turn → one re-prompt to really do it, then the truth.
+                    if ((calls == null || calls.length() == 0) && !routine) {
                         val shown = ReplyParts.split(textOut, final = true).text
-                        synchronized(turnOk) { ClaimGuard.unbackedSend(shown, turnOk.toList()) }?.let { fixed ->
-                            textOut = fixed; reply.put("content", textOut); pendingFollowups = emptyList()
+                        val okNames = synchronized(turnOk) { turnOk.map { it.name } }
+                        val miss = ActionProof.unbacked(shown, okNames, lastUserText())
+                        if (miss != null) {
+                            if (!proofNudged && nudgesLeft > 0 && step < maxSteps - 3) {
+                                proofNudged = true
+                                nudgesLeft--
+                                if (liveId >= 0) { msgs = msgs.filterNot { it.id == liveId }; liveId = -1L }
+                                add(Role.STEP, RetryGuard.label(RetryGuard.Kind.CLAIM))
+                                history.put(JSONObject().put("role", "user").put("content", RetryGuard.anchor(ActionProof.nudge(miss), lastUserText())))
+                                continue
+                            }
+                            textOut = ActionProof.honest(shown, miss); reply.put("content", textOut); pendingFollowups = emptyList()
                         }
                     }
                     if ((calls == null || calls.length() == 0) && step < maxSteps - 4 && gateLeft > 0 && nudgesLeft > 0 && !routine) {
