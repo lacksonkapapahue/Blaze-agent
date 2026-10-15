@@ -236,7 +236,7 @@ private data class Dot(val x: Float, val y: Float, val r: Float, val vx: Float, 
 
 /** Faint drifting particle dots (the site's button-hover particles), livelier while Blaze works. */
 @Composable
-fun ParticleField(mood: Mood, modifier: Modifier = Modifier) {
+fun ParticleField(mood: Mood, modifier: Modifier = Modifier, overlay: Boolean = false) {
     val c = LocalBlaze.current
     if (!com.blaze.assistant.agent.Settings.particles) return
     val energy by animateFloatAsState(if (mood == Mood.IDLE) 0f else 1f, tween(700), label = "e")
@@ -270,7 +270,7 @@ fun ParticleField(mood: Mood, modifier: Modifier = Modifier) {
             // v0.29.4: blue in both themes and easier to see (they were faint grey ink).
             val a = (if (c.dark) 0.34f else 0.30f) + 0.18f * energy + if (i % 7 == 0) 0.14f else 0f
             val col = if (i % 9 == 0 && energy > 0.1f) ParticleBlue.hot(c.dark).copy(alpha = 0.75f * energy) else ParticleBlue.of(c.dark).copy(alpha = a.coerceAtMost(0.8f))
-            drawCircle(col, d.r * 1.35f * density, Offset(px * w, py * h))
+            drawCircle(if (overlay) col.copy(alpha = col.alpha * 0.8f) else col, d.r * 1.35f * density, Offset(px * w, py * h))
         }
     }
 }

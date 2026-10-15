@@ -447,7 +447,6 @@ fun ChatScreen() {
     // v0.28.3: back inside Projects: project chat → project page → projects list (then the system's back).
     BackHandler(enabled = !isPrivate && nav.back() != null) { navNow().back()?.let { go(it) } }
     Box(Modifier.fillMaxSize().background(c.paper)) {
-        ParticleField(mood)
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             ShellTopBar(mode = shellMode,
                 // v0.24.0: the toggle only switches tabs; there is no conversation list behind it.
@@ -612,6 +611,8 @@ fun ChatScreen() {
                 }
             }
         }
+        // v0.29.5: the particles drift OVER the thread now, so they visibly pass through the see-through bubbles and text.
+        ParticleField(mood, overlay = true)
 
         // v0.27.2: the selection pill, swipe sideways for Search, Ask Blaze, Translate, Define, Read aloud, Share.
         tbRect?.let { r ->

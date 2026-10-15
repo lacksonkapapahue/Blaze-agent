@@ -151,10 +151,14 @@ object Bubbles {
  * outline marks where each bubble starts and ends. Yours is tinted with the accent blue, Blaze's is neutral.
  */
 object GlassBubble {
-    fun mineFill(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.20f else 0.10f)
-    fun mineEdge(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.70f else 0.55f)
-    fun blazeFill(c: BlazeColors): Color = c.bubble.copy(alpha = if (c.dark) 0.45f else 0.50f)
-    fun blazeEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.22f else 0.16f)
+    // v0.29.5: nearly clear (Luke: "still looks solid / grey"). Particles drift over the thread, so they show through.
+    fun mineFill(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.10f else 0.05f)
+    fun mineEdge(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.75f else 0.60f)
+    fun blazeFill(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.04f else 0.015f)
+    fun blazeEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.30f else 0.22f)
+    /** Strips and chips in the thread (the work card, follow-ups): clear with a hairline instead of a grey slab. */
+    fun stripFill(c: BlazeColors): Color = Color.Transparent
+    fun stripEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.22f else 0.16f)
 }
 
 /** Your message: a see-through accent bubble on the right with a clear outline (ink text). */
@@ -247,7 +251,8 @@ private fun MetaDot() {
 @Composable
 fun SoftPill(text: String, modifier: Modifier = Modifier, lead: String = "", fill: Color? = null, ink: Color? = null, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Row(modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(20.dp)).background(fill ?: c.accentSoft).clickable(onClick = onClick)
+    Row(modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(20.dp)).background((fill ?: c.accentSoft).let { if (it == c.bubble) GlassBubble.stripFill(c) else it })
+        .border(1.dp, if (fill == c.bubble) GlassBubble.stripEdge(c) else Color.Transparent, RoundedCornerShape(20.dp)).clickable(onClick = onClick)
         .heightIn(min = 40.dp).padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
         if (lead.isNotBlank()) {
             Text(lead, style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = ink ?: c.accent))
