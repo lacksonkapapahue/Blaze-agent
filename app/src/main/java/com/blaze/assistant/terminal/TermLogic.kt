@@ -54,7 +54,8 @@ object TermLogic {
     /** The distros this phone can install (Alpine has its own installer and works everywhere Linux does). */
     fun installable(abi: String?): List<Distro> = DISTROS.filter { it.id == "alpine" || cpu(abi)?.let { c -> it.urls[c] } != null }
 
-    val PHONE = Env("phone", "Phone shell (BusyBox)", "phone")
+    /** v0.29.8: the "phone" tab, renamed so it says what it is: this phone's own command line, nothing to install. */
+    val PHONE = Env("phone", "Phone shell · built-in tools, no install", "phone sh")
     val ALPINE = DISTROS.first().env()
 
     /** What a new tab can run: the installed distros (in list order), then the phone shell. */
@@ -84,6 +85,49 @@ object TermLogic {
     fun phoneArgs(busybox: String?): Pair<String, List<String>> =
         if (busybox != null) busybox to listOf("ash", "-l") else "/system/bin/sh" to listOf("sh", "-l")
 
+    /**
+     * v0.29.8: how the phone tab starts. BusyBox ash only when BusyBox is there AND passed the start-up probe
+     * ([probeOk]); otherwise Android's own /system/bin/sh (mksh + toybox: ls, top, ping, ps… still work), so the tab
+     * never opens as "[Process completed (signal 31)]". [busybox] is the path of libbusybox.so (argv[0] "ash" picks the applet).
+     */
+    data class Launch(val path: String, val argv: List<String>, val busybox: Boolean)
+
+    fun phoneLaunch(busybox: String?, busyboxWorks: Boolean): Launch =
+        if (busybox != null && busyboxWorks) Launch(busybox, listOf("ash", "-l"), true)
+        else Launch("/system/bin/sh", listOf("sh", "-l"), false)
+
+    /** The BusyBox start-up probe (`busybox sh -c 'echo ok'`) passed: exit 0 and "ok". A seccomp kill exits 128+31 = 159. */
+    fun probeOk(exitCode: Int, output: String): Boolean = exitCode == 0 && output.trim().lines().lastOrNull()?.trim() == "ok"
+
+    const val SIGSYS = 31
+
+    /** Termux's TerminalSession exit status: >= 0 an exit code, < 0 minus the signal that killed it. */
+    fun signalOf(exitStatus: Int): Int? = if (exitStatus < 0) -exitStatus else null
+
+    /**
+     * v0.29.8: the extra line under "[Process completed …]" when a phone tab dies at once. Signal 31 (SIGSYS) means
+     * Android's app sandbox (seccomp) killed it for a blocked system call; the next start uses Android's own shell.
+     */
+    fun finishNote(envId: String, usedBusybox: Boolean, exitStatus: Int): String? {
+        if (envId != "phone") return null
+        return when (signalOf(exitStatus)) {
+            SIGSYS -> if (usedBusybox) "\r\n Android's app sandbox stopped BusyBox (signal 31 = a blocked system call).\r\n Press Enter: this tab reopens with Android's own shell instead.\r\n"
+                      else "\r\n Android's app sandbox stopped the shell (signal 31). Press Enter to try again.\r\n"
+            null -> null
+            else -> "\r\n The shell stopped. Press Enter to open a fresh one.\r\n"
+        }
+    }
+
+    /** BusyBox applets not linked onto PATH: Android's own versions work for apps (ping uses Android's ICMP sockets) or need root anyway. */
+    val KEEP_ANDROIDS = setOf("sh", "su", "reboot", "init", "mount", "umount", "ping", "ping6", "login", "passwd")
+
+    /** Tappable example commands above the extra keys in a phone tab: (label, what it types). Each runs on tap. */
+    val PHONE_EXAMPLES: List<Pair<String, String>> = listOf(
+        "help" to "help", "ls" to "ls -l", "cd storage" to "cd /sdcard && ls", "cd home" to "cd ~ && pwd",
+        "top" to "top", "ping" to "ping -c 3 google.com", "space" to "df -h", "phone info" to "uname -a; getprop ro.product.model",
+        "clear" to "clear",
+    )
+
     /** "KEY=value" pairs for the PTY (the native side clears the environment first). */
     fun envArray(vararg maps: Map<String, String>): Array<String> {
         val m = linkedMapOf<String, String>()
@@ -104,16 +148,78 @@ object TermLogic {
     /** Pinch zoom: the new text size in px, kept in range. */
     fun zoom(current: Int, scale: Float): Int = (current * scale).toInt().coerceIn(MIN_FONT, MAX_FONT)
 
-    /** The first lines of a new tab, Termux-style. */
-    fun welcome(env: Env): String = buildString {
+    /** The first lines of a new tab, Termux-style. Lines stay under ~44 columns so a small phone doesn't wrap them. */
+    fun welcome(env: Env, busybox: Boolean = true): String = buildString {
         append("\r\n Welcome to Blaze Terminal!\r\n\r\n")
         if (env.id != "phone") {
             append(" ${env.label}, running on this phone.\r\n\r\n Working with packages:\r\n\r\n")
             for (h in env.hint) append("  - $h\r\n")
             append("\r\n Your Blaze files are in ~/phone, storage in /sdcard.\r\n")
+            append(" Pinch to zoom · long-press to copy · ⋮ to paste.\r\n\r\n")
         } else {
-            append(" Phone shell with BusyBox tools.\r\n Install a Linux (Ubuntu, Debian, Arch, Alpine…) from the + menu.\r\n")
+            append(" This is the PHONE SHELL: a command line\r\n")
+            append(" for this phone, using the tools built\r\n")
+            append(if (busybox) " into Android and Blaze (BusyBox).\r\n" else " into Android (toybox).\r\n")
+            append(" Nothing to install.\r\n\r\n")
+            append(" Not a full Linux: no apt, python or git.\r\n")
+            append(" For those: + → Install a Linux…\r\n\r\n")
+            append(" Try these, or tap the buttons below:\r\n")
+            for ((cmd, what) in PHONE_TOUR) append("   ").append(cmd.padEnd(11)).append(what).append("\r\n")
+            append("\r\n Type a command and press Enter.\r\n Ctrl-C stops a running command.\r\n\r\n")
         }
-        append(" Pinch to zoom · long-press to copy · ⋮ to paste.\r\n\r\n")
     }
+
+    /** The welcome text's short tour of the phone shell: command → what it does. */
+    val PHONE_TOUR: List<Pair<String, String>> = listOf(
+        "ls" to "list the files here",
+        "cd /sdcard" to "your phone's storage",
+        "cd ~" to "back to the home folder",
+        "top" to "what's running (q quits)",
+        "df -h" to "free storage space",
+        "help" to "every tool you can use",
+    )
+
+    /**
+     * v0.29.8: the phone shell's start-up file (sourced through \$ENV by BusyBox ash and Android's mksh): a `help`
+     * command that explains the shell and lists its tools, plus a short prompt. [busybox] = BusyBox ash is the shell.
+     */
+    fun phoneRc(busybox: Boolean): String = buildString {
+        append("# Blaze Terminal phone shell (written by Blaze on each start; put your own settings in ~/.profile)\n")
+        append(if (busybox) "PS1='phone:\\w \\$ '\n" else "PS1='phone:\${PWD##*/} \$ '\n")
+        append("help() {\n  cat <<'BLAZE_HELP'\n")
+        append(HELP_TEXT)
+        append(if (busybox) "\nEvery tool here:   busybox --list   (or: ls /system/bin)\n" else "\nEvery tool here:   ls /system/bin\n")
+        append("A tool's options:  <tool> --help    e.g.  ls --help\nBLAZE_HELP\n}\n")
+    }
+
+    val HELP_TEXT = """
+Blaze phone shell: commands for this phone itself.
+Type one and press Enter. Ctrl-C stops a command.
+
+Files and folders
+  ls                list files (ls -l for details)
+  cd <folder>       go into a folder (cd .. = up)
+  pwd               where am I?
+  cd /sdcard        your photos, downloads, documents
+  cat <file>        show a file
+  cp / mv / rm      copy, move, delete
+  mkdir <name>      make a folder
+  vi <file>         edit a text file (Esc :wq saves)
+  find . -name '*.jpg'   search for files
+
+This phone
+  top               running programs (q quits)
+  df -h             free storage
+  free -m           memory
+  uname -a          Android's kernel
+  getprop ro.product.model   phone model
+
+Network
+  ping -c 3 google.com   is the internet working?
+  wget <url>        download a file
+  ip addr           this phone's addresses
+
+Want apt, python, node or git?
+  Tap + at the top, then "Install a Linux…".
+""".trimStart('\n')
 }

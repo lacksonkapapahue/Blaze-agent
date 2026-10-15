@@ -32,23 +32,65 @@ object Terminal {
 
     fun init(ctx: Context) { app = ctx.applicationContext; Linux.init(ctx) }
 
-    /** Links every BusyBox applet into usr/bin once per app version (cheap, no root). */
+    /**
+     * v0.29.8: false when BusyBox can't run on this phone (the start-up probe failed), so the phone tab uses Android's own
+     * sh and nothing BusyBox is linked onto PATH. Before v0.29.8 every BusyBox applet died at start with SIGSYS (signal 31):
+     * the bundled builds drop privileges with setgid()/setuid(), which Android's app seccomp filter kills (the binaries
+     * are now patched to skip that; see tools/busybox/README.md).
+     */
+    @Volatile var busyboxOk = false
+        private set
+
+    /** The phone tab saw BusyBox killed by Android: stop using it until the app is updated. */
+    fun markBusyboxBroken() {
+        busyboxOk = false
+        try { bin().deleteRecursively(); bin().mkdirs(); File(app.filesDir, "usr/.bb").writeText("${appVer()} broken"); writeRc() } catch (_: Exception) { }
+    }
+
+    /** The phone shell's start-up file (help command, prompt), sourced through \$ENV. */
+    fun phoneRc(): File = File(app.filesDir, "usr/etc/phonerc")
+
+    /**
+     * Links every BusyBox applet into usr/bin once per app version (cheap, no root). v0.29.8: BusyBox is first run
+     * through a "busybox" link (argv[0] must be busybox: run as libbusybox.so it answered "applet not found", so
+     * `--list` came back empty and no tool was ever linked), and probed (`busybox sh -c 'echo ok'`) before anything is linked.
+     */
     @Synchronized fun setup() {
-        if (!hasBusybox()) return
+        if (!hasBusybox()) { busyboxOk = false; writeRc(); return }
         val stamp = File(app.filesDir, "usr/.bb")
-        val ver = try { app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime.toString() } catch (_: Exception) { "1" }
-        if (stamp.exists() && stamp.readText() == ver && File(bin(), "busybox").exists()) return
+        val ver = appVer()
+        val prev = try { stamp.readText() } catch (_: Exception) { "" }
+        if (prev == "$ver ok" && File(bin(), "busybox").exists()) { busyboxOk = true; if (!phoneRc().exists()) writeRc(); return }
+        if (prev == "$ver broken") { busyboxOk = false; writeRc(); return }
         bin().deleteRecursively(); bin().mkdirs()
-        val applets = try {
-            ProcessBuilder(busybox().absolutePath, "--list").redirectErrorStream(true).start().inputStream.bufferedReader().readLines()
-        } catch (_: Exception) { emptyList() }
-        for (a in applets + "busybox") {
-            val name = a.trim(); if (name.isEmpty() || name.contains('/')) continue
-            // Keep Android's own versions of a few that apps rely on.
-            if (name in setOf("sh", "su", "reboot", "init", "mount", "umount")) continue
-            try { Os.symlink(busybox().absolutePath, File(bin(), name).absolutePath) } catch (_: Exception) { }
-        }
-        stamp.parentFile?.mkdirs(); stamp.writeText(ver)
+        val link = File(bin(), "busybox")
+        try { Os.symlink(busybox().absolutePath, link.absolutePath) } catch (_: Exception) { }
+        val via = if (link.exists()) link.absolutePath else busybox().absolutePath
+        busyboxOk = try {
+            val p = ProcessBuilder(via, "sh", "-c", "echo ok").redirectErrorStream(true).start()
+            val out = p.inputStream.bufferedReader().readText()
+            val done = p.waitFor(10, TimeUnit.SECONDS)
+            done && TermLogic.probeOk(p.exitValue(), out)
+        } catch (_: Exception) { false }
+        if (busyboxOk) {
+            val applets = try {
+                ProcessBuilder(via, "--list").redirectErrorStream(true).start().inputStream.bufferedReader().readLines()
+            } catch (_: Exception) { emptyList() }
+            for (a in applets) {
+                val name = a.trim(); if (name.isEmpty() || name.contains('/') || name == "busybox") continue
+                // Keep Android's own versions of a few that apps rely on (ping works for apps only as Android's).
+                if (name in TermLogic.KEEP_ANDROIDS) continue
+                try { Os.symlink(busybox().absolutePath, File(bin(), name).absolutePath) } catch (_: Exception) { }
+            }
+        } else { bin().deleteRecursively(); bin().mkdirs() }
+        stamp.parentFile?.mkdirs(); stamp.writeText("$ver ${if (busyboxOk) "ok" else "broken"}")
+        writeRc()
+    }
+
+    private fun appVer(): String = try { app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime.toString() } catch (_: Exception) { "1" }
+
+    private fun writeRc() {
+        try { phoneRc().parentFile?.mkdirs(); phoneRc().writeText(TermLogic.phoneRc(busyboxOk)) } catch (_: Exception) { }
     }
 
     fun env(): Map<String, String> = mapOf(

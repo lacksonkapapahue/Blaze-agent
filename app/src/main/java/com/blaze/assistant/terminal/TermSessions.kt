@@ -13,7 +13,8 @@ import java.io.File
  * vim, htop, nano, colours, Ctrl-C and resizing all work.
  */
 object TermSessions {
-    class Tab(val n: Int, val env: TermLogic.Env, val session: TerminalSession) {
+    /** [busybox]: a phone tab running BusyBox ash (false = Android's own sh). */
+    class Tab(val n: Int, val env: TermLogic.Env, val session: TerminalSession, val busybox: Boolean = false) {
         @Volatile var finished = false
         @Volatile var welcomed = false
     }
@@ -36,7 +37,17 @@ object TermSessions {
     private val client = object : TerminalSessionClient {
         override fun onTextChanged(s: TerminalSession) { screen?.changed(find(s)) }
         override fun onTitleChanged(s: TerminalSession) { screen?.structure() }
-        override fun onSessionFinished(s: TerminalSession) { find(s)?.finished = true; screen?.structure(); screen?.changed(find(s)) }
+        override fun onSessionFinished(s: TerminalSession) {
+            val t = find(s)
+            t?.finished = true
+            // v0.29.8: a phone tab killed by Android's sandbox (signal 31) says why, and the next start skips BusyBox.
+            if (t != null) {
+                val status = try { s.exitStatus } catch (_: Exception) { 0 }
+                if (t.busybox && TermLogic.signalOf(status) == TermLogic.SIGSYS) Terminal.markBusyboxBroken()
+                TermLogic.finishNote(t.env.id, t.busybox, status)?.let { note -> val b = note.toByteArray(); s.emulator?.append(b, b.size) }
+            }
+            screen?.structure(); screen?.changed(t)
+        }
         override fun onCopyTextToClipboard(s: TerminalSession, text: String?) {
             val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("Blaze Terminal", text.orEmpty()))
@@ -71,15 +82,19 @@ object TermSessions {
         val e = env ?: TermLogic.pick(lastEnv, Distros.installedIds())
         lastEnv = e.id
         val home = Terminal.home().absolutePath
+        var usedBusybox = false
         val session = if (e.id != "phone" && Distros.installed(e.id)) {
             val cmd = Linux.command(null, "xterm-256color", e.id)
             TerminalSession(cmd.first(), home, cmd.toTypedArray(), TermLogic.envArray(Terminal.env(), Linux.env()), 3000, client)
         } else {
+            // v0.29.8: BusyBox ash only when it passed Terminal.setup()'s probe, else Android's own sh (TermLogic.phoneLaunch).
             val bb = File(app.applicationInfo.nativeLibraryDir, "libbusybox.so").takeIf { it.exists() }?.absolutePath
-            val (path, argv) = TermLogic.phoneArgs(bb)
-            TerminalSession(path, home, argv.toTypedArray(), TermLogic.envArray(Terminal.env(), mapOf("PS1" to "\\w \\$ ")), 3000, client)
+            val l = TermLogic.phoneLaunch(bb, Terminal.busyboxOk)
+            usedBusybox = l.busybox
+            val extra = mapOf("ENV" to Terminal.phoneRc().absolutePath, "PS1" to if (l.busybox) "phone:\\w \\$ " else "phone \$ ")
+            TerminalSession(l.path, home, l.argv.toTypedArray(), TermLogic.envArray(Terminal.env(), extra), 3000, client)
         }
-        val tab = Tab(++counter, e, session)
+        val tab = Tab(++counter, e, session, usedBusybox)
         synchronized(tabs) { tabs += tab; current = tabs.size - 1 }
         screen?.structure()
         return tab

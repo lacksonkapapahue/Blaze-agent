@@ -52,7 +52,7 @@ class TermLogicTest {
     @Test fun tabsAndZoom() {
         assertEquals("1 alpine", TermLogic.tabLabel(1, TermLogic.ALPINE, null, false))
         assertEquals("2 vim", TermLogic.tabLabel(2, TermLogic.ALPINE, "vim", false))
-        assertEquals("3 phone ✕", TermLogic.tabLabel(3, TermLogic.PHONE, "", true))
+        assertEquals("3 phone sh ✕", TermLogic.tabLabel(3, TermLogic.PHONE, "", true))
         assertEquals(TermLogic.MAX_FONT, TermLogic.zoom(60, 2f)); assertEquals(TermLogic.MIN_FONT, TermLogic.zoom(15, 0.2f))
         assertTrue(TermLogic.welcome(TermLogic.ALPINE).contains("apk add <package>"))
     }

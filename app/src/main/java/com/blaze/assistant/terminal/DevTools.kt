@@ -259,7 +259,7 @@ object DevTools {
 
     private suspend fun status(): String {
         val sb = StringBuilder()
-        sb.append("Phone shell: ").append(if (Terminal.hasBusybox()) "sh + BusyBox" else "sh only (no BusyBox)").append(". Working folder: ").append(show(Terminal.agentCwd())).append('\n')
+        sb.append("Phone shell: ").append(if (Terminal.busyboxOk) "sh + BusyBox" else "sh + Android toybox (BusyBox unavailable)").append(". Working folder: ").append(show(Terminal.agentCwd())).append('\n')
         sb.append("Alpine Linux: ").append(when { Linux.installed() -> "installed (${Linux.sizeMb()} MB)"; Linux.supported() -> "not installed (run_code or linux_install sets it up)"; else -> "not supported on this CPU" }).append('\n')
         if (Linux.installed()) sb.append(Terminal.run("for t in python3 pip3 node npm git curl gcc make java; do printf '%s: ' \$t; command -v \$t >/dev/null && echo yes || echo no; done; df -h /root 2>/dev/null | tail -1", 30, true).removePrefix("exit 0").trim()).append('\n')
         sb.append("Termux: ").append(if (Terminal.termuxInstalled(app)) "installed" else "not installed").append('\n')
