@@ -2,6 +2,9 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.1: browser load feed
+- While a page loads, Blaze Browser shows what it's pulling under the progress bar: "Connecting to bbc.com", then "Pulling 23 files · fonts.gstatic.com › inter.woff2 · 4s". After 6 s with nothing new it says "Slow network · still waiting on bbc.com", so a slow connection looks like work, not a freeze (`browser/LoadFeed.kt`, LoadFeedTest).
+
 ## v0.29.0: Home board
 - Home board: a widget store, the board itself, a Customise sheet, an interest picker, widget tools Blaze can use (add / change / remove / list widgets) and a Home pill in the top bar. Sources include crypto (CoinGecko), currency rates and more (`home/`, `ui/HomeBoardUi.kt`).
 

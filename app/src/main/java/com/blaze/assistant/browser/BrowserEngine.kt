@@ -59,6 +59,11 @@ object BrowserEngine {
         internal var maskJs: String? = null
         var url by mutableStateOf("")
         var progress by mutableIntStateOf(100)
+        /** v0.29.1 load feed: what the page is pulling right now (see [LoadFeed]). */
+        var pulls by mutableIntStateOf(0)
+        var pulling by mutableStateOf("")
+        var loadStart by mutableStateOf(0L)
+        var lastPull by mutableStateOf(0L)
         var canBack by mutableStateOf(false)
         var canForward by mutableStateOf(false)
         @Volatile var loaded: CompletableDeferred<Unit> = CompletableDeferred(Unit)
@@ -185,8 +190,13 @@ object BrowserEngine {
             }
             override fun onPageStarted(v: WebView, url: String?, favicon: Bitmap?) {
                 t.url = url.orEmpty(); t.progress = 5
+                t.pulls = 0; t.pulling = ""; t.loadStart = System.currentTimeMillis(); t.lastPull = t.loadStart
                 if (t.loaded.isCompleted) t.loaded = CompletableDeferred()
                 t.maskJs?.let { v.evaluateJavascript(it, null) }
+            }
+            override fun onLoadResource(v: WebView, url: String?) {
+                if (t.progress >= 100 || url.isNullOrBlank() || url.startsWith("data:")) return
+                t.pulls++; t.pulling = LoadFeed.label(url); t.lastPull = System.currentTimeMillis()
             }
             override fun onPageFinished(v: WebView, url: String?) {
                 t.url = url.orEmpty(); t.progress = 100; t.canBack = v.canGoBack(); t.canForward = v.canGoForward()

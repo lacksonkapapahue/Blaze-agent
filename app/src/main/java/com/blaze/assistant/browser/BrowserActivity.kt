@@ -265,6 +265,18 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
                 enabled = tab?.url.orEmpty().startsWith("http") || previewPage != null) { askFirst = null; askOpen = true }
         }
         BrandProgress(tab?.progress ?: 100, Modifier.padding(horizontal = 14.dp))
+        // v0.29.1: show what the page is pulling, so a slow network still looks alive.
+        tab?.let { tb ->
+            if (tb.progress in 0..99) {
+                var now by remember { mutableStateOf(System.currentTimeMillis()) }
+                LaunchedEffect(tb.id, tb.loadStart) { while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(500) } }
+                val host = LoadFeed.label(tb.url).substringBefore(" ›")
+                androidx.compose.material3.Text(LoadFeed.line(tb.progress, tb.pulls, tb.pulling, host, tb.loadStart, tb.lastPull, now),
+                    color = Glass.sub, fontSize = 11.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 3.dp))
+            }
+        }
         // Rounded tab chips (only with more than one tab of this kind).
         val sameKind = BrowserEngine.tabs.filter { it.isPrivate == priv }
         if (sameKind.size > 1) {
