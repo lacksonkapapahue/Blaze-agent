@@ -279,7 +279,7 @@ object MagicHand {
     private fun type() = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
 
     private fun screen(): Pair<Int, Int> {
-        val s = svc ?: return 1080 to 2340
+        val s = svc ?: return android.content.res.Resources.getSystem().displayMetrics.let { it.widthPixels to it.heightPixels }
         val w = wm
         return if (android.os.Build.VERSION.SDK_INT >= 30 && w != null) w.currentWindowMetrics.bounds.let { it.width() to it.height() }
         else s.resources.displayMetrics.let { it.widthPixels to it.heightPixels }
