@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -149,6 +150,9 @@ object Bubbles {
 /**
  * v0.29.4: see-through bubbles. The fill is a light tint (so particles and the page show through) and a clear 1.2dp
  * outline marks where each bubble starts and ends. Yours is tinted with the accent blue, Blaze's is neutral.
+ *
+ * v0.29.5/0.29.6: nearly clear glass. The fills are a whisper of tint (no opaque backing anywhere, cards inside included)
+ * and the particles drift across the thread. The text keeps a soft halo in the page colour ([halo]) so it stays readable.
  */
 object GlassBubble {
     // v0.29.5: nearly clear (Luke: "still looks solid / grey"). Particles drift over the thread, so they show through.
@@ -159,6 +163,13 @@ object GlassBubble {
     /** Strips and chips in the thread (the work card, follow-ups): clear with a hairline instead of a grey slab. */
     fun stripFill(c: BlazeColors): Color = Color.Transparent
     fun stripEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.22f else 0.16f)
+    // v0.29.9: nothing opaque inside a bubble either, and the words keep a soft halo for contrast.
+    /** The most opaque any bubble fill may be (GlassBubbleTest). */
+    const val MAX_FILL_ALPHA = 0.16f
+    /** Code / table cards inside a bubble: a soft inset, still see-through. */
+    fun cardFill(c: BlazeColors): Color = c.inset.copy(alpha = if (c.dark) 0.30f else 0.40f)
+    /** A soft glow in the page colour behind every letter, so the words stay crisp with particles drifting across them. */
+    fun halo(c: BlazeColors): Shadow = Shadow(color = c.paper.copy(alpha = if (c.dark) 0.85f else 0.95f), offset = Offset.Zero, blurRadius = 6f)
 }
 
 /** Your message: a see-through accent bubble on the right with a clear outline (ink text). */
@@ -181,7 +192,7 @@ fun UserBubble(text: String, quoted: String = "", pos: GroupPos = GroupPos.SINGL
             // v0.28.1: your own message renders its markdown too (## App, 1. **Offline mode**), never raw symbols.
             val shown = remember(text, c.ink) { Md.render(text, c.ink, c.ink.copy(alpha = 0.10f)) }
             SelectionContainer {
-                Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink))
+                Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink, shadow = GlassBubble.halo(c)))
             }
         }
     }
@@ -216,7 +227,7 @@ fun ErrorBubble(text: String, pos: GroupPos = GroupPos.SINGLE) {
         Label("Error", color = c.accent, size = 9.sp)
         Spacer(Modifier.height(4.dp))
         SelectionContainer {
-            Text(text, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 21.sp, color = c.body))
+            Text(text, style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 21.sp, color = c.body, shadow = GlassBubble.halo(c)))
         }
     }
 }
