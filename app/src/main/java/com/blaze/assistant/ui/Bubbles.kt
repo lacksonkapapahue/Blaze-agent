@@ -2,6 +2,7 @@ package com.blaze.assistant.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -145,25 +146,38 @@ object Bubbles {
     }
 }
 
-/** Your message: an ink bubble on the right (paper text). */
+/**
+ * v0.29.4: see-through bubbles. The fill is a light tint (so particles and the page show through) and a clear 1.2dp
+ * outline marks where each bubble starts and ends. Yours is tinted with the accent blue, Blaze's is neutral.
+ */
+object GlassBubble {
+    fun mineFill(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.20f else 0.10f)
+    fun mineEdge(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.70f else 0.55f)
+    fun blazeFill(c: BlazeColors): Color = c.bubble.copy(alpha = if (c.dark) 0.45f else 0.50f)
+    fun blazeEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.22f else 0.16f)
+}
+
+/** Your message: a see-through accent bubble on the right with a clear outline (ink text). */
 @Composable
 fun UserBubble(text: String, quoted: String = "", pos: GroupPos = GroupPos.SINGLE, modifier: Modifier = Modifier) {
     val c = LocalBlaze.current
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(Bubbles.shape(Side.ME, pos)).background(c.ink)
+        val shape = Bubbles.shape(Side.ME, pos)
+        Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(shape).background(GlassBubble.mineFill(c))
+            .border(1.2.dp, GlassBubble.mineEdge(c), shape)
             .padding(horizontal = 14.dp, vertical = 9.dp)) {
             if (quoted.isNotEmpty()) {
                 Row(Modifier.padding(bottom = 6.dp).height(IntrinsicSize.Min)) {
-                    Box(Modifier.width(2.dp).fillMaxHeight().clip(RoundedCornerShape(1.dp)).background(c.paper.copy(alpha = 0.5f)))
+                    Box(Modifier.width(2.dp).fillMaxHeight().clip(RoundedCornerShape(1.dp)).background(c.accent.copy(alpha = 0.6f)))
                     Spacer(Modifier.width(8.dp))
                     Text(quoted, maxLines = 3, overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.paper.copy(alpha = 0.7f)))
+                        style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 18.sp, color = c.sub))
                 }
             }
             // v0.28.1: your own message renders its markdown too (## App, 1. **Offline mode**), never raw symbols.
-            val shown = remember(text, c.paper) { Md.render(text, c.paper, c.paper.copy(alpha = 0.16f)) }
+            val shown = remember(text, c.ink) { Md.render(text, c.ink, c.ink.copy(alpha = 0.10f)) }
             SelectionContainer {
-                Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.paper))
+                Text(shown, style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink))
             }
         }
     }
@@ -173,9 +187,11 @@ fun UserBubble(text: String, quoted: String = "", pos: GroupPos = GroupPos.SINGL
 @Composable
 fun BlazeBubble(pos: GroupPos = GroupPos.SINGLE, modifier: Modifier = Modifier, fill: Color? = null, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalBlaze.current
-    val bg = fill ?: c.bubble
+    val bg = fill ?: GlassBubble.blazeFill(c)
+    val shape = Bubbles.shape(Side.BLAZE, pos)
     Row(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).clip(Bubbles.shape(Side.BLAZE, pos)).background(bg)
+        Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).clip(shape).background(bg)
+            .border(1.2.dp, if (fill != null) c.accent.copy(alpha = 0.45f) else GlassBubble.blazeEdge(c), shape)
             .padding(horizontal = 14.dp, vertical = 10.dp)) {
             CompositionLocalProvider(LocalBubble provides bg) { content() }
         }

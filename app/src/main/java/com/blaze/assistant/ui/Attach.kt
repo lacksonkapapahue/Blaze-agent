@@ -233,7 +233,8 @@ fun SentBubble(text: String, quoted: String, media: List<String>, files: List<St
     val words = AttachView.bubbleText(text, media)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         if (media.isNotEmpty()) {
-            Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(Bubbles.shape(Side.ME, pos)).background(c.ink).padding(4.dp),
+            Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(Bubbles.shape(Side.ME, pos)).background(GlassBubble.mineFill(c))
+                .border(1.2.dp, GlassBubble.mineEdge(c), Bubbles.shape(Side.ME, pos)).padding(4.dp),
                 horizontalAlignment = Alignment.End) {
                 val single = media.size == 1
                 // v0.28.1: several pictures = a fanned card stack (swipe to flip, tap or ⤢ for the full-screen viewer).
@@ -252,8 +253,8 @@ fun SentBubble(text: String, quoted: String, media: List<String>, files: List<St
                     }
                 }
                 if (words.isNotBlank() || quoted.isNotBlank()) {
-                    Text(remember(words, c.paper) { Md.render(words, c.paper, c.paper.copy(alpha = 0.16f)) }, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.paper))
+                    Text(remember(words, c.ink) { Md.render(words, c.ink, c.ink.copy(alpha = 0.10f)) }, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
+                        style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink))
                 }
             }
         } else UserBubble(text, quoted, pos)
