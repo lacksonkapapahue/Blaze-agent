@@ -200,10 +200,10 @@ fun SelectionPill(rect: Rect, actions: List<SelectionActions.Action>, ink: Color
 
 @Composable
 private fun EdgeHint(modifier: Modifier, height: Dp, ink: Color, paper: Color, start: Boolean) {
-    val fade = if (start) listOf(ink, ink.copy(alpha = 0f)) else listOf(ink.copy(alpha = 0f), ink)
-    Box(modifier.width(30.dp).height(height).background(Brush.horizontalGradient(fade)),
+    val fade = if (start) listOf(ink, ink.copy(alpha = 0.92f), ink.copy(alpha = 0f)) else listOf(ink.copy(alpha = 0f), ink.copy(alpha = 0.92f), ink)
+    Box(modifier.width(44.dp).height(height).background(Brush.horizontalGradient(fade)),
         contentAlignment = if (start) Alignment.CenterStart else Alignment.CenterEnd) {
-        Text(if (start) "\u2039" else "\u203a", modifier = Modifier.padding(horizontal = 8.dp),
+        Text(if (start) "\u2039" else "\u203a", modifier = Modifier.padding(horizontal = 10.dp),
             style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = paper.copy(alpha = 0.75f)))
     }
 }
