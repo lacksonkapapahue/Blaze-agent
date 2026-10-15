@@ -2,6 +2,13 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.1: Terminal that explains itself, phone shell fixed
+
+- **Phone shell starts again.** On phones like the Galaxy A12 the phone tab opened straight to "[Process completed (signal 31) - press Enter]". Signal 31 is SIGSYS: Android's app sandbox (seccomp) kills any app process that calls setgid/setuid, and the bundled BusyBox called both at the start of every tool (its `check_suid` privilege drop, a no-op for an app). Both BusyBox binaries now skip that drop (one instruction each, `tools/busybox/patch_setid.py`, README there).
+- BusyBox's tools are really on PATH now: setup ran `libbusybox.so --list`, which BusyBox answers with "applet not found", so nothing was ever linked. It now runs through a `busybox` link and is probed first; if a phone still refuses it, the tab opens Android's own shell (toybox) instead of a dead tab and says why. ping stays Android's (it works for apps).
+- The phone tab explains itself: a welcome that says what it is (this phone's command line, nothing to install, not a full Linux) and how to get a Linux, a short tour, tappable example commands above the keys (help, ls, cd storage, top, ping, space…) and a `help` command listing the tools with plain descriptions. Renamed "Phone shell · built-in tools, no install" (tab chip "phone sh").
+- ⋮ and + open a Blaze bottom sheet (rounded, dark, Blaze blue, an icon and a hint per row, the app's motion timing) instead of the white Android pop-up. The extra keys are rounded Blaze key caps, CTRL/ALT light up blue, tabs use Blaze blue; the remaining confirmations are dark dialogs.
+
 ## v0.29.7: Browser remembers: saved passwords, tabs that come back, offline pages
 
 - **Saved passwords.** Sign in on a site in Blaze Browser and a Blaze card asks "Save password?" (or "Update password?" when the password changed), with Save, Not now and Never for this site. Passwords are encrypted with the phone's Android Keystore (AES-256-GCM, the key never leaves the phone) in `browser_logins.json`, one entry per site and username, several accounts per site. Sites are matched by registrable domain (accounts.google.com and www.google.com are one site; bob.github.io and alice.github.io are not). Next time a sign-in form appears, a "Use your saved password" bar offers the accounts for that site; one tap fills them (it never presses Sign in for you). https pages (and the LAN) only. Two-step sign-ins (email first, password next) keep the email.

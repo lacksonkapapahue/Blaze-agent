@@ -1,7 +1,10 @@
 package com.blaze.assistant.terminal
 
 import android.annotation.SuppressLint
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import android.widget.FrameLayout
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -35,8 +38,10 @@ import kotlinx.coroutines.withContext
  * v0.29.2 Blaze Terminal: a full-screen, Termux-style terminal. Black screen, monospace text, Termux's two
  * extra-keys rows (ESC / ― HOME ↑ END PGUP · ⇥ CTRL ALT ← ↓ → PGDN), tabs along the top, pinch to zoom,
  * long-press to select and copy, paste from the menu. Tabs run the user's Alpine Linux (PRoot) or the phone shell.
+ * v0.30.1: Blaze colours (blue accent, rounded key caps), ⋮ and + open a Blaze bottom sheet (TermSheetHost) instead of a
+ * white Android pop-up, and a phone tab shows tappable example commands above the keys.
  */
-class BlazeTerminalActivity : Activity(), TermSessions.Listener {
+class BlazeTerminalActivity : ComponentActivity(), TermSessions.Listener {
     companion object {
         fun open(ctx: Context) = ctx.startActivity(Intent(ctx, BlazeTerminalActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
@@ -51,9 +56,14 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private val ink = Color.parseColor("#E6E6E6")
-    private val dim = Color.parseColor("#8A8A8A")
-    private val accent = Color.parseColor("#FF8A3D")
+    private val ink = Color.parseColor("#F0F0EE")        // Blaze DarkColors.ink
+    private val dim = Color.parseColor("#8F8F8D")
+    private val accent = Color.parseColor("#6B8CFF")     // Blaze blue on dark (DarkColors.accent)
+    private val keyBg = Color.parseColor("#1B1B1F")
+    private val keyEdge = Color.parseColor("#2C2C31")
+    private val barBg = Color.parseColor("#0B0B0D")
+    private val sheet = TermSheet.State()
+    private lateinit var examplesBar: HorizontalScrollView
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -61,7 +71,7 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.statusBarColor = Color.BLACK
-        window.navigationBarColor = Color.BLACK
+        window.navigationBarColor = barBg
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
         if (fontPx == 0) fontPx = (resources.displayMetrics.scaledDensity * 13).toInt().coerceIn(TermLogic.MIN_FONT, TermLogic.MAX_FONT)
 
@@ -86,12 +96,29 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
         term.setTerminalViewClient(viewClient)
         root.addView(term, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // v0.30.1: tappable example commands (phone tabs only), so the phone shell explains itself.
+        val examples = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(6), dp(4), dp(6), dp(4)) }
+        for ((label, cmd) in TermLogic.PHONE_EXAMPLES) examples.addView(chip(label, false) { runExample(cmd) })
+        examplesBar = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; setBackgroundColor(barBg); addView(examples) }
+        root.addView(examplesBar)
+
+        val keys = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(barBg); setPadding(dp(4), dp(3), dp(4), dp(4)) }
         for (row in TermLogic.ROWS) {
             val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-            for (k in row) r.addView(extraKey(k), LinearLayout.LayoutParams(0, dp(42), 1f))
-            root.addView(r)
+            for (k in row) r.addView(extraKey(k), LinearLayout.LayoutParams(0, dp(40), 1f).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+            keys.addView(r)
         }
-        setContentView(root)
+        root.addView(keys)
+
+        // The Blaze sheet floats over everything (scrim + rounded card); it draws nothing while closed.
+        val frame = FrameLayout(this)
+        frame.addView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent { TermSheetHost(sheet) }
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(frame)
+        com.blaze.assistant.ui.MotionTokens.refresh(this)
 
         TermSessions.screen = this
         val tab = TermSessions.ensureOne(this)
@@ -134,6 +161,15 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
             tabRow.addView(c)
         }
         TermSessions.active()?.let { if (term.currentSession !== it.session) attach(it) }
+        if (::examplesBar.isInitialized) examplesBar.visibility = if (TermSessions.active()?.env?.id == "phone") View.VISIBLE else View.GONE
+    }
+
+    /** Types an example command into the active tab and runs it (a finished tab is reopened first). */
+    private fun runExample(cmd: String) {
+        var t = TermSessions.active() ?: return
+        if (t.finished) { val env = t.env; TermSessions.close(t); t = TermSessions.open(this, env); attach(t) }
+        t.session.write(cmd + "\r")
+        term.requestFocus()
     }
 
     // ---- UI pieces ----
@@ -144,8 +180,8 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
     private fun chip(text: String, selected: Boolean, onClick: () -> Unit) = TextView(this).apply {
         this.text = text
         typeface = Typeface.MONOSPACE; textSize = 13f
-        setTextColor(if (selected) Color.BLACK else ink)
-        background = pill(if (selected) accent else Color.parseColor("#161616"), if (selected) accent else Color.parseColor("#2A2A2A"))
+        setTextColor(if (selected) Color.WHITE else ink)
+        background = pill(if (selected) accent else keyBg, if (selected) accent else keyEdge)
         setPadding(dp(12), dp(6), dp(12), dp(6))
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(6) }
         setOnClickListener { onClick() }
@@ -154,14 +190,15 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
     @SuppressLint("ClickableViewAccessibility")
     private fun extraKey(k: TermLogic.Key) = TextView(this).apply {
         text = k.label; gravity = Gravity.CENTER
-        typeface = Typeface.MONOSPACE; textSize = 15f
-        setTextColor(ink); setBackgroundColor(Color.BLACK)
+        typeface = Typeface.MONOSPACE; textSize = 14f
+        setTextColor(ink); background = keyCap(false)
         if (k.toggle.isNotEmpty()) keyViews[k.toggle] = this
         var repeating: Runnable? = null
         setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    v.setBackgroundColor(Color.parseColor("#2A2A2A"))
+                    v.background = keyCap(true)
+                    if (com.blaze.assistant.ui.MotionTokens.enabled) v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(com.blaze.assistant.ui.MotionTokens.ms(com.blaze.assistant.ui.MotionTokens.SHORT) / 2).start()
                     press(k)
                     if (k.repeat) {
                         val r = object : Runnable { override fun run() { press(k); main.postDelayed(this, 60) } }
@@ -169,7 +206,8 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
                     }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.setBackgroundColor(Color.BLACK)
+                    v.background = keyCap(k.toggle == "ctrl" && ctrl || k.toggle == "alt" && alt)
+                    v.animate().scaleX(1f).scaleY(1f).setDuration(com.blaze.assistant.ui.MotionTokens.ms(com.blaze.assistant.ui.MotionTokens.SHORT)).start()
                     repeating?.let { main.removeCallbacks(it) }; repeating = null
                 }
             }
@@ -196,9 +234,16 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
         }
     }
 
+    /** A rounded Blaze key cap; [on] = held, or a CTRL/ALT that's switched on (Blaze blue). */
+    private fun keyCap(on: Boolean) = GradientDrawable().apply {
+        cornerRadius = dp(10).toFloat()
+        setColor(if (on) Color.argb(60, Color.red(accent), Color.green(accent), Color.blue(accent)) else keyBg)
+        setStroke(dp(1), if (on) accent else keyEdge)
+    }
+
     private fun paintToggles() {
-        keyViews["ctrl"]?.setTextColor(if (ctrl) accent else ink)
-        keyViews["alt"]?.setTextColor(if (alt) accent else ink)
+        keyViews["ctrl"]?.let { it.setTextColor(if (ctrl) accent else ink); it.background = keyCap(ctrl) }
+        keyViews["alt"]?.let { it.setTextColor(if (alt) accent else ink); it.background = keyCap(alt) }
     }
 
     private fun resetToggles() { if (ctrl || alt) { ctrl = false; alt = false; paintToggles() } }
@@ -210,10 +255,14 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
 
     private fun newTabMenu() {
         val envs = TermSessions.envs()
-        val labels = envs.map { it.label } + "Install a Linux…"
-        AlertDialog.Builder(this).setTitle("New tab").setItems(labels.toTypedArray()) { _, i ->
-            if (i < envs.size) { attach(TermSessions.open(this, envs[i])); showKeyboard() } else installMenu()
-        }.show()
+        val items = envs.map { e ->
+            if (e.id == "phone") TermSheet.Item(e.id, "Phone shell", "This phone's own command line: ls, cd, top, ping… Nothing to install.", "phone")
+            else TermSheet.Item(e.id, e.label, "Full Linux: ${e.hint.firstOrNull { it.startsWith("Install") }?.removePrefix("Install:")?.trim() ?: "install packages"}", "linux")
+        } + TermSheet.Item("install", "Install a Linux…", "Ubuntu, Debian, Arch, Alpine… for apt, python, git and more", "install")
+        sheet.show("New tab", "Pick what the new tab runs", items) { item ->
+            val e = envs.firstOrNull { it.id == item.id }
+            if (e != null) { attach(TermSessions.open(this, e)); showKeyboard() } else installMenu()
+        }
     }
 
     /** Every distro this phone can run, with its size; installed ones can be removed (long-press style: second dialog). */
@@ -225,13 +274,13 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
             val size = d.sizeMb[cpu]?.let { "~$it MB" } ?: ""
             "${d.env().label}  ·  " + if (Distros.installed(d.id)) "installed" else size
         }
-        AlertDialog.Builder(this).setTitle("Linux on this phone").setItems(labels.toTypedArray()) { _, i ->
+        dialog().setTitle("Linux on this phone").setItems(labels.toTypedArray()) { _, i ->
             val d = list[i]
             if (Distros.installed(d.id)) {
-                AlertDialog.Builder(this).setTitle(d.env().label)
+                dialog().setTitle(d.env().label)
                     .setItems(arrayOf("Open a new tab", "Remove ${d.name}")) { _, j ->
                         if (j == 0) { attach(TermSessions.open(this, d.env())); showKeyboard() }
-                        else AlertDialog.Builder(this).setMessage("Remove ${d.name} and everything installed in it?")
+                        else dialog().setMessage("Remove ${d.name} and everything installed in it?")
                             .setPositiveButton("Remove") { _, _ ->
                                 synchronized(TermSessions.tabs) { TermSessions.tabs.filter { it.env.id == d.id } }.forEach { TermSessions.close(it) }
                                 scope.launch { withContext(Dispatchers.IO) { Distros.uninstall(d.id) }; Toast.makeText(this@BlazeTerminalActivity, "${d.name} removed", Toast.LENGTH_SHORT).show()
@@ -244,7 +293,7 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
 
     private fun install(d: TermLogic.Distro) {
         val text = TextView(this).apply { setPadding(dp(24), dp(16), dp(24), dp(8)); textSize = 14f; this.text = "Starting…" }
-        val dlg = AlertDialog.Builder(this).setTitle("Installing ${d.env().label}").setView(text)
+        val dlg = dialog().setTitle("Installing ${d.env().label}").setView(text)
             .setNegativeButton("Hide", null).setCancelable(true).show()
         val watch = scope.launch {
             val flow = if (d.id == "alpine") Linux.status else Distros.status
@@ -263,23 +312,43 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
 
     private fun moreMenu() {
         val tab = TermSessions.active()
-        val items = listOf("Paste", "Copy all text", "Keyboard", "Bigger text", "Smaller text", "Restart this tab", "Close this tab")
-        AlertDialog.Builder(this).setItems(items.toTypedArray()) { _, i ->
+        val items = buildList {
+            add(TermSheet.Item("paste", "Paste", "Type what's on the clipboard", "paste"))
+            add(TermSheet.Item("copy", "Copy all text", "Everything in this tab, to the clipboard", "copy"))
+            add(TermSheet.Item("keyboard", "Keyboard", "Show the on-screen keyboard", "keyboard"))
+            add(TermSheet.Item("bigger", "Bigger text", "Or pinch out on the terminal", "bigger"))
+            add(TermSheet.Item("smaller", "Smaller text", "Or pinch in", "smaller"))
+            if (tab?.env?.id == "phone") add(TermSheet.Item("help", "What can I type here?", "Runs help: every tool in the phone shell", "help"))
+            add(TermSheet.Item("restart", "Restart this tab", "Stop what's running and start fresh", "restart"))
+            add(TermSheet.Item("close", "Close this tab", "", "close", danger = true))
+        }
+        val title = tab?.let { TermLogic.tabLabel(it.n, it.env, it.session.title, it.finished) } ?: "Terminal"
+        sheet.show(title, tab?.env?.label.orEmpty(), items) { item ->
             val s = term.currentSession
-            when (i) {
-                0 -> s?.let { pasteInto(it) }
-                1 -> s?.emulator?.screen?.transcriptText?.let { txt ->
+            when (item.id) {
+                "paste" -> s?.let { pasteInto(it) }
+                "copy" -> s?.emulator?.screen?.transcriptText?.let { txt ->
                     val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("Blaze Terminal", txt)); Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
                 }
-                2 -> showKeyboard()
-                3 -> setFont(TermLogic.zoom(fontPx, 1.15f))
-                4 -> setFont(TermLogic.zoom(fontPx, 1 / 1.15f))
-                5 -> tab?.let { val env = it.env; TermSessions.close(it); attach(TermSessions.open(this, env)) }
-                6 -> tab?.let { confirmClose(it) }
+                "keyboard" -> showKeyboard()
+                "bigger" -> setFont(TermLogic.zoom(fontPx, 1.15f))
+                "smaller" -> setFont(TermLogic.zoom(fontPx, 1 / 1.15f))
+                "help" -> runExample("help")
+                "restart" -> tab?.let { val env = it.env; TermSessions.close(it); attach(TermSessions.open(this, env)) }
+                "close" -> tab?.let { confirmClose(it) }
             }
-        }.show()
+        }
     }
+
+    @Deprecated("Back closes the Blaze sheet first")
+    override fun onBackPressed() {
+        if (sheet.open) { sheet.close(); return }
+        @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    /** Dark Android dialogs for the remaining confirmations, so nothing flashes white over the terminal. */
+    private fun dialog() = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
 
     private fun pasteInto(s: TerminalSession) {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
@@ -291,7 +360,7 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
 
     private fun confirmClose(t: TermSessions.Tab) {
         if (t.finished) { closeTab(t); return }
-        AlertDialog.Builder(this).setMessage("Close tab ${t.n}? Anything running in it stops.")
+        dialog().setMessage("Close tab ${t.n}? Anything running in it stops.")
             .setPositiveButton("Close") { _, _ -> closeTab(t) }.setNegativeButton("Cancel", null).show()
     }
 
@@ -338,7 +407,7 @@ class BlazeTerminalActivity : Activity(), TermSessions.Listener {
             val t = TermSessions.active() ?: return
             if (!t.welcomed) {
                 t.welcomed = true
-                val b = TermLogic.welcome(t.env).toByteArray()
+                val b = TermLogic.welcome(t.env, t.busybox).toByteArray()
                 t.session.emulator?.append(b, b.size)
                 term.onScreenUpdated()
             }

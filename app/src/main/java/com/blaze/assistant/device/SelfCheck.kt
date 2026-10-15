@@ -47,7 +47,7 @@ object SelfCheck {
         // Terminal
         val T = com.blaze.assistant.terminal.Terminal
         val sh = try { withTimeoutOrNull(10_000) { T.run("echo blaze-ok", 8) }?.contains("blaze-ok") == true } catch (_: Exception) { false }
-        out += Item("Terminal", sh, if (sh) "Phone shell works${if (T.hasBusybox()) " · BusyBox tools ready" else " · BusyBox missing (fewer tools)"}" else "The phone shell didn't answer.")
+        out += Item("Terminal", sh, if (sh) "Phone shell works${if (T.busyboxOk) " · BusyBox tools ready" else if (T.hasBusybox()) " · BusyBox blocked by Android (using Android's own tools)" else " · BusyBox missing (fewer tools)"}" else "The phone shell didn't answer.")
         val L = com.blaze.assistant.terminal.Linux
         val linuxOk = if (L.installed()) try { withTimeoutOrNull(30_000) { T.run("echo linux-ok", 25, true) }?.contains("linux-ok") == true } catch (_: Exception) { false } else false
         out += Item("Linux", linuxOk || !L.supported(), when {
