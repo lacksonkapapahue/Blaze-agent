@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -139,7 +141,7 @@ abstract class BlazeDocsTask : DefaultTask() {
         root.resolve("docs").takeIf { it.isDirectory }?.walkTopDown()?.filter { it.isFile && it.extension == "md" }?.sortedBy { it.path }?.forEach {
             put("docs/" + it.relativeTo(root.resolve("docs")).invariantSeparatorsPath, it.readText())
         }
-        val md = java.security.MessageDigest.getInstance("SHA-1")
+        val md = MessageDigest.getInstance("SHA-1")
         for ((n, t) in files) {
             val f = out.resolve(n); f.parentFile.mkdirs(); f.writeText(t)
             md.update(n.toByteArray()); md.update(0); md.update(t.toByteArray()); md.update(1)
