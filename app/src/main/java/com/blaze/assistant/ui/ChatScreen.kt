@@ -91,8 +91,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalTextToolbar
-import androidx.compose.ui.platform.TextToolbar
-import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -148,17 +146,6 @@ private fun buildItems(messages: List<ChatMessage>, working: Boolean): List<Item
     flush(working, 0L)
     Bubbles.positions(out.map { it.side }, out.map { it.at }).forEachIndexed { i, p -> out[i].pos = p }
     return out
-}
-
-/** Text selection menu with Copy · Quote · Select all, drawn in Blaze's style. */
-private class BlazeToolbar(val onShow: (Rect, (() -> Unit)?, (() -> Unit)?) -> Unit, val onHide: () -> Unit) : TextToolbar {
-    override var status: TextToolbarStatus = TextToolbarStatus.Hidden
-        private set
-    override fun showMenu(rect: Rect, onCopyRequested: (() -> Unit)?, onPasteRequested: (() -> Unit)?,
-                          onCutRequested: (() -> Unit)?, onSelectAllRequested: (() -> Unit)?) {
-        status = TextToolbarStatus.Shown; onShow(rect, onCopyRequested, onSelectAllRequested)
-    }
-    override fun hide() { status = TextToolbarStatus.Hidden; onHide() }
 }
 
 @Composable
@@ -374,6 +361,40 @@ fun ChatScreen() {
         Agent.send(full, attachments = pending)
         pending = emptyList(); quote = ""; input = TextFieldValue("")
     }
+    // Selection toolbar state.
+    var tbRect by remember { mutableStateOf<Rect?>(null) }
+    var tbCopy by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var tbAll by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val toolbar = remember { BlazeTextToolbar({ r, cp, all -> tbRect = r; tbCopy = cp; tbAll = all }, { tbRect = null }) }
+    // v0.27.2: selected words reach Search / Ask / Share without overwriting the phone's clipboard.
+    val capClip = remember(clip) { CaptureClipboard(clip) }
+    // v0.27.2: what each selection-pill action does in the chat. Every action but Select all ends the selection.
+    fun askNow(prompt: String) {
+        input = TextFieldValue(prompt, TextRange(prompt.length))
+        if (mood == Mood.IDLE) send(prompt) else Toast.makeText(ctx, "Blaze is busy. It's in the box; tap send when it's done.", Toast.LENGTH_SHORT).show()
+    }
+    fun onSelection(a: SelectionActions.Action) {
+        val copy = tbCopy
+        when (a) {
+            SelectionActions.Action.COPY -> { copy?.invoke(); toolbar.hide() }
+            SelectionActions.Action.SELECT_ALL -> tbAll?.invoke()
+            else -> {
+                val t = capClip.capture(copy).trim()
+                toolbar.hide()
+                if (t.isBlank()) return
+                when (SelectionActions.resolve(a, t)) {
+                    SelectionActions.Action.QUOTE -> quote = t
+                    SelectionActions.Action.SEARCH, SelectionActions.Action.OPEN_LINK -> SelectionDo.openInBlazeBrowser(ctx, t)
+                    SelectionActions.Action.ASK -> askNow(SelectionActions.askPrompt(t))
+                    SelectionActions.Action.TRANSLATE -> askNow(SelectionActions.translatePrompt(t, SelectionDo.phoneLanguage()))
+                    SelectionActions.Action.DEFINE -> askNow(SelectionActions.definePrompt(t))
+                    SelectionActions.Action.READ_ALOUD -> SelectionDo.readAloud(ctx, t)
+                    SelectionActions.Action.SHARE -> SelectionDo.share(ctx, t)
+                    else -> {}
+                }
+            }
+        }
+    }
     fun newChat(projectId: String = "") {
         Agent.clear(projectId.isNotBlank()); quote = ""; com.blaze.assistant.agent.Projects.current.value = projectId
         exitView(); shellMode = "chat"
@@ -385,11 +406,6 @@ fun ChatScreen() {
         showSearch = false; exitView(); shellMode = "chat"
     }
 
-    // Selection toolbar state.
-    var tbRect by remember { mutableStateOf<Rect?>(null) }
-    var tbCopy by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var tbAll by remember { mutableStateOf<(() -> Unit)?>(null) }
-    val toolbar = remember { BlazeToolbar({ r, cp, all -> tbRect = r; tbCopy = cp; tbAll = all }, { tbRect = null }) }
 
     if (inCall) { CallScreen(onHangUp = { inCall = false }); return }
     val me = account.user
@@ -438,7 +454,7 @@ fun ChatScreen() {
                     Welcome(needsSetup = !Settings.ready, onSetup = { setupPage = 0; onboard = true }) { Agent.send(it) }
                 } else {
                     val dens = LocalDensity.current
-                    CompositionLocalProvider(LocalTextToolbar provides toolbar,
+                    CompositionLocalProvider(LocalTextToolbar provides toolbar, LocalClipboardManager provides capClip,
                         LocalDensity provides androidx.compose.ui.unit.Density(dens.density, dens.fontScale * Settings.textScale)) {
                         MessageList(mood,
                             onQuote = { quote = it },
@@ -526,23 +542,12 @@ fun ChatScreen() {
             }
         }
 
-        // Copy · Quote · Select all, above the selected words.
+        // v0.27.2: the selection pill, swipe sideways for Search, Ask Blaze, Translate, Define, Read aloud, Share.
         tbRect?.let { r ->
             val d = LocalDensity.current
-            val y = (r.top - with(d) { 52.dp.toPx() }).coerceAtLeast(with(d) { 40.dp.toPx() })
-            Row(Modifier.offset { IntOffset(r.left.toInt().coerceAtMost((r.right - with(d) { 230.dp.toPx() }).toInt().coerceAtLeast(0)).coerceAtLeast(12), y.toInt()) }
-                .shadow(8.dp, BlazeShapes.pill).clip(BlazeShapes.pill).background(c.ink, BlazeShapes.pill).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                listOf("Copy" to { tbCopy?.invoke(); toolbar.hide() },
-                    "Quote" to {
-                        tbCopy?.invoke()
-                        val t = clip.getText()?.text.orEmpty()
-                        if (t.isNotBlank()) quote = t.trim()
-                        toolbar.hide()
-                    },
-                    "Select all" to { tbAll?.invoke() }).forEach { (label, act) ->
-                    Box(Modifier.clip(BlazeShapes.pill).clickable { act() }.padding(horizontal = 14.dp, vertical = 12.dp)) { ActionText(label, color = c.paper, size = 11.sp) }
-                }
-            }
+            val short = with(d) { SelectionActions.likelyShort(r.width / density, r.height / density) }
+            val acts = remember(tbAll != null, short) { SelectionActions.forUnknown(short, allowQuote = true, allowSelectAll = tbAll != null) }
+            SelectionPill(r, acts, ink = c.ink, paper = c.paper) { a -> onSelection(a) }
         }
 
         if (avatarMenu) {

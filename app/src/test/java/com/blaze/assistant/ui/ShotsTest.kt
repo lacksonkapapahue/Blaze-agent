@@ -193,6 +193,17 @@ class ShotsTest {
     // v0.24.0: messaging-style chat (idle, typing), /clear with its undo bar, and the ask_user card inline.
     @Test fun messaging() = shot("39-messaging") { Chat(busy = false, input = "Thanks!") }
     @Test fun messagingDark() = shot("40-messaging-dark", dark = true) { Chat(busy = false) }
+    // v0.27.2: the swipeable selection pill over a message (more actions past the right edge).
+    @Test fun selectionPill() = shot("61-selection-pill") {
+        Chat(busy = false)
+        SelectionPill(androidx.compose.ui.geometry.Rect(60f, 700f, 420f, 760f), SelectionActions.forUnknown(likelyShort = true),
+            ink = LocalBlaze.current.ink, paper = LocalBlaze.current.paper, nudge = false) { }
+    }
+    @Test fun selectionPillDark() = shot("62-selection-pill-dark", dark = true) {
+        Chat(busy = false)
+        SelectionPill(androidx.compose.ui.geometry.Rect(60f, 700f, 420f, 760f), SelectionActions.forUnknown(likelyShort = false),
+            ink = LocalBlaze.current.ink, paper = LocalBlaze.current.paper, nudge = false) { }
+    }
     @Test fun clearUndo() = shot("41-clear-undo") {
         Column(Modifier.fillMaxSize()) {
             ShellTopBar("chat", {}, {}, {}, true, {}, "Luke", {})
