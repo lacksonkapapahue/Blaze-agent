@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -1013,4 +1014,28 @@ class ShotsTest {
             mode = com.blaze.assistant.device.CameraModes.Mode.PHOTO, flash = "off", canFlip = true, busy = false,
             onClose = {}, onFlash = {}, onFlip = {}, onShutter = {})
     }
+
+    // v0.29.3: Home's default sky with glass cards, in the app's dark theme (the board keeps light ink on the sky).
+    @Test fun homeGlassSky() = shot("83-home-glass-sky", dark = true) {
+        val now = System.currentTimeMillis()
+        val ws = listOf(
+            com.blaze.assistant.home.Widget("w", com.blaze.assistant.home.WidgetTypes.WEATHER, "Weather", "Weather", order = 0),
+            com.blaze.assistant.home.Widget("n", com.blaze.assistant.home.WidgetTypes.NEWS, "AI news", "AI", order = 1),
+        )
+        val data = mapOf(
+            "w" to com.blaze.assistant.home.WidgetData(headline = "Ndola", value = "71°F", change = "Clear · feels 68°", fetched = now,
+                lines = listOf(com.blaze.assistant.home.WidgetLine("Today", "Cloudy", note = "89° / 66°"), com.blaze.assistant.home.WidgetLine("Fri", "Cloudy", note = "88° / 65°"))),
+            "n" to com.blaze.assistant.home.WidgetData(fetched = now, lines = listOf(
+                com.blaze.assistant.home.WidgetLine("Dependence on AI makes human brains less nimble, MIT professor says", "Fox News · 1 h ago"),
+                com.blaze.assistant.home.WidgetLine("Chipmaker sell-off sends investors to other stocks", "CNN · 9 h ago"))),
+        )
+        CompositionLocalProvider(LocalBlaze provides LightColors, LocalGlass provides HomeGlass.light) {
+            Box(Modifier.fillMaxSize().drawBehind { drawSky() }) {
+                HomeBoardView(com.blaze.assistant.home.Stacks.build(ws), data, emptySet(), false, now, com.blaze.assistant.home.StackState(),
+                    stamp = "Updated 1 min ago", onToggle = {}, onMenu = {}, onLine = { _, _ -> }, onOpen = { _, _ -> }, onAction = { _, _ -> },
+                    onVisible = {}, onReorder = {}, onMove = { _, _ -> }, onRemove = {}, onCustomise = {}, onCreate = {})
+            }
+        }
+    }
+
 }

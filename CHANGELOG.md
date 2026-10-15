@@ -2,6 +2,11 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.3: Glass Home
+- Home's new default background is a light daytime sky (drawn, nothing to download): blue to a pale horizon, a soft sun glow and clouds.
+- Over the sky or your own photo (Customise → Background → Image), cards, stacks, buttons and chips turn to frosted glass with a bright edge. Text uses dark ink on the sky in both app themes.
+- Your photo now shows in full behind the glass instead of faded. Solid and Gradient backgrounds keep the old solid cards. Anyone who already picked a background keeps it.
+
 ## v0.29.2: Blaze Terminal
 - New **Terminal** view (/terminal, Views, "open terminal"): a full-screen, Termux-style terminal with a real PTY (Termux's Apache-2.0 terminal-emulator + terminal-view). vim, nano, htop, colours, Ctrl-C and resizing work.
 - More Linux: + → "Install a Linux…" offers Alpine, Ubuntu 24.04, Debian 12, Arch Linux ARM, Fedora and Manjaro (proot-distro rootfs, .tar.xz with pax headers; resumable download). Remove one from the same menu.
