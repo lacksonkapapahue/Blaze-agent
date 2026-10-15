@@ -2,6 +2,9 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.29.0: Home board
+- Home board: a widget store, the board itself, a Customise sheet, an interest picker, widget tools Blaze can use (add / change / remove / list widgets) and a Home pill in the top bar. Sources include crypto (CoinGecko), currency rates and more (`home/`, `ui/HomeBoardUi.kt`).
+
 ## v0.28.9: "open it" fix + empty-reply fix
 - "open it for me" (about a gallery picture) opened the game "Juno: New Origins Complete Edition": the fast lane sent open_app "it", and "Ed-it-ion" contains "it". Commands that point back ("it", "that", "the picture", "again") now skip the fast lane and its cache, so the full agent uses the chat context. App names match on whole words only (`phone/AppMatch.kt`), and open_app refuses pronouns.
 - An empty provider reply showed the raw "End of input at character 0 of" error. It now counts as a provider hiccup (503) and goes through the normal retry / next-model path.

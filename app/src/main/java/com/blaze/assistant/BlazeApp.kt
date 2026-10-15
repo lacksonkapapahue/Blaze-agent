@@ -40,6 +40,8 @@ class BlazeApp : Application() {
         Agent.init(this)
         com.blaze.assistant.agent.BgAgents.init(this)
         com.blaze.assistant.routine.Routines.init(this)
+        // v0.29.0 Home board: widgets + cached content in blaze.db, refreshed by WorkManager (≥ 1 h).
+        com.blaze.assistant.home.HomeBoard.init(this)
         com.blaze.assistant.notify.Notifier.init(this)
         try { com.blaze.assistant.update.Updater.checkInBackground(this) } catch (_: Throwable) { }
         Settings.tellIfSecretsDropped()

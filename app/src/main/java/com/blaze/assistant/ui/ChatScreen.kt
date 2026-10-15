@@ -290,11 +290,13 @@ fun ChatScreen() {
     // ---- 0.12 shell state ----
     // v0.28.3: Chat | Projects and where you are in Projects (list → project → project chat), as one ChatNav.
     // Main Chat always shows the main thread; project chats open inside Projects and never replace it.
-    var navS by rememberSaveable { mutableStateOf(ChatNav().encode()) }
+    // v0.29.0: Home joins the pill; the last tab (Home or Chat) is remembered, Chat on first run.
+    var navS by rememberSaveable { mutableStateOf(ChatNav(tab = ChatNav.startTab(Settings.str("shell_tab", ChatNav.CHAT))).encode()) }
     val nav = ChatNav.decode(navS)
     fun navNow(): ChatNav = ChatNav.decode(navS)
     fun go(n: ChatNav) { navS = n.encode() }
     val shellMode = nav.tab
+    LaunchedEffect(nav.tab) { Settings.setStr("shell_tab", nav.tab) }
     var showViews by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var avatarMenu by remember { mutableStateOf(false) }
@@ -463,10 +465,13 @@ fun ChatScreen() {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 // v0.27.0: Chat and Projects cross-fade when you switch tabs.
                 // v0.28.3: three panes: main Chat, the Projects list / a project page, and a project chat screen.
-                val pane = when { nav.inProjectChat -> "pchat"; nav.tab == ChatNav.PROJECTS -> "projects"; else -> "chat" }
+                val pane = when { nav.inProjectChat -> "pchat"; nav.tab == ChatNav.PROJECTS -> "projects"; nav.tab == ChatNav.HOME -> "home"; else -> "chat" }
                 androidx.compose.animation.Crossfade(pane, modifier = Modifier.fillMaxSize(),
                     animationSpec = MotionTokens.medium(), label = "tab") { paneNow ->
-                if (paneNow == "projects") {
+                if (paneNow == "home") {
+                    // v0.29.0 Home board: plain-words asks go to Blaze in the main chat (home_widget_* tools).
+                    HomePane(onAsk = { t -> Agent.send(t) })
+                } else if (paneNow == "projects") {
                     val needs = remember(question, allChats) { question?.let { q -> allChats.filter { it.title == q.chat }.map { it.id }.toSet() } ?: emptySet() }
                     ProjectsPane(projects, allChats, busyChats, needs, nav.project,
                         onOpen = { go(navNow().openProject(it)) }, onBack = { navNow().back()?.let { go(it) } },

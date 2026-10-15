@@ -73,6 +73,10 @@ object ToolRouter {
         Group("pc", "the user's paired computer running Blaze Desktop (ask_pc)",
             r("""\b(pc|computer|laptop|desktop|my mac|macbook|on windows)\b"""),
             { it == "ask_pc" }),
+        // v0.29.0 Home board widgets.
+        Group("home", "the Home board: add, change, remove and list widgets (weather, news, creators, sports scores, prices, calendar, routines, deadlines, GitHub, most-used apps, custom cards)",
+            r("""\b(widgets?|home ?board|home tab|on (?:my )?home|board|dashboard|track(?:ing)?|follow(?:ing)?|keep an eye|scores?|fixtures|new videos|uploads|crypto|bitcoin|exchange rate|stock price)\b"""),
+            { it.startsWith("home_widget_") }),
         Group("more", "everything else: watchers, triggers, goals, standing permissions, skill packs and other rarely used tools",
             Regex("(?!)"), { false }),
         Group("extras", "learned skills, helpers working in parallel, screen memory",

@@ -1,5 +1,8 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -57,6 +60,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -100,8 +104,9 @@ fun ShellTopBar(
             // v0.24.8: the mascot in a circle (was a square pixel "B").
             Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onLogo).semantics { contentDescription = "Blaze" }, contentAlignment = Alignment.Center) { BrandMark(mood, 34.dp) }
             Spacer(Modifier.width(6.dp))
-            if (isPrivate) PrivatePill(onGhost) else Pill(mode, onMode)
-            Spacer(Modifier.weight(1f))
+            // v0.29.0: the pill gets the room left over, and shrinks (then turns into icons) on narrow screens / big fonts.
+            Box(Modifier.weight(1f)) { if (isPrivate) PrivatePill(onGhost) else Pill(mode, onMode) }
+            Spacer(Modifier.width(4.dp))
             Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onSearch).semantics { contentDescription = "Search" }, contentAlignment = Alignment.Center) { SearchGlyph(c.ink) }
             // v0.24.4: the router status dot is gone (no router dashboard); the ghost opens / leaves a private chat.
             Box(Modifier.size(40.dp).clip(CircleShape).background(if (isPrivate) c.ink else Color.Transparent).clickable(onClick = onGhost)
@@ -126,22 +131,54 @@ fun ShellTopBar(
 }
 
 /**
- * Chat | Projects. It only switches tabs (v0.24.0: no conversation list behind a tap or long-press on Chat).
+ * Chat | Projects | Home. It only switches tabs (v0.24.0: no conversation list behind a tap or long-press on Chat).
+ * v0.29.0: Home joins; on narrow widths (small phones, large fonts) the pill shrinks its padding, then shows icons only
+ * (each still announced by name to TalkBack). Layout rule in [PillFit] (unit tested).
  */
 @Composable
 private fun Pill(mode: String, onMode: (String) -> Unit) {
     val c = LocalBlaze.current
-    Row(Modifier.clip(RoundedCornerShape(20.dp)).background(c.faint).padding(3.dp)) {
-        listOf("chat" to "Chat", "projects" to "Projects").forEach { (id, label) ->
-            val on = mode == id
-            // v0.27.0: the Chat | Projects highlight fades across (MotionTokens).
-            val fill by androidx.compose.animation.animateColorAsState(if (on) c.ink else Color.Transparent, MotionTokens.medium(), label = "tab")
-            val ink by androidx.compose.animation.animateColorAsState(if (on) c.paper else c.sub, MotionTokens.medium(), label = "tabText")
-            Box(Modifier.clip(RoundedCornerShape(17.dp)).background(fill)
-                .clickable(onClickLabel = "Switch to $label") { onMode(id) }.padding(horizontal = 14.dp, vertical = 7.dp)) {
-                Text(label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = ink))
+    androidx.compose.foundation.layout.BoxWithConstraints {
+        val font = androidx.compose.ui.platform.LocalDensity.current.fontScale
+        val fit = PillFit.pick(maxWidth.value, font)
+        Row(Modifier.clip(RoundedCornerShape(20.dp)).background(c.faint).padding(3.dp)) {
+            PillFit.tabs.forEach { (id, label) ->
+                val on = mode == id
+                // v0.27.0: the highlight fades across (MotionTokens).
+                val fill by androidx.compose.animation.animateColorAsState(if (on) c.ink else Color.Transparent, MotionTokens.medium(), label = "tab")
+                val ink by androidx.compose.animation.animateColorAsState(if (on) c.paper else c.sub, MotionTokens.medium(), label = "tabText")
+                Box(Modifier.clip(RoundedCornerShape(17.dp)).background(fill)
+                    .clickable(onClickLabel = "Switch to $label") { onMode(id) }
+                    .semantics { selected = on; if (fit.icons) contentDescription = label }
+                    .heightIn(min = 34.dp).padding(horizontal = fit.padDp.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
+                    if (fit.icons) androidx.compose.material3.Icon(PillFit.icon(id), contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+                    else Text(label, maxLines = 1, softWrap = false,
+                        style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = fit.fontSp.sp, color = ink))
+                }
             }
         }
+    }
+}
+
+/** v0.29.0: how the Chat | Projects | Home pill fits the room it has (dp) at the phone's font scale. */
+object PillFit {
+    val tabs = listOf("chat" to "Chat", "projects" to "Projects", "home" to "Home")
+    data class Fit(val padDp: Int, val fontSp: Float, val icons: Boolean)
+
+    /** Text width estimate: ~0.6 em per character of "ChatProjectsHome" (16 chars) + padding per tab + the 6 dp frame. */
+    fun need(padDp: Int, fontSp: Float, fontScale: Float): Float = 16 * fontSp * fontScale * 0.6f + 3 * 2 * padDp + 6
+
+    fun pick(width: Float, fontScale: Float): Fit = when {
+        need(14, 13f, fontScale) <= width -> Fit(14, 13f, false)
+        need(9, 12.5f, fontScale) <= width -> Fit(9, 12.5f, false)
+        need(6, 12f, fontScale) <= width -> Fit(6, 12f, false)
+        else -> Fit(12, 13f, true)
+    }
+
+    fun icon(id: String): androidx.compose.ui.graphics.vector.ImageVector = when (id) {
+        "projects" -> androidx.compose.material.icons.Icons.Rounded.Folder
+        "home" -> androidx.compose.material.icons.Icons.Rounded.Home
+        else -> androidx.compose.material.icons.Icons.Rounded.ChatBubbleOutline
     }
 }
 

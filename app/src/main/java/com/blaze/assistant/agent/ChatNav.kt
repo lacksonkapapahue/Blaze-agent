@@ -11,7 +11,7 @@ package com.blaze.assistant.agent
  *    notification), [follow] moves the user into Projects at that chat instead of loading it into main Chat.
  */
 data class ChatNav(
-    /** [CHAT] or [PROJECTS]. */
+    /** [CHAT], [PROJECTS] or (v0.29.0) [HOME]. */
     val tab: String = CHAT,
     /** The open project on the Projects tab ("" = the projects list). */
     val project: String = "",
@@ -28,7 +28,7 @@ data class ChatNav(
     val mainChat: String get() = MAIN
 
     /** Chat | Projects pill. Keeps the Projects position so coming back restores it. */
-    fun switchTab(to: String): ChatNav = copy(tab = if (to == PROJECTS) PROJECTS else CHAT)
+    fun switchTab(to: String): ChatNav = copy(tab = tabOf(to))
 
     /** The projects list (e.g. /projects). */
     fun projectsList(): ChatNav = ChatNav(PROJECTS, "", "")
@@ -71,13 +71,20 @@ data class ChatNav(
     companion object {
         const val CHAT = "chat"
         const val PROJECTS = "projects"
+        /** v0.29.0: the Home board. */
+        const val HOME = "home"
+
+        fun tabOf(s: String?): String = when (s) { PROJECTS -> PROJECTS; HOME -> HOME; else -> CHAT }
+
+        /** The tab to open on start: Home when the user last left it there (remembered), else Chat (the default on first run). */
+        fun startTab(remembered: String?): String = if (remembered == HOME) HOME else CHAT
         const val MAIN: String = Mind.MAIN
         private const val SEP = "\u001f"
 
         fun decode(s: String?): ChatNav {
             val p = s.orEmpty().split(SEP)
             if (p.size != 3) return ChatNav()
-            val tab = if (p[0] == PROJECTS) PROJECTS else CHAT
+            val tab = tabOf(p[0])
             val project = p[1]
             return ChatNav(tab, project, if (project.isBlank()) "" else p[2])
         }
