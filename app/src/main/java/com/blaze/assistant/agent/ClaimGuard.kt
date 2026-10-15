@@ -22,7 +22,7 @@ object ClaimGuard {
     /** Did a tool result say it worked? (Same failure words the rest of the agent uses.) */
     fun succeeded(result: String): Boolean {
         val r = result.trimStart()
-        return r.isNotEmpty() && !Regex("""^(Error|Couldn't|Could not|Refused|Failed|No such|Unknown|Not in the|Nothing |There's no|The user did NOT|The user chose|That MCP tool|That changed nothing)""", ic).containsMatchIn(r)
+        return r.isNotEmpty() && !Regex("""^(Error|Couldn't|Could not|Not sent|Refused|Failed|No such|Unknown|Not in the|Nothing |There's no|The user did NOT|The user declined|The user chose|That MCP tool|That changed nothing)""", ic).containsMatchIn(r)
     }
 
     /** Words that name each view's things in a claim. Archive is read-only, so nothing there can be claimed. */
@@ -138,6 +138,32 @@ object ClaimGuard {
             "memory" -> "save that to memory this time"
             else -> "do that in ${spec.name} this time, so nothing changed there yet"
         } + ". Say \u201ctry again\u201d and I'll have another go."
+        return if (rest.length < 12) line else "$line\n\n$rest"
+    }
+
+    // ---------------- v0.28.7: sends ----------------
+
+    /** Tools whose success means a message really left the phone. */
+    val SEND_TOOLS = setOf("message_contact", "send_sms", "send_text", "reply_to_notification", "gmail_send", "send_email")
+
+    private val sendClaimRe = Regex("""\b(?:message|text|picture|image|photo|it)\s+(?:was\s+|has been\s+)?sent\b|^\s*sent\b|\b(?:i've|i have|i just|i)\s+(?:sent|messaged|texted|delivered|forwarded)\b|\bsuccessfully sent\b""", ic)
+
+    /** Is this request about sending something to someone (not a question about an earlier send)? */
+    fun asksToSend(userText: String): Boolean =
+        Regex("""\b(send|message|text|whatsapp|telegram|sms|forward|tell|reply)\b""", ic).containsMatchIn(userText) &&
+            !Regex("""^\s*(did|have|has|was|were)\b""", ic).containsMatchIn(userText)
+
+    /** Sentences in [reply] that say a message went out. */
+    fun sendClaims(reply: String): List<String> = sentences(reply).filter { s ->
+        sendClaimRe.containsMatchIn(s) && !Regex("""\b(not|never|couldn't|didn't|wasn't|haven't|unable|failed|once|when|after|if)\b""", ic).containsMatchIn(s)
+    }
+
+    /** A reply claiming a send with no send tool succeeding this turn → the honest version, else null. */
+    fun unbackedSend(reply: String, ok: List<Call>): String? {
+        val bad = sendClaims(reply)
+        if (bad.isEmpty() || ok.any { it.name in SEND_TOOLS }) return null
+        val rest = sentences(reply).filterNot { it in bad }.joinToString(" ").trim()
+        val line = "I haven't actually sent it: no message left the phone this time. Say \u201ctry again\u201d and I'll send it properly."
         return if (rest.length < 12) line else "$line\n\n$rest"
     }
 }

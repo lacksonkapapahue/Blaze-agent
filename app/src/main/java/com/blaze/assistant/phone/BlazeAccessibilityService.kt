@@ -336,6 +336,9 @@ class BlazeAccessibilityService : AccessibilityService() {
         return elements.indexOfFirst { it?.isEditable == true }.takeIf { it >= 0 }
     }
 
+    /** What the focused (or first) text field holds now, "" when there is none. */
+    fun fieldText(): String { val i = anyField() ?: return ""; return element(i)?.text?.toString().orEmpty() }
+
     /** Presses the keyboard's Enter/Search on the current field. */
     suspend fun pressEnter(): Boolean { val id = anyField() ?: return false; return submitIme(elements[id] ?: return false) }
 
