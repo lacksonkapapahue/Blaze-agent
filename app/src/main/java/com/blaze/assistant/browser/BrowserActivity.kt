@@ -45,6 +45,7 @@ import android.os.Build
 import android.util.Rational
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -71,7 +72,7 @@ import com.blaze.assistant.ui.hairlineBottom
 import com.blaze.assistant.ui.hairlineTop
 
 /** The Browser screen: shows BrowserEngine's current tab with an address bar, tabs, bookmarks, history and downloads. */
-class BrowserActivity : ComponentActivity() {
+class BrowserActivity : androidx.fragment.app.FragmentActivity() {
     private var pending: ValueCallback<Array<Uri>>? = null
     private val picker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         pending?.onReceiveValue(if (r.resultCode == Activity.RESULT_OK) WebChromeClient.FileChooserParams.parseResult(r.resultCode, r.data) else null)
@@ -104,6 +105,7 @@ class BrowserActivity : ComponentActivity() {
             pending?.onReceiveValue(null); pending = cb
             try { picker.launch(p.createIntent()); true } catch (_: Exception) { pending = null; cb.onReceiveValue(null); false }
         }
+        BrowserUi.authenticate = { reason, ok -> authenticate(reason, ok) }
         handle(intent)
         if (BrowserEngine.tabs.isEmpty()) BrowserEngine.newTab(this)
         setContent { BlazeTheme { BrowserScreen(onClose = { finish() }, onImport = { try { importer.launch(arrayOf("*/*")) } catch (_: Exception) { } },
@@ -132,8 +134,23 @@ class BrowserActivity : ComponentActivity() {
     }
 
     override fun onResume() { super.onResume(); BrowserEngine.attach(this); BrowserEngine.tab()?.web?.onResume() }
-    override fun onPause() { BrowserEngine.attach(null); super.onPause() }
+    override fun onPause() { BrowserEngine.attach(null); BrowserEngine.saveTabsNow(); super.onPause() }
+    override fun onStop() { BrowserEngine.saveTabsNow(); super.onStop() }
+
+    /** v0.29.7: fingerprint / face / PIN before a saved password is shown, copied or edited. No screen lock = no reveal. */
+    private fun authenticate(reason: String, ok: () -> Unit) {
+        val auth = androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK or androidx.biometric.BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        if (androidx.biometric.BiometricManager.from(this).canAuthenticate(auth) != androidx.biometric.BiometricManager.BIOMETRIC_SUCCESS) {
+            Toast.makeText(this, "Set a screen lock (PIN, pattern or fingerprint) in Android settings to see saved passwords.", Toast.LENGTH_LONG).show(); return }
+        try {
+            androidx.biometric.BiometricPrompt(this, androidx.core.content.ContextCompat.getMainExecutor(this), object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(r: androidx.biometric.BiometricPrompt.AuthenticationResult) { ok() }
+            }).authenticate(androidx.biometric.BiometricPrompt.PromptInfo.Builder().setTitle("Saved passwords").setSubtitle(reason).setAllowedAuthenticators(auth).build())
+        } catch (e: Exception) { Toast.makeText(this, "Couldn't ask for your screen lock: ${e.message}", Toast.LENGTH_SHORT).show() }
+    }
+
     override fun onDestroy() {
+        BrowserUi.authenticate = null
         BrowserEngine.attach(null); BrowserEngine.filePicker = null
         // Back to the background browser: the tabs keep running offscreen at screen size.
         BrowserEngine.tabs.forEach { (it.web.parent as? ViewGroup)?.removeView(it.web); BrowserEngine.layoutOffscreen(it.web) }
@@ -146,9 +163,12 @@ object BrowserUi {
     val pip = androidx.compose.runtime.mutableStateOf(false)
     /** The summoned page pointer (v0.24.6). */
     val pointer = androidx.compose.runtime.mutableStateOf(false)
+    /** v0.29.7: device unlock for Saved passwords (set while the browser is open). */
+    @Volatile var authenticate: ((String, () -> Unit) -> Unit)? = null
+    @Volatile var unlockedUntil = 0L
 }
 
-private enum class Panel { NONE, TABS, MENU, BOOKMARKS, HISTORY, PRIVACY }
+private enum class Panel { NONE, TABS, MENU, BOOKMARKS, HISTORY, PRIVACY, PASSWORDS, SAVED_PAGES }
 
 /**
  * The Browser (v0.24.6 look): rounded dark Blaze theme with a pill address bar, rounded tab chips, round icon
@@ -172,12 +192,14 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
     var askOpen by remember { mutableStateOf(previewAsk != null) }
     var askFirst by remember { mutableStateOf<String?>(null) }
     val pip by BrowserUi.pip
+    var reading by remember { mutableStateOf<SavedPages.Page?>(null) }
     val priv = tab?.isPrivate == true
     val bg = if (priv) Glass.privateBg else Glass.bg
 
     BackHandler {
         when {
             BrowserEngine.fullView != null -> BrowserEngine.exitFull()
+            reading != null -> reading = null
             askOpen -> askOpen = false
             pointer -> pointer = false
             panel != Panel.NONE -> panel = Panel.NONE
@@ -191,6 +213,8 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
             modifier = Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black))
         return
     }
+
+    reading?.let { p -> SavedTextReader(p, onClose = { reading = null }); return }
 
     if (panel == Panel.TABS) {
         Box(Modifier.fillMaxSize().background(if (priv) androidx.compose.ui.graphics.Color(0xFF202124) else LocalBlaze.current.paper).systemBarsPadding()) {
@@ -305,18 +329,30 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
                 key(tab.id) { WebHost(tab) }
                 if (blank) StartPage(tick) { u -> BrowserEngine.load(tab, u); panel = Panel.NONE }
                 if (pointer) PagePointerLayer(tab.web, host, onClose = { pointer = false })
+                // v0.29.7 saved passwords: offer to save after a sign-in, or offer saved accounts on a sign-in form.
+                val offer = BrowserEngine.loginOffer
+                if (!pointer && panel == Panel.NONE && !priv) {
+                    if (offer != null && offer.tabId == tab.id) SaveLoginCard(offer, onSave = { BrowserEngine.acceptLoginOffer() },
+                        onNever = { BrowserEngine.neverForSite() }, onDismiss = { BrowserEngine.dismissLoginOffer() })
+                    else if (tab.fillAccounts.isNotEmpty()) LoginFillBar(tab.fillAccounts, onPick = { BrowserEngine.fillLogin(tab, it) }, onDismiss = { tab.fillAccounts = emptyList() })
+                }
             }
             when (panel) {
                 Panel.TABS, Panel.NONE -> {}
                 Panel.PRIVACY -> Sheet { PrivacySheet(onImport = onImport, onPrivateTab = { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }) }
-                Panel.MENU -> Sheet {
+                Panel.MENU -> Sheet { Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                     val url = tab?.url.orEmpty()
                     val marked = remember(url, tick) { BrowserData.isBookmarked(ctx, url) }
                     MenuRow(Icons.Rounded.Add, "New tab") { BrowserEngine.newTab(ctx); panel = Panel.NONE }
                     MenuRow(Icons.Rounded.VisibilityOff, "New private tab") { BrowserEngine.newTab(ctx, isPrivate = true); panel = Panel.NONE }
                     MenuRow(Icons.Rounded.VpnLock, "VPN & privacy" + when (BrowserVpn.status) { BrowserVpn.Status.ON -> "  \u00b7  " + Countries.flag(BrowserVpn.exitCountry ?: BrowserVpn.current()?.country.orEmpty()); BrowserVpn.Status.FAILED -> "  \u00b7  not connected"; else -> "" }) { panel = Panel.PRIVACY }
                     if (url.startsWith("http")) MenuRow(if (marked) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder, if (marked) "Remove bookmark" else "Bookmark this page") { BrowserData.toggleBookmark(ctx, tab?.title.orEmpty(), url); tick++; panel = Panel.NONE }
+                    if (url.startsWith("http")) MenuRow(Icons.Rounded.OfflinePin, "Save page for offline") {
+                        tab?.let { t -> BrowserEngine.savePage(t) { msg -> android.widget.Toast.makeText(ctx, msg, android.widget.Toast.LENGTH_SHORT).show() } }
+                        panel = Panel.NONE }
                     MenuRow(Icons.Rounded.Bookmarks, "Bookmarks") { panel = Panel.BOOKMARKS }
+                    MenuRow(Icons.Rounded.LibraryBooks, "Saved pages") { panel = Panel.SAVED_PAGES }
+                    MenuRow(Icons.Rounded.Key, "Saved passwords") { panel = Panel.PASSWORDS }
                     MenuRow(Icons.Rounded.History, "History") { panel = Panel.HISTORY }
                     MenuRow(if (BrowserEngine.desktop) Icons.Rounded.PhoneAndroid else Icons.Rounded.DesktopWindows, if (BrowserEngine.desktop) "Mobile site" else "Desktop site") { BrowserEngine.useDesktop(!BrowserEngine.desktop); panel = Panel.NONE }
                     if (url.startsWith("http")) {
@@ -336,6 +372,14 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
                         BrowserEngine.closeAll(p); if (BrowserEngine.normalTabs().isEmpty()) BrowserEngine.newTab(ctx)
                         if (!p || BrowserEngine.tab()?.isPrivate == true) BrowserEngine.current = BrowserEngine.tabs.indexOfLast { !it.isPrivate }
                         panel = Panel.NONE }
+                }
+                }
+                Panel.PASSWORDS -> Sheet { SavedPasswordsPanel() }
+                Panel.SAVED_PAGES -> Sheet {
+                    SavedPagesPanel(onOpen = { p ->
+                        if (!BrowserEngine.openSaved(ctx, p)) android.widget.Toast.makeText(ctx, "That saved page is missing.", android.widget.Toast.LENGTH_SHORT).show()
+                        panel = Panel.NONE
+                    }, onRead = { p -> reading = p; panel = Panel.NONE })
                 }
                 Panel.BOOKMARKS -> Sheet { EntryList("Bookmarks", BrowserData.bookmarks(ctx), "No bookmarks yet.") { tab?.let { t -> BrowserEngine.load(t, it) }; panel = Panel.NONE } }
                 Panel.HISTORY -> Sheet {
@@ -381,7 +425,7 @@ private fun WebHost(tab: BrowserEngine.Tab) {
     }, modifier = Modifier.fillMaxSize())
 }
 
-private fun display(u: String) = if (u == "about:blank") "" else u.removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/')
+private fun display(u: String) = if (u == "about:blank") "" else if (SavedPages.isSavedUrl(u)) "Offline copy" else u.removePrefix("https://").removePrefix("http://").removePrefix("www.").trimEnd('/')
 
 @Composable
 private fun StartPage(tick: Int, open: (String) -> Unit) {
@@ -439,7 +483,7 @@ private fun StartPage(tick: Int, open: (String) -> Unit) {
     }
 }
 
-@Composable private fun Sheet(content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun Sheet(content: @Composable ColumnScope.() -> Unit) {
     val shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)), contentAlignment = Alignment.BottomCenter) {
         Column(Modifier.fillMaxWidth().shadow(18.dp, shape).clip(shape).background(Glass.surface).border(1.dp, Glass.border, shape)
