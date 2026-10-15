@@ -174,7 +174,7 @@ object Skills {
     private suspend fun sendSms(ctx: Context, to: String, msg: String): String {
         if (!has(ctx, Manifest.permission.SEND_SMS)) return missing("Messages")
         val (who, number) = resolve(ctx, to) ?: return "Couldn't tell which number \"$to\" is. Use find_contact and ask the user."
-        if (!Agent.confirm("Send a text to $who?", "\u201c$msg\u201d", "Send")) return "The user declined. The message was NOT sent."
+        if (!Agent.confirm("Send a text to $who?", "\u201c$msg\u201d", "Send", always = true)) return "The user declined. The message was NOT sent."
         val sms = if (Build.VERSION.SDK_INT >= 31) ctx.getSystemService(SmsManager::class.java) else @Suppress("DEPRECATION") SmsManager.getDefault()
         val parts = sms.divideMessage(msg)
         sms.sendMultipartTextMessage(number, null, parts, null, null)
@@ -207,7 +207,7 @@ object Skills {
             ctx.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return "Opened the dialer for $who; the user presses call."
         }
-        if (!Agent.confirm("Call $who?", number, "Call")) return "The user declined. No call was placed."
+        if (!Agent.confirm("Call $who?", number, "Call", always = true)) return "The user declined. No call was placed."
         ctx.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return "Calling $who."
     }
@@ -290,12 +290,18 @@ object Skills {
             "do_not_disturb" to listOf("Do not disturb", "Do Not Disturb", "DND"),
         )
         val want = when (v) { "on", "enable", "true", "1" -> true; "off", "disable", "false", "0" -> false; else -> null }
+        // v0.28.2: changing a phone setting always shows the confirm card, except a command the user typed or said
+        // themselves (the fast lane, ConfirmGate.Direct). Reading (battery) and opening a settings panel don't ask.
+        suspend fun approved(): Boolean = kotlin.coroutines.coroutineContext[com.blaze.assistant.agent.ConfirmGate.DirectKey] != null ||
+            Agent.confirm("Change a phone setting?", settingLine(s, v), "Change", always = true)
         tileNames[s]?.let { names ->
             val svc = BlazeAccessibilityService.instance
+            if (svc != null && !approved()) return "The user declined. The setting was NOT changed."
             if (svc != null) try { svc.toggleQuickTile(names, want)?.let { return it } } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) {}
         }
         return when (s) {
             "flashlight" -> {
+                if (!approved()) return "The user declined. The setting was NOT changed."
                 val cm = ctx.getSystemService(CameraManager::class.java)
                 val id = cm.cameraIdList.firstOrNull { cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
                     ?: return "This phone has no flashlight."
@@ -303,6 +309,7 @@ object Skills {
                 cm.setTorchMode(id, on); "Flashlight ${if (on) "on" else "off"}."
             }
             "volume" -> {
+                if (v.isNotEmpty() && !approved()) return "The user declined. The setting was NOT changed."
                 val am = ctx.getSystemService(AudioManager::class.java)
                 val st = AudioManager.STREAM_MUSIC
                 when {
@@ -329,4 +336,12 @@ object Skills {
             else -> "Unknown setting."
         }
     }
+
+    /** The confirm card's line for a setting change ("Wi-Fi: off", "Media volume: 40"). */
+    private fun settingLine(s: String, v: String): String {
+        val name = when (s) { "wifi" -> "Wi-Fi"; "do_not_disturb" -> "Do Not Disturb"; "mobile_data" -> "Mobile data"; "airplane" -> "Airplane mode"
+            "volume" -> "Media volume"; else -> s.replace('_', ' ').replaceFirstChar { it.uppercase() } }
+        return if (v.isBlank()) "$name: switch" else "$name: $v"
+    }
+
 }

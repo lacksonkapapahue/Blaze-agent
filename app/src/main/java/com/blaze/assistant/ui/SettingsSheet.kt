@@ -642,7 +642,8 @@ private fun BackupSection() {
     }
     Spacer(Modifier.height(22.dp))
     Label("Backup", modifier = Modifier.padding(bottom = 8.dp))
-    Text("Updates keep everything automatically. Export only if you'll reinstall or switch phones.",
+    Text("Updates keep everything automatically. Your chats, memory and sign-ins are never copied to Google's cloud backup, " +
+        "so Export (settings, keys and memory) if you'll reinstall or switch phones. Keep the file private.",
         style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, lineHeight = 19.sp, color = c.sub))
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {

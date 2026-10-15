@@ -198,7 +198,7 @@ object ModelCatalog {
     }
 
     internal fun http(method: String, url: String, body: String?, headers: Map<String, String>): Pair<Int, String> {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = com.blaze.assistant.connect.UrlSafety.open(url)
         conn.requestMethod = method
         conn.connectTimeout = 20_000
         conn.readTimeout = 45_000

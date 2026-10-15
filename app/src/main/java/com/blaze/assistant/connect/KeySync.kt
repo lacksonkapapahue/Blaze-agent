@@ -149,7 +149,7 @@ object KeySync {
     }
 
     private fun http(method: String, token: String, body: JSONObject? = null): Pair<Int, JSONObject> {
-        val c = URL(BlazeAccount.base() + "/v1/keys").openConnection() as HttpURLConnection
+        val c = UrlSafety.open(BlazeAccount.base() + "/v1/keys")
         try {
             c.requestMethod = method
             c.connectTimeout = 15_000; c.readTimeout = 20_000

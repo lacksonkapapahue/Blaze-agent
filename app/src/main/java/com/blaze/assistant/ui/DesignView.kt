@@ -84,10 +84,16 @@ fun designSpec(target: String, home: File?): org.json.JSONObject? = try {
 class DesignBridge(private val onGl: (Int, Boolean, String) -> Unit, private val onError: (String) -> Unit,
                    private val onReady: (String) -> Unit, private val onFail: (String) -> Unit) {
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
-    @android.webkit.JavascriptInterface fun gl(level: Int, gl1: Boolean, engine: String) { main.post { onGl(level, gl1, engine) } }
-    @android.webkit.JavascriptInterface fun error(msg: String) { main.post { onError(msg) } }
-    @android.webkit.JavascriptInterface fun ready(engine: String) { main.post { onReady(engine) } }
-    @android.webkit.JavascriptInterface fun fail(msg: String) { main.post { onFail(msg) } }
+    /** v0.28.2: set when the view leaves; later calls (and ones already posted) are dropped. */
+    @Volatile var disposed = false
+        private set
+    fun dispose() { disposed = true; main.removeCallbacksAndMessages(null) }
+    private fun post(f: () -> Unit) { if (!disposed) main.post { if (!disposed) f() } }
+    // Strings from the page are capped: the bridge only updates the view's state.
+    @android.webkit.JavascriptInterface fun gl(level: Int, gl1: Boolean, engine: String?) { val e = DesignServe.bridgeText(engine, 16); post { onGl(level.coerceIn(-1, 2), gl1, e) } }
+    @android.webkit.JavascriptInterface fun error(msg: String?) { val m = DesignServe.bridgeText(msg); post { onError(m) } }
+    @android.webkit.JavascriptInterface fun ready(engine: String?) { val e = DesignServe.bridgeText(engine, 16); post { onReady(e) } }
+    @android.webkit.JavascriptInterface fun fail(msg: String?) { val m = DesignServe.bridgeText(msg); post { onFail(m) } }
 }
 
 /** What the current attempt to draw a design has reported. */
@@ -120,7 +126,12 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                preview: Boolean = true, initialFailure: String? = null) {
     val c = LocalBlaze.current
     val fileUrl = remember(target, home) { designUrl(target, home) }
-    val url = remember(fileUrl, home) { DesignServe.virtualUrl(fileUrl, home) }
+    // v0.28.2: every page is served from the virtual origin (files outside Blaze's home too), so the WebView has no file access.
+    val url = remember(fileUrl, home) { DesignServe.servedUrl(fileUrl, home) }
+    val appData = androidx.compose.ui.platform.LocalContext.current.applicationInfo?.dataDir?.let { File(it) }
+    val extRoot = remember(fileUrl, home) { DesignServe.extRoot(fileUrl, home, appData) }
+    /** A link the page tried to open outside the design: offered as "Open in browser", never followed by itself. */
+    var external by remember(url) { mutableStateOf<String?>(null) }
     var wide by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     var ask by remember { mutableStateOf("") }
@@ -210,21 +221,25 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
             } else if (preview) {
                 androidx.compose.runtime.key(url, wide, reload) {
                     val loadUrl = DesignServe.attemptUrl(url, rs.forceGl1)
-                    AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
-                        WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.allowFileAccess = true
-                            settings.useWideViewPort = wide
-                            settings.loadWithOverviewMode = wide
-                            settings.builtInZoomControls = true
-                            settings.displayZoomControls = false
-                            addJavascriptInterface(DesignBridge(
+                    val bridge = remember { DesignBridge(
                                 onGl = { level, gl1, engine -> rs.glLevel = level; rs.gl1 = gl1; rs.engine = engine },
                                 onError = { noteError(it, fatal = false) },
                                 onReady = { engine -> rs.grace?.cancel(); rs.grace = null; rs.ready = true; rs.engine = engine
                                     try { errorFile?.delete() } catch (_: Exception) { } },
-                                onFail = { fail(it) }), "BlazeDesign")
+                                onFail = { fail(it) }) }
+                    androidx.compose.runtime.DisposableEffect(bridge) { onDispose { bridge.dispose() } }
+                    AndroidView(modifier = Modifier.fillMaxSize(), factory = { ctx ->
+                        WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            // v0.28.2: pages come from the virtual origin (shouldInterceptRequest), never file:// or content://.
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            settings.useWideViewPort = wide
+                            settings.loadWithOverviewMode = wide
+                            settings.builtInZoomControls = true
+                            settings.displayZoomControls = false
+                            addJavascriptInterface(bridge, "BlazeDesign")
                             webChromeClient = object : android.webkit.WebChromeClient() {
                                 override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
                                     if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
@@ -239,7 +254,15 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                             }
                             webViewClient = object : WebViewClient() {
                                 override fun shouldInterceptRequest(view: WebView, req: android.webkit.WebResourceRequest): android.webkit.WebResourceResponse? =
-                                    serveDesign(ctx, req.url.toString(), home, rs.engine)
+                                    serveDesign(ctx, req.url.toString(), home, rs.engine, extRoot)
+                                // v0.28.2: the top frame stays on the design's origin; a tapped link elsewhere is offered, not followed.
+                                override fun shouldOverrideUrlLoading(view: WebView, req: android.webkit.WebResourceRequest): Boolean {
+                                    if (!req.isForMainFrame) return false
+                                    val next = req.url.toString()
+                                    if (DesignServe.allowNavigation(loadUrl, next)) return false
+                                    if (req.hasGesture() && (next.startsWith("https://") || next.startsWith("http://"))) external = next
+                                    return true
+                                }
                                 override fun onPageFinished(view: WebView, u: String?) {
                                     if (wide) view.evaluateJavascript("(function(){var m=document.querySelector('meta[name=viewport]');" +
                                         "if(!m){m=document.createElement('meta');m.name='viewport';document.head.appendChild(m);}m.content='width=1280';})()", null)
@@ -253,6 +276,16 @@ fun DesignView(target: String, busy: Boolean, status: String, onAsk: (String) ->
                     })
                 }
                 if (failure != null) FailBanner(failure, sketch = false, onRetry = { restart(false) }, modifier = Modifier.align(Alignment.BottomCenter))
+                external?.let { link ->
+                    Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(10.dp).clip(BlazeShapes.pill).background(c.ink, BlazeShapes.pill)
+                        .padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Link to " + (DesignServe.originOf(link).substringAfter("://").ifBlank { "another site" }), maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                            style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = c.paper))
+                        ActionText("Open in browser", color = c.paper, size = 9.sp, modifier = Modifier.clickable { external = null; onOpenInBrowser(link) }.padding(6.dp))
+                        ActionText("\u2715", color = c.paper, size = 9.sp, modifier = Modifier.clickable { external = null }.padding(6.dp))
+                    }
+                }
             }
         }
         Row(Modifier.fillMaxWidth().hairlineTop(c.hair).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -292,13 +325,13 @@ private fun FailBanner(error: String, sketch: Boolean, onRetry: () -> Unit, modi
  * Answers a Design view request: the virtual origin (designs, Blaze's home, bundled three.js) and CDN three.js
  * URLs from the APK (the build matching [engine]). Null = let the network have it.
  */
-fun serveDesign(ctx: android.content.Context, url: String, home: File?, engine: String?): android.webkit.WebResourceResponse? {
+fun serveDesign(ctx: android.content.Context, url: String, home: File?, engine: String?, ext: File? = null): android.webkit.WebResourceResponse? {
     fun notFound() = android.webkit.WebResourceResponse("text/plain", "utf-8", 404, "Not Found", mapOf("Access-Control-Allow-Origin" to "*"), java.io.ByteArrayInputStream(ByteArray(0)))
     fun ok(mime: String, data: java.io.InputStream, cache: String) = android.webkit.WebResourceResponse(mime,
         if (mime.startsWith("text/") || mime.endsWith("json") || mime.endsWith("javascript")) "utf-8" else null, 200, "OK",
         mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to cache), data)
     return try {
-        when (val t = DesignServe.resolve(url, home)) {
+        when (val t = DesignServe.resolve(url, home, ext)) {
             is DesignServe.Target.Asset -> try { ok(t.mime, ctx.assets.open(t.path), "max-age=86400") } catch (_: Exception) { notFound() }
             is DesignServe.Target.Disk -> when {
                 !t.file.isFile -> notFound()

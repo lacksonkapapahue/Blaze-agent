@@ -13,7 +13,7 @@ import { chatCompletions } from "./chat";
 import { loadConfig } from "./db";
 import { VERSION, type Env } from "./env";
 import { TASKS } from "./router";
-import { CORS, HttpError, apiError, json } from "./util";
+import { CORS, HttpError, apiError, json, withCors } from "./util";
 
 const MODEL_INFO: Record<string, string> = {
   auto: "Blaze picks the task from the request",
@@ -69,14 +69,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    let res: Response;
     try {
-      return await handle(req, env, ctx);
+      res = await handle(req, env, ctx);
     } catch (e) {
-      if (e instanceof HttpError) return apiError(e.status, e.code, e.message, e.headers);
-      // Never echo internals (or anything from the request) in a 500.
-      console.error("gateway error", (e as Error)?.name || "Error");
-      return apiError(500, "internal_error", "Something went wrong in the gateway");
+      if (e instanceof HttpError) res = apiError(e.status, e.code, e.message, e.headers);
+      else {
+        // Never echo internals (or anything from the request) in a 500.
+        console.error("gateway error", (e as Error)?.name || "Error");
+        res = apiError(500, "internal_error", "Something went wrong in the gateway");
+      }
     }
+    // CORS: no cross-origin access unless the caller's Origin is in ALLOWED_ORIGINS (see util.ts withCors).
+    return withCors(req, env, res);
   },
   /** Cron (wrangler.toml): model discovery for providers whose list is about a day old. */
   async scheduled(_ev: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {

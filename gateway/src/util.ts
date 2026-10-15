@@ -39,8 +39,12 @@ export function safeEqual(a: string, b: string): boolean {
   return d === 0;
 }
 
+/**
+ * CORS headers for /v1. No Access-Control-Allow-Origin here: Blaze's apps are native and need no CORS, and the
+ * admin page is same-origin, so by default no other website may read the gateway's answers. [withCors] adds
+ * Allow-Origin only for an Origin listed in the optional ALLOWED_ORIGINS env var, and strips these headers otherwise.
+ */
 export const CORS: Record<string, string> = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Authorization, Content-Type",
   "Access-Control-Expose-Headers": "X-Blaze-Task, X-Blaze-Provider, X-Blaze-Model, X-RateLimit-Remaining-Requests, Retry-After",
@@ -80,4 +84,27 @@ export function utcDay(ms = Date.now()): string {
 export function msToUtcMidnight(ms = Date.now()): number {
   const d = new Date(ms);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - ms;
+}
+
+/** ALLOWED_ORIGINS ("https://a.example, https://b.example") as exact origins; "*" is ignored on purpose. */
+export function allowedOrigins(env: { ALLOWED_ORIGINS?: string }): Set<string> {
+  return new Set((env.ALLOWED_ORIGINS || "").split(/[\s,]+/).map(o => o.trim().replace(/\/+$/, "").toLowerCase()).filter(o => /^https?:\/\/[^/\s*]+$/.test(o)));
+}
+
+/**
+ * Applies the CORS policy to a response: a cross-origin caller listed in ALLOWED_ORIGINS gets its own origin back
+ * (with Vary: Origin); anyone else gets no Access-Control-* headers at all, so browsers block the read.
+ */
+export function withCors(req: Request, env: { ALLOWED_ORIGINS?: string }, res: Response): Response {
+  const origin = (req.headers.get("Origin") || "").replace(/\/+$/, "").toLowerCase();
+  const allowed = origin !== "" && allowedOrigins(env).has(origin);
+  const out = new Response(res.body, res);
+  for (const k of [...out.headers.keys()]) if (k.toLowerCase().startsWith("access-control-")) out.headers.delete(k);
+  if (allowed) {
+    for (const [k, v] of Object.entries(CORS)) out.headers.set(k, v);
+    out.headers.set("Access-Control-Allow-Origin", req.headers.get("Origin")!.replace(/\/+$/, ""));
+    out.headers.append("Vary", "Origin");
+    if (req.method === "OPTIONS") out.headers.set("Access-Control-Max-Age", "86400");
+  }
+  return out;
 }
