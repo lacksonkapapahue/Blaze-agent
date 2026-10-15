@@ -34,7 +34,7 @@ class BrowserPersistenceTest {
         assertEquals("zesco.co.zm", SiteDomain.registrable("portal.zesco.co.zm"))
         assertEquals("joey.github.io", SiteDomain.registrable("joey.github.io"))
         assertEquals("joey.github.io", SiteDomain.registrable("a.joey.github.io"))
-        assertEquals("blaze-gateway.blaze-app.workers.dev", SiteDomain.registrable("blaze-gateway.blaze-app.workers.dev"))
+        assertEquals("blaze-app.workers.dev", SiteDomain.registrable("blaze-gateway.blaze-app.workers.dev"))
         assertEquals("bucket.s3.amazonaws.com", SiteDomain.registrable("bucket.s3.amazonaws.com"))
         assertEquals("192.168.1.5", SiteDomain.registrable("192.168.1.5"))
         assertEquals("localhost", SiteDomain.registrable("localhost"))
