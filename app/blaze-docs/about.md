@@ -37,7 +37,7 @@ How to update: type /update in the chat (or Settings › Updates › Check for u
 - Magic Hand: circle or grab anything on screen to copy, translate, search or save its text; Grab mode; watches.
 - Browser: Blaze's own background browser (open, read, click, fill forms, log in with the secure form and Saved logins), private tabs, browser VPN by country, Blaze Free (WARP). "Ask Blaze about this page".
 - Phone control: open apps and do things in them (run_plan), visible pointer you can pause, messages, calls, contacts, calendar, alarms, settings toggles, USSD.
-- Projects: ongoing efforts with their own threads, brief and instructions.
+- Projects: ongoing efforts with their own threads, brief and instructions. The brief is capped at 600 tokens (the editor shows the count); each project chat pins only the top of the instructions and brief (about 600 tokens) and Blaze searches the full instructions, full brief and older notes with project_docs_search when it needs them.
 - Specialists (agents): background specialists (Coder, Designer, Researcher and more) that work in parallel with their own playbooks; you can create your own.
 - Skills: SKILL.md files (same format as Blaze Desktop and CLI) in ~/skills; the ones that match a request are looked up per turn; core skills shape every turn.
 - Views: /views opens Design (live preview of 3D, sites, diagrams), Memory, Learn (flashcards), Seller, Jobs, Schedule, Agents, Accounts, Skills, Gallery, Browser, Doctor, Usage, Voice, Desktop and more.

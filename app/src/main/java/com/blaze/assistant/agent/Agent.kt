@@ -85,7 +85,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "memory_search", "search_past_chats", "gmail_search", "gmail_read",
         "gcal_events", "calendar_events", "drive_search", "gcontacts_search", "find_contact", "recent_notifications", "read_messages",
         "recent_calls", "device_status", "battery_level", "github_issues", "github_my_prs", "github_notifications", "github_search_repos",
-        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing", BlazeDocs.TOOL_SEARCH, BlazeDocs.TOOL_READ)
+        "notion_search", "slack_read", "slack_channels", "search_screen_memory", "spotify_now_playing", BlazeDocs.TOOL_SEARCH, BlazeDocs.TOOL_READ,
+        ProjectDocs.TOOL_SEARCH, ProjectDocs.TOOL_READ)
 
     private val screenActions = setOf("tap", "type_text", "scroll", "press_button", "open_app", "open_url", "search_in_app")
     private val ids = AtomicLong(1)
@@ -814,6 +815,8 @@ When you finish, say what you did in one short sentence.
         t.put(com.blaze.assistant.ui.Views.tool())
         t.put(SelfKnowledge.tool())
         BlazeDocs.tools().forEach { t.put(it) }
+        // v0.28.5: a project's full instructions / brief / notes as lookups; stripped from every chat that isn't in a project.
+        ProjectDocs.tools().forEach { t.put(it) }
         t.put(BlazeRouter.tool())
         t.put(com.blaze.assistant.desktop.LinuxDesktop.tool())
         if (Settings.longChat || Mind.ready) LongChat.tools().forEach { t.put(it) }
@@ -1287,7 +1290,7 @@ When you finish, say what you did in one short sentence.
                     SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", Locale.getDefault()).format(Date()), Memory.promptBlock(lastUserText()), agentId) +
                     Modes.promptLine(agentPlan) + (if (Settings.longChat && rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "")
                 else systemPrompt(lastUserText(), turnSkills.full.map { it.name }.toSet(), id) + Modes.promptLine(agentPlan) + (if (isPrivate) PrivateChat.PROMPT_LINE else "") +
-                (if (Settings.longChat) LongChat.PROMPT_LINE + Projects.briefBlock(id) + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
+                (if (Settings.longChat) LongChat.PROMPT_LINE + (if (rung == Mind.Rung.SUMMARY) LongChat.summaryBlock(st) else "") else "") +
                 (if (rung == Mind.Rung.LOOKUP) "\n" + Mind.LOOKUP_RULE + "\n" else "") +
                 (agentId?.let { "\nYou are background agent $it, not the main chat. Work alone and finish with the result only." } ?: BgAgents.leadLine()) +
                 (turnDesignNote.ifEmpty { turnView?.let { ViewRouter.hint(it) } ?: "" }) + SkillMatch.block(turnSkills) + SpecialistMatch.hint(turnSpecs) +
@@ -1375,8 +1378,8 @@ When you finish, say what you did in one short sentence.
                 "update_brief" -> {
                     val p = Projects.of(me) ?: return "This chat isn't in a project, so there's no brief to update. Keep going without it."
                     add(Role.STEP, "Updating the project brief")
-                    Projects.setBrief(p.id, args.optString("brief"))
-                    "Brief for ${p.name} updated; it's sent with every turn in this project."
+                    // v0.28.5: capped at 600 tokens (squeezed, then its top part; the whole text and the old brief are kept as notes).
+                    Projects.updateBrief(p.id, args.optString("brief"))
                 }
                 else -> "Unknown tool"
             }
@@ -1415,6 +1418,7 @@ When you finish, say what you did in one short sentence.
             val bytes0 = DataMeter.used()
             try {
                 val allTools0 = tools().apply { put(ToolRouter.loadTool()) }.let { if (isPrivate) PrivateChat.filterTools(it) else it }
+                    .let { if (Projects.of(id) == null) ProjectDocs.strip(it) else it }
                 // Agents don't start or steer other agents; Plan keeps only read-only tools.
                 val spNow = specialist
                 val allTools = Modes.filterTools(if (agentId == null) allTools0 else JSONArray().apply {
@@ -1874,7 +1878,7 @@ When you finish, say what you did in one short sentence.
 
         /** The blocking run (delegate wait=true): non-phone specialists in parallel, phone ones one after another. */
         private suspend fun delegateAndWait(briefs: List<Dispatch.Brief>): String = kotlinx.coroutines.coroutineScope {
-            val all = tools().let { if (isPrivate) PrivateChat.filterTools(it) else it }
+            val all = tools().let { if (isPrivate) PrivateChat.filterTools(it) else it }.let { if (Projects.of(id) == null) ProjectDocs.strip(it) else it }
             val jobs = briefs.take(Dispatch.MAX_TASKS).mapIndexed { i, b -> Triple(i, Specialists.byId(b.specialist) ?: Specialists.builtIn.first(), b.task) }
             val phoneLock = kotlinx.coroutines.sync.Mutex()
             val results = jobs.map { (i, spec, task) ->
@@ -2207,6 +2211,8 @@ When you finish, say what you did in one short sentence.
                 }
                 BlazeDocs.TOOL_SEARCH -> { add(Role.STEP, "Looking it up in Blaze's docs"); kotlinx.coroutines.withContext(Dispatchers.IO) { BlazeDocs.search(args) } }
                 BlazeDocs.TOOL_READ -> { add(Role.STEP, "Reading Blaze's docs"); kotlinx.coroutines.withContext(Dispatchers.IO) { BlazeDocs.read(args) } }
+                ProjectDocs.TOOL_SEARCH -> { add(Role.STEP, "Checking the project's notes"); kotlinx.coroutines.withContext(Dispatchers.IO) { ProjectDocs.search(id, args) } }
+                ProjectDocs.TOOL_READ -> { add(Role.STEP, "Reading the project's notes"); kotlinx.coroutines.withContext(Dispatchers.IO) { ProjectDocs.read(id, args) } }
                 SelfKnowledge.TOOL -> { add(Role.STEP, "Checking my own setup"); kotlinx.coroutines.withContext(Dispatchers.IO) { SelfKnowledge.report(app, args.optString("section")) } }
                 com.blaze.assistant.ui.Views.TOOL -> {
                     val v = com.blaze.assistant.ui.Views.find(args.optString("view"))

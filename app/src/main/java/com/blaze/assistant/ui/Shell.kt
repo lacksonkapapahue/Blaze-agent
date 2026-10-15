@@ -688,11 +688,18 @@ fun ProjectsPane(projects: List<Project>, chats: List<ChatMeta>, busy: Set<Strin
                     modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), singleLine = false, minHeight = 72.dp)
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Label("Brief", size = 9.sp, modifier = Modifier.weight(1f))
-                    Label("${brief.length / 4} / 600 tokens", color = if (brief.length > com.blaze.assistant.agent.Projects.BRIEF_MAX * 9 / 10) c.accent else c.weak, size = 9.sp)
+                    // v0.28.5: the real count (BlazeDb.tokens) against the hard cap; typing or pasting past it is cut at the cap.
+                    val P = com.blaze.assistant.agent.Projects
+                    val used = P.tokens(brief)
+                    Label("$used / ${P.BRIEF_TOKENS} tokens", color = if (used >= P.BRIEF_TOKENS * 9 / 10) c.accent else c.weak, size = 9.sp)
                 }
-                BlazeTextField(brief, { brief = it.take(com.blaze.assistant.agent.Projects.BRIEF_MAX); onBrief(open.id, brief) },
-                    "Pinned brief: purpose, rules, key files, what's in progress. Blaze keeps it up to date.",
+                var cut by remember(open.id) { mutableStateOf(false) }
+                BlazeTextField(brief, { t -> val fit = com.blaze.assistant.agent.Projects.cutTokens(t, com.blaze.assistant.agent.Projects.BRIEF_TOKENS)
+                        cut = fit.length < t.length; brief = fit; onBrief(open.id, fit) },
+                    "Pinned brief: purpose and rules first, then key files and what's in progress. Blaze keeps it up to date.",
                     modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth(), singleLine = false, minHeight = 96.dp)
+                if (cut) Text("The brief is at its 600-token cap, so the rest was cut. Put longer details in Instructions: Blaze searches them when it needs them.",
+                    style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, color = c.accent), modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp))
                 Label("Chats", size = 9.sp, modifier = Modifier.padding(start = 20.dp, top = 18.dp, bottom = 6.dp))
                 val list = open.chats.mapNotNull { id -> chats.firstOrNull { it.id == id } }
                 // v0.28.3: each chat opens inside Projects; ⋯ (or a long-press) renames or deletes it.
