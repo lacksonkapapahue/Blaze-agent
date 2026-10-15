@@ -116,7 +116,7 @@ object Skills {
 
     // ---------- Contacts ----------
 
-    private fun contacts(ctx: Context, name: String): List<Pair<String, String>> {
+    internal fun contacts(ctx: Context, name: String): List<Pair<String, String>> {
         if (!has(ctx, Manifest.permission.READ_CONTACTS)) return emptyList()
         val out = mutableListOf<Pair<String, String>>()
         ctx.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
@@ -124,7 +124,15 @@ object Skills {
             "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?", arrayOf("%$name%"), null)?.use {
             while (it.moveToNext() && out.size < 8) out += it.getString(0) to it.getString(1)
         }
-        return out.distinctBy { it.second.filter(Char::isDigit) }
+        if (out.isNotEmpty()) return out.distinctBy { it.second.filter(Char::isDigit) }
+        // v0.28.7: nothing by LIKE (a typo, emoji, words in another order): score every contact instead.
+        val all = mutableListOf<Pair<String, String>>()
+        ctx.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use {
+            while (it.moveToNext() && all.size < 5000) { val n = it.getString(0) ?: continue; all += n to (it.getString(1) ?: continue) }
+        }
+        return all.map { it to SendCheck.score(name, it.first) }.filter { it.second > 0 }.sortedByDescending { it.second }
+            .map { it.first }.distinctBy { it.second.filter(Char::isDigit) }.take(8)
     }
 
     private fun findContact(ctx: Context, name: String): String {
