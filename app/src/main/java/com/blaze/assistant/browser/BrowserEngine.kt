@@ -389,7 +389,6 @@ object BrowserEngine {
     /** Host of the page in the current tab ("" when none). */
     fun host(): String = tab()?.url?.let { SecureInput.hostOf(it) }.orEmpty()
     fun url(): String = tab()?.url.orEmpty()
-    fun url(): String = tab()?.url.orEmpty()
 
     /** True when the current page says this account can't use a password. */
     suspend fun passwordRefused(): String? {
