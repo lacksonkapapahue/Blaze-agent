@@ -31,7 +31,7 @@ table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}th{tex
 td{padding:7px 8px;border-bottom:1px solid var(--hair);vertical-align:top}td.m{font-family:var(--mono);font-size:12px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--muted)}.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
 .tag{display:inline-block;font:11px var(--mono);color:var(--muted);border:1px solid var(--hair);border-radius:999px;padding:0 7px;margin:0 3px 3px 0}
-.tag.pv{color:#a9bbff;background:rgba(123,152,255,.12);border-color:rgba(123,152,255,.5)}.tag.w{color:var(--warn);border-color:rgba(240,179,90,.5)}.tag.x{color:var(--bad);border-color:rgba(255,107,107,.5)}
+.tag.ok{color:var(--ok);border-color:rgba(95,211,141,.5)}.tag.pv{color:#a9bbff;background:rgba(123,152,255,.12);border-color:rgba(123,152,255,.5)}.tag.w{color:var(--warn);border-color:rgba(240,179,90,.5)}.tag.x{color:var(--bad);border-color:rgba(255,107,107,.5)}
 .warnbox{border-color:var(--warn);color:var(--warn);font-family:var(--mono);font-size:12px}
 .muted{color:var(--muted)}.hidden{display:none}
 #toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);background:var(--raised2);border:1px solid var(--accent);border-radius:999px;padding:8px 16px;font:12px var(--mono);opacity:0;transition:opacity .2s;pointer-events:none;z-index:5;max-width:90vw}
@@ -115,7 +115,7 @@ input::placeholder{color:#8e8e88}.task{scroll-margin-top:70px}
 <script nonce="${nonce}">
 (function(){
 const $=s=>document.querySelector(s);let TOKEN=sessionStorage.getItem("bz_admin")||"";let S=null;let tab="health";
-let CAT={models:[],discovery:[]};let MI=new Map();const DRAFT={};const NOTES={};const PICK={};
+let CAT={models:[],discovery:[],tests:[],test_first:[],free_list_only:[],fast_ms:3000};const LIVE={};let MI=new Map();const DRAFT={};const NOTES={};const PICK={};
 const CAPWORD={vision:"can't see images",tools:"no tool calling",long:"short memory",fast:"not a fast model"};
 function el(tag,attrs,...kids){const e=document.createElement(tag);for(const k in (attrs||{})){if(k==="class")e.className=attrs[k];else if(k.startsWith("on"))e.addEventListener(k.slice(2),attrs[k]);else e.setAttribute(k,attrs[k]);}for(const c of kids){if(c==null)continue;e.append(c.nodeType?c:document.createTextNode(String(c)));}return e;}
 function toast(t){const x=$("#toast");x.textContent=t;x.classList.add("show");clearTimeout(x._t);x._t=setTimeout(()=>x.classList.remove("show"),3200);}
@@ -125,7 +125,7 @@ async function api(method,path,body){const r=await fetch("/admin/api/"+path,{met
  const j=await r.json().catch(()=>({}));if(r.status===401){signOut(true);throw new Error("signed out");}if(!r.ok)throw new Error((j.error&&j.error.message)||j.message||("HTTP "+r.status));return j;}
 function ago(t){if(!t)return "–";const s=Math.round((Date.now()-t)/1000);if(s<60)return s+"s ago";if(s<3600)return Math.round(s/60)+"m ago";if(s<86400)return Math.round(s/3600)+"h ago";return Math.round(s/86400)+"d ago";}
 function inS(t){const s=Math.max(0,Math.round((t-Date.now())/1000));return s<60?s+"s":s<3600?Math.round(s/60)+"m":Math.round(s/3600)+"h";}
-function show(id){for(const s of ["health","routes","providers","plans","access"])$("#t-"+s).classList.toggle("hidden",s!==id);for(const b of document.querySelectorAll("#nav button"))b.classList.toggle("on",b.dataset.t===id);tab=id;if(id==="routes")loadModels().catch(e=>toast(e.message));}
+function show(id){for(const s of ["health","routes","providers","plans","access"])$("#t-"+s).classList.toggle("hidden",s!==id);for(const b of document.querySelectorAll("#nav button"))b.classList.toggle("on",b.dataset.t===id);tab=id;if(id==="routes")loadModels().catch(e=>toast(e.message));if(id==="providers")refreshLive(false).catch(()=>{});}
 function signOut(silent){if(!silent&&TOKEN)fetch("/admin/api/logout",{method:"POST",headers:{Authorization:"Bearer "+TOKEN}}).catch(()=>{});TOKEN="";sessionStorage.removeItem("bz_admin");$("#app").classList.add("hidden");$("#login").classList.remove("hidden");}
 async function signIn(body){$("#lerr").textContent="";try{const r=await fetch("/admin/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||"Sign-in failed");TOKEN=j.token;
  const me=await fetch("/admin/api/me",{headers:{Authorization:"Bearer "+TOKEN}});if(!me.ok)throw new Error("Not an admin");sessionStorage.setItem("bz_admin",TOKEN);$("#pw").value="";$("#tk").value="";start();}catch(e){TOKEN="";$("#lerr").textContent=e.message;}}
@@ -134,13 +134,27 @@ $("#gotk").onclick=()=>signIn({token:$("#tk").value});$("#out").onclick=()=>sign
 for(const b of document.querySelectorAll("#nav button"))b.onclick=()=>show(b.dataset.t);
 /* force=true after the admin's own actions (always re-render); the 15 s refresh passes false so it never wipes what's being typed. */
 async function load(force){S=await api("GET","state");render(force!==false);}
-async function loadModels(){CAT=await api("GET","models");MI=new Map(CAT.models.map(m=>[m.provider+"|"+m.id,m]));renderRoutes();}
+async function loadModels(){CAT=await api("GET","models");CAT.tests=CAT.tests||[];CAT.test_first=CAT.test_first||[];CAT.free_list_only=CAT.free_list_only||[];MI=new Map(CAT.models.map(m=>[m.provider+"|"+m.id,m]));renderRoutes();if(S&&!editing())renderProviders();}
+/* Nous (0.3.1): free-list providers are listed live and their models must pass Test within fast_ms before routing. */
+function gated(p){return CAT.test_first.indexOf(p)>=0;}
+function freeOnly(p){return CAT.free_list_only.indexOf(p)>=0;}
+function testOf(p,m){return CAT.tests.find(x=>x.provider===p&&x.model===m);}
+function vetted(p,m){const r=testOf(p,m);return !!(r&&r.ok&&r.ms<=CAT.fast_ms);}
+function secs(ms){return (Math.round(ms/100)/10)+" s";}
+function testTag(p,m){const r=testOf(p,m);if(!r)return el("span",{class:"tag w"},"untested");if(r.ok&&r.ms<=CAT.fast_ms)return el("span",{class:"tag ok"},"✓ "+secs(r.ms));
+ return el("span",{class:"tag x"},r.ok?("slow "+secs(r.ms)):("failed"+(r.status?" "+r.status:"")+(r.kind?" · "+r.kind:"")));}
+function testWord(r){if(r.ok)return r.vetted===false?(r.fast===false?"answered in "+secs(r.ms)+": slower than "+secs(CAT.fast_ms)+", won't be routed":(r.listed===false?"answered in "+secs(r.ms)+" but it isn't on the free list now":"ok · "+r.ms+" ms")):("ok · "+r.ms+" ms"+(r.vetted?" · can be routed":""));
+ return ("fail "+r.status+" · "+(r.kind||"")+" "+(r.error||"")).slice(0,180);}
+async function runTest(p,m){const r=await api("POST","test-model",{provider:p,model:m});await loadModels().catch(()=>{});return r;}
+/* Refresh a free-list provider's live model list when it's older than 10 minutes (the free list rotates). */
+async function refreshLive(force){const ids=CAT.free_list_only.filter(p=>{const d=(CAT.discovery||[]).find(x=>x.provider_id===p);return force||!d||Date.now()-d.ran_at>600000;}).filter(p=>!LIVE[p]||Date.now()-LIVE[p]>60000);
+ if(!ids.length)return;for(const p of ids){LIVE[p]=Date.now();await api("POST","providers/"+p+"/discover").catch(()=>{});}await loadModels().catch(()=>{});}
 function editing(){const a=document.activeElement;return !!(a&&a.closest&&a.closest("#t-routes,#t-providers,#t-plans,#t-access")&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"||a.tagName==="SELECT"));}
 function render(force){$("#ver").textContent="v"+S.version;const w=$("#warns");w.replaceChildren(...S.warnings.map(x=>el("div",{class:"card warnbox"},"! "+x)));
  $("#s-req").textContent=S.usage_today.requests;$("#s-users").textContent=S.usage_today.users;$("#s-tok").textContent=Number(S.usage_today.tokens).toLocaleString();
  $("#s-cool").textContent=S.health.filter(h=>h.cooling_until).length;renderHealth();if(force||!editing()){renderRoutes();renderProviders();renderPlans();renderAccess();}}
 function renderHealth(){$("#health").replaceChildren(...S.health.map(h=>{const st=h.cooling_until?"warn":(h.last_fail_at>h.last_ok_at?"bad":(h.last_ok_at?"ok":""));
- const btn=el("button",{class:"b",onclick:async e=>{e.target.textContent="…";try{const r=await api("POST","test-model",{provider:h.provider,model:h.model});toast(r.ok?("ok · "+r.ms+" ms"):("fail "+r.status+" · "+(r.kind||"")+" "+(r.error||"")).slice(0,160));}catch(x){toast(x.message);}load();}},"test");
+ const btn=el("button",{class:"b",onclick:async e=>{e.target.textContent="…";try{const r=await runTest(h.provider,h.model);toast(testWord(r));}catch(x){toast(x.message);}load();}},"test");
  const clr=h.cooling_until?el("button",{class:"b",onclick:async()=>{await api("POST","cooldowns/clear",{provider:h.provider,model:h.model});load();}},"clear"):null;
  const m=MI.get(h.provider+"|"+h.model);
  return el("tr",{},el("td",{class:"m"},el("span",{class:"dot "+st}),(m?m.name+" · ":"")+h.provider+" · "+h.model),el("td",{},...h.tasks.map(t=>el("span",{class:"tag"},t))),el("td",{class:"m"},ago(h.last_ok_at)),
@@ -157,6 +171,9 @@ function slot(t,c,i,n){const m=MI.get(c.provider+"|"+c.model);const need=(S.task
  if(m&&need&&m.caps.indexOf(need)<0)flags.push(el("span",{class:need==="fast"?"tag w":"tag x"},CAPWORD[need]));
  if(!provUsable(c.provider))flags.push(el("span",{class:"tag w"},"no key yet · skipped"));
  if(c.provider==="openrouter"&&!/:free$/.test(c.model))flags.push(el("span",{class:"tag x"},"paid · won't be used"));
+ if(freeOnly(c.provider)&&!m)flags.push(el("span",{class:"tag x"},"not on the free list now · skipped"));
+ if(gated(c.provider)&&!vetted(c.provider,c.model))flags.push(el("span",{class:"tag x"},"needs a passing Test ≤ "+secs(CAT.fast_ms)+" · skipped"));
+ if(gated(c.provider))flags.push(testTag(c.provider,c.model));
  const up=el("button",{class:"b i",title:"move up",onclick:()=>{const l=list(t).slice();if(i>0){[l[i-1],l[i]]=[l[i],l[i-1]];setList(t,l);}}},"↑");
  const dn=el("button",{class:"b i",title:"move down",onclick:()=>{const l=list(t).slice();if(i<l.length-1){[l[i+1],l[i]]=[l[i],l[i+1]];setList(t,l);}}},"↓");
  const rm=el("button",{class:"b i d",title:"remove",onclick:()=>{const l=list(t).slice();l.splice(i,1);setList(t,l);}},"✕");
@@ -167,15 +184,18 @@ function slot(t,c,i,n){const m=MI.get(c.provider+"|"+c.model);const need=(S.task
 function picker(t){const st=PICK[t]||(PICK[t]={q:"",fit:true,open:false});const need=(S.task_info[t]||{}).needs;
  const addC=c=>{const l=list(t).slice();if(l.some(x=>x.provider===c.provider&&x.model===c.model)){toast("already in the list");return;}
   const last=l.length&&l[l.length-1].provider==="workers-ai"&&c.provider!=="workers-ai"?l.length-1:l.length;l.splice(last,0,c);st.open=true;setList(t,l);};
- if(!st.open)return el("div",{class:"row",style:"margin-top:6px"},el("button",{class:"b a",onclick:()=>{st.open=true;renderRoutes();const i=document.querySelector("#pick-"+t+" input");if(i)i.focus();}},"+ Add a model"));
+ /* Test-first providers (Nous): a model goes in only after Test passes within fast_ms. */
+ const pickM=async m=>{const c={provider:m.provider,model:m.id};if(!gated(m.provider)||vetted(m.provider,m.id)){addC(c);return;}
+  toast("Testing "+m.name+"…");try{const r=await runTest(m.provider,m.id);if(r.ok&&r.vetted){addC(c);note("route-"+t,"Added "+m.name+": "+testWord(r),"ok");}else note("route-"+t,"Not added: "+m.name+" · "+(r.error==="No enabled key for this provider"?"add a "+provName(m.provider)+" key first (Providers tab)":testWord(r)),"bad");}catch(x){note("route-"+t,x.message,"bad");}renderRoutes();};
+ if(!st.open)return el("div",{class:"row",style:"margin-top:6px"},el("button",{class:"b a",onclick:()=>{st.open=true;renderRoutes();refreshLive(false).catch(()=>{});const i=document.querySelector("#pick-"+t+" input");if(i)i.focus();}},"+ Add a model"));
  const q=el("input",{placeholder:"search models (e.g. flash, llama, coder)",class:"grow"});q.value=st.q;
  const fit=el("input",{type:"checkbox"});fit.checked=st.fit;const res=el("div",{class:"res",role:"listbox"});
  const fill=()=>{st.q=q.value;st.fit=fit.checked;const words=q.value.toLowerCase().split(" ").filter(Boolean);const by={};
   for(const m of CAT.models){if(st.fit&&!fits(t,m))continue;const hay=(m.name+" "+m.id+" "+m.provider+" "+provName(m.provider)).toLowerCase();if(words.some(w=>hay.indexOf(w)<0))continue;(by[m.provider]=by[m.provider]||[]).push(m);}
   const groups=Object.keys(by).sort((a,b)=>(provUsable(b)?1:0)-(provUsable(a)?1:0)||a.localeCompare(b));const kids=[];
-  for(const p of groups){kids.push(el("div",{class:"g"},provName(p)+(provUsable(p)?"":" · no key yet")));
+  for(const p of groups){kids.push(el("div",{class:"g"},provName(p)+(provUsable(p)?"":" · no key yet")+(freeOnly(p)?" · free now (live list)":"")+(gated(p)?" · tested on pick, must reply ≤ "+secs(CAT.fast_ms):"")));
    for(const m of by[p]){const inL=list(t).some(x=>x.provider===m.provider&&x.model===m.id);
-    kids.push(el("button",{type:"button",role:"option",title:m.provider+" · "+m.id,onclick:()=>addC({provider:m.provider,model:m.id})},el("span",{},(inL?"✓ ":"")+m.name+(fits(t,m)?"":" ⚠ "+CAPWORD[need])),el("span",{class:"id"},m.context?(m.context>=1e6?(Math.round(m.context/1e5)/10)+"M":Math.round(m.context/1000)+"k"):"")));}}
+    kids.push(el("button",{type:"button",role:"option",title:m.provider+" · "+m.id,onclick:()=>pickM(m)},el("span",{},(inL?"✓ ":"")+m.name+(fits(t,m)?"":" ⚠ "+CAPWORD[need])),freeOnly(p)?el("span",{class:"tag ok"},"free"):null,gated(p)?testTag(p,m.id):null,el("span",{class:"id"},m.context?(m.context>=1e6?(Math.round(m.context/1e5)/10)+"M":Math.round(m.context/1000)+"k"):"")));}}
   if(!kids.length)kids.push(el("div",{class:"empty"},CAT.models.length?"No match":"No models yet: press Find models"));res.replaceChildren(...kids);};
  q.oninput=fill;fit.onchange=fill;fill();
  return el("div",{class:"pick",id:"pick-"+t},el("div",{class:"row"},q,el("label",{class:"muted",style:"font-size:12px"},fit," only models that fit"+(need&&need!=="fast"?" ("+({vision:"see images",tools:"use tools",long:"long inputs"})[need]+")":"")),el("button",{class:"b",onclick:()=>{st.open=false;renderRoutes();}},"Done")),res);}
@@ -215,9 +235,18 @@ function renderProviders(){$("#providers").replaceChildren(...S.providers.map(p=
    const dsc=r.discovery?(r.discovery.ok?" · found "+r.discovery.count+" models":" · couldn't list models yet: "+(r.discovery.error||"")):"";
    note(p.id,r.duplicate?("That key is already saved ("+r.masked+"), nothing added"):("Key added "+r.masked+dsc),r.duplicate?"warn":"ok");if(r.discovery&&r.discovery.ok)loadModels().catch(()=>{});}
   catch(e){note(p.id,e.message,"bad");}document.activeElement&&document.activeElement.blur&&document.activeElement.blur();await load(true);}},"Add key");
+ const live=freeOnly(p.id)?freeList(p):null;
  return el("div",{class:"card"},el("div",{class:"row",style:"margin-bottom:8px"},el("span",{class:"lbl"},p.id+" · "+p.type),el("span",{class:"tag pv"},dtxt),el("span",{class:"grow"}),el("label",{class:"muted"},en," enabled"),find,save,del),
   el("div",{class:"row",style:"margin-bottom:6px"},name,url),el("div",{class:"row",style:"margin-bottom:8px"},notes),
-  p.type==="workers-ai"?el("div",{class:"muted",style:"font-size:12px"},"Uses the Worker's AI binding, no key."):el("div",{},keys,el("div",{class:"row",style:"margin-top:8px"},nk,nl,add)),noteEl(p.id));}));}
+  p.type==="workers-ai"?el("div",{class:"muted",style:"font-size:12px"},"Uses the Worker's AI binding, no key."):el("div",{},keys,el("div",{class:"row",style:"margin-top:8px"},nk,nl,add)),live,noteEl(p.id));}));}
+/* Free models on a free-list provider's live list (Nous), each with Test: pass within fast_ms and it can be added to a route. */
+function freeList(p){const ms=CAT.models.filter(m=>m.provider===p.id);
+ const head=el("div",{class:"row",style:"margin-top:10px"},el("span",{class:"lbl grow"},"Free models right now · price 0 on the live list · "+(gated(p.id)?"Test must reply within "+secs(CAT.fast_ms)+" before routing":"")),el("button",{class:"b",onclick:async e=>{e.target.disabled=true;await refreshLive(true).catch(()=>{});note(p.id,"Live list refreshed: "+CAT.models.filter(m=>m.provider===p.id).length+" free models","ok");renderProviders();}},"Refresh list"));
+ if(!ms.length)return el("div",{},head,el("div",{class:"muted",style:"font-size:13px"},"No free models listed yet: press Refresh list (works before a key is added)."));
+ return el("div",{},head,el("table",{},el("tbody",{},...ms.map(m=>el("tr",{},el("td",{},m.name,el("div",{class:"muted",style:"font:11px var(--mono)"},m.id)),
+  el("td",{class:"m"},m.context?(m.context>=1e6?(Math.round(m.context/1e5)/10)+"M":Math.round(m.context/1000)+"k"):""),el("td",{},...m.caps.filter(c=>c!=="chat").map(c=>el("span",{class:"tag"},c))),
+  el("td",{},el("span",{class:"tag ok"},"free"),gated(p.id)?testTag(p.id,m.id):null),
+  el("td",{},el("button",{class:"b",onclick:async e=>{e.target.textContent="…";try{const r=await runTest(p.id,m.id);note(p.id,m.name+": "+(r.error==="No enabled key for this provider"?"add a key first":testWord(r)),r.ok&&r.vetted!==false?"ok":"bad");}catch(x){note(p.id,x.message,"bad");}renderProviders();}},"test")))))));}
 $("#np-add").onclick=async()=>{try{await api("POST","providers",{id:$("#np-id").value,name:$("#np-name").value,base_url:$("#np-url").value,type:$("#np-type").value});toast("provider added");load(true);}catch(e){toast(e.message);}};
 function renderPlans(){$("#defplan").textContent=S.default_plan;$("#plans").replaceChildren(...S.plans.map(p=>{const pr=el("input",{type:"number",min:"0",step:"1",value:p.price_usd,size:"6"});
  const r=el("input",{type:"number",min:"0",value:p.daily_requests,size:"8"});const t=el("input",{type:"number",min:"0",value:p.daily_tokens,size:"12"});

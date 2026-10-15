@@ -3,10 +3,10 @@
 
 import { decide, listAccounts, type AccessStatus } from "./access";
 import { adminEmails, requireAdmin, type Admin } from "./auth";
-import { discoverAll, discoverProvider, isRoutable, loadModels, suggestLineup, TASK_INFO } from "./catalog";
+import { discoverAll, discoverProvider, isRoutable, loadModels, notRoutableReason, suggestLineup, TASK_INFO } from "./catalog";
 import { encryptKey, last4, masked, MIN_SECRET_LEN, decryptKey } from "./crypto";
 import { ensureSeeded, invalidateConfig, loadConfig, loadMarks, saveMarkStmt, seed } from "./db";
-import { DEFAULT_PLAN, DEFAULT_ROUTES, WORKERS_AI, type Candidate } from "./defaults";
+import { DEFAULT_PLAN, DEFAULT_ROUTES, FAST_MS, FREE_LIST_ONLY, TEST_FIRST, WORKERS_AI, type Candidate } from "./defaults";
 import type { Env } from "./env";
 import { VERSION } from "./env";
 import { callOpenAI, callWorkersAI, testKey, upstreamBody } from "./providers";
@@ -204,7 +204,13 @@ async function listModels(env: Env): Promise<Response> {
     loadModels(env.DB),
     env.DB.prepare("SELECT provider_id, ran_at, ok, count, source, error FROM discovery").all<any>(),
   ]);
-  return json({ models: models.filter(m => m.free), discovery: disc.results, task_info: TASK_INFO });
+  const tests = await env.DB.prepare("SELECT provider_id, model_id, ok, ms, status, kind, tested_at FROM model_tests").all<any>().catch(() => ({ results: [] as any[] }));
+  return json({
+    models: models.filter(m => m.free), discovery: disc.results, task_info: TASK_INFO,
+    // Nous (0.3.1): the picker flags free-list models and their last Test; these must pass Test within fast_ms.
+    tests: tests.results.map(t => ({ provider: t.provider_id, model: t.model_id, ok: !!t.ok, ms: Number(t.ms) || 0, status: Number(t.status) || 0, kind: t.kind || "", tested_at: Number(t.tested_at) || 0 })),
+    test_first: [...TEST_FIRST], free_list_only: [...FREE_LIST_ONLY], fast_ms: FAST_MS,
+  });
 }
 
 /** POST /admin/api/routes/suggest {apply?: boolean}: best free lineup per task from discovered models. */
@@ -212,7 +218,8 @@ async function suggestRoutes(req: Request, env: Env): Promise<Response> {
   const b = await readJSON(req, 16_384).catch(() => ({} as Record<string, unknown>));
   invalidateConfig();
   const cfg = await loadConfig(env.DB);
-  const models = await loadModels(env.DB);
+  // Untested / slow Nous models are never suggested (Joey's rule: Test first, reply within FAST_MS).
+  const models = (await loadModels(env.DB)).filter(m => isRoutable({ provider: m.provider, model: m.id }, cfg.paid, cfg));
   const usable = (id: string) => {
     const p = cfg.providers.get(id);
     if (!p || !p.enabled) return false;
@@ -262,7 +269,12 @@ async function testKeyRoute(env: Env, id: number): Promise<Response> {
   return json(r);
 }
 
-/** POST /admin/api/test-model {provider, model}: a 1-token completion through the real path. */
+/**
+ * POST /admin/api/test-model {provider, model}: a short real completion through the real path.
+ * Records the result in D1 `model_tests` (ok, full reply time). For TEST_FIRST providers (Nous) the
+ * model becomes routable only when it answered within FAST_MS ("vetted"); FREE_LIST_ONLY providers
+ * also need it on the current free list.
+ */
 async function testModel(req: Request, env: Env): Promise<Response> {
   const b = await readJSON(req, 16_384);
   const c: Candidate = { provider: str(b.provider, 32), model: str(b.model, 200) };
@@ -270,7 +282,7 @@ async function testModel(req: Request, env: Env): Promise<Response> {
   const cfg = await loadConfig(env.DB);
   const p = cfg.providers.get(c.provider);
   if (!p) throw new HttpError(404, "no_provider", "No such provider");
-  const body = { messages: [{ role: "user", content: "Reply with: OK" }], max_tokens: 5, stream: false };
+  const body = { messages: [{ role: "user", content: "Reply with: OK" }], max_tokens: 16, stream: false };
   const t0 = Date.now();
   let up;
   if (p.type === "workers-ai") up = await callWorkersAI(env.AI, c.model, body, 30_000);
@@ -281,19 +293,36 @@ async function testModel(req: Request, env: Env): Promise<Response> {
     if (!plain) return json({ ok: false, status: 0, ms: 0, error: "Can't decrypt the key" });
     up = await callOpenAI(c.provider, p.base_url, plain, upstreamBody(body, c.model), 30_000);
   }
-  const ms = Date.now() - t0;
   const marks = new Map<string, Mark>();
-  const now = Date.now();
+  let answered = false;
   if (up.status >= 200 && up.status < 300) {
-    await up.body?.cancel().catch(() => undefined);
+    // Time the whole reply (not just the headers): the 3 s rule is about the answer.
+    const text = up.body ? await new Response(up.body).text().catch(() => "") : "";
+    try { answered = Array.isArray(JSON.parse(text)?.choices); } catch { answered = false; }
+  }
+  const now = Date.now();
+  const ms = now - t0;
+  const k = `${c.provider}|${c.model}`;
+  const fast = ms <= FAST_MS;
+  const listedOk = !FREE_LIST_ONLY.has(c.provider) || cfg.listed.has(k);
+  const gate = TEST_FIRST.has(c.provider) ? { test_first: true, fast_ms: FAST_MS, fast, listed: listedOk, vetted: answered && fast && listedOk } : {};
+  const record = (ok: boolean, kind: string) => env.DB.prepare(
+    "INSERT INTO model_tests (provider_id, model_id, ok, ms, status, kind, tested_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) " +
+    "ON CONFLICT (provider_id, model_id) DO UPDATE SET ok = ?3, ms = ?4, status = ?5, kind = ?6, tested_at = ?7",
+  ).bind(c.provider, c.model.slice(0, 200), ok ? 1 : 0, ms, up.status, kind, now).run().catch(() => undefined); // table missing before migration 0004
+  if (answered) {
     const ok = markOk(marks, c, now);
     await saveMarkStmt(env.DB, ok.key, ok.mark).run();
-    return json({ ok: true, status: up.status, ms });
+    await record(true, fast ? "ok" : "slow");
+    invalidateConfig();
+    return json({ ok: true, status: up.status, ms, ...gate });
   }
-  const o = classify(c.provider, up.status, up.errorText);
+  const o = up.status >= 200 && up.status < 300 ? { kind: "server" as const, coolMs: 0, scope: "none" as const } : classify(c.provider, up.status, up.errorText);
   const ch = applyOutcome(marks, c, o, now);
   if (ch) await saveMarkStmt(env.DB, ch.key, ch.mark).run();
-  return json({ ok: false, status: up.status, ms, kind: o.kind, error: up.errorText.slice(0, 300) });
+  await record(false, o.kind);
+  invalidateConfig();
+  return json({ ok: false, status: up.status, ms, kind: o.kind, error: (up.errorText || (up.status ? "no completion in the reply" : "")).slice(0, 300), ...gate });
 }
 
 async function clearCooldown(req: Request, env: Env): Promise<Response> {
@@ -317,9 +346,11 @@ async function putRoute(req: Request, env: Env, taskName: string): Promise<Respo
     models.push({ provider, model });
   }
   if (models.length > 40) throw new HttpError(400, "too_many", "At most 40 models per task");
+  invalidateConfig(); // a Test that just passed in another isolate must count
   const cfg = await loadConfig(env.DB);
-  for (const c of models) if (!isRoutable(c, cfg.paid)) {
-    throw new HttpError(400, "paid_model", c.provider === "openrouter" ? `OpenRouter: only :free models (${c.model})` : `${c.provider} ${c.model} is paid-only`);
+  for (const c of models) {
+    const why = notRoutableReason(c, cfg.paid, cfg);
+    if (why) throw new HttpError(400, TEST_FIRST.has(c.provider) || FREE_LIST_ONLY.has(c.provider) ? "not_vetted" : "paid_model", why);
   }
   await env.DB.prepare("INSERT INTO task_routes (task, models, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (task) DO UPDATE SET models = ?2, updated_at = ?3")
     .bind(task, JSON.stringify(models), Date.now()).run();

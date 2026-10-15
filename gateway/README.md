@@ -139,14 +139,16 @@ length, free flag) plus one `discovery` row per provider (when, how many, source
 | Provider | List API |
 | --- | --- |
 | Gemini | native `GET …/v1beta/models?pageSize=1000` (`x-goog-api-key`); `generateContent` models only |
-| Groq, Cerebras, Mistral, OpenRouter, NVIDIA, GitHub Models | `GET {base_url}/models` (Bearer key; OpenRouter's list is public) |
+| Groq, Cerebras, Mistral, OpenRouter, Nous, NVIDIA, GitHub Models | `GET {base_url}/models` (Bearer key; OpenRouter's and Nous's lists are public) |
 | Workers AI | the AI binding's `models({task:"Text Generation"})`; a built-in curated list if that fails |
 
 - Embeddings, speech, image generation, moderation, guard and OCR models are dropped.
 - Capabilities come from provider metadata where given (Mistral `capabilities`, OpenRouter
   `architecture` / `supported_parameters`, Workers AI properties, Gemini token limits), otherwise
   from the model id.
-- **Free only:** OpenRouter keeps only `:free` models; Gemini models matching known paid-only
+- **Free only:** OpenRouter keeps only `:free` models; Nous (0.3.1) keeps only models its live list
+  prices at 0, and a Nous model is routed only while it's on that list and after /admin Test answered
+  within 3 s (D1 `model_tests`); Gemini models matching known paid-only
   names (Gemini 3 Pro, `-pro-preview`, deep-research) are stored with `free = 0`, hidden in
   `/admin`, refused by `PUT /routes/:task`, and skipped at request time even if an old route names
   them. Free flags for Gemini are a name heuristic; check Google's pricing page if in doubt.

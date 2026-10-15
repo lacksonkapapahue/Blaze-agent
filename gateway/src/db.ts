@@ -1,6 +1,6 @@
 // D1 access: configuration (cached per isolate for a few seconds), model health and stats.
 
-import { DEFAULT_PLANS, DEFAULT_PROVIDERS, DEFAULT_ROUTES, type Candidate, type PlanLimits, type ProviderType } from "./defaults";
+import { DEFAULT_PLANS, DEFAULT_PROVIDERS, DEFAULT_ROUTES, FAST_MS, FREE_LIST_ONLY, TEST_FIRST, type Candidate, type PlanLimits, type ProviderType } from "./defaults";
 import { TASKS, type Mark, type Task } from "./router";
 import { utcDay } from "./util";
 
@@ -34,6 +34,10 @@ export interface Config {
   assignments: Map<string, string>;
   /** "provider|model" of discovered models flagged paid-only: never routed to. */
   paid: Set<string>;
+  /** "provider|model" on the latest free list of a FREE_LIST_ONLY provider (Nous); others aren't routed. */
+  listed: Set<string>;
+  /** "provider|model" of TEST_FIRST providers whose latest /admin Test passed within FAST_MS (migration 0004). */
+  vetted: Set<string>;
   /** Gateway switches from the D1 `settings` table (migration 0003). */
   settings: Settings;
 }
@@ -125,11 +129,24 @@ export async function loadConfig(db: D1Database, now = Date.now()): Promise<Conf
     const pr = await db.prepare("SELECT provider_id, model_id FROM models WHERE free = 0").all<any>();
     for (const x of pr.results) paid.add(`${x.provider_id}|${x.model_id}`);
   } catch { /* no models table yet */ }
+  // Nous (0.3.1): routed only while on its discovered free list and after a fast passing Test.
+  // Missing tables (migrations not applied yet) leave both sets empty: those providers just aren't routed.
+  const listed = new Set<string>();
+  const vetted = new Set<string>();
+  const freeOnly = [...FREE_LIST_ONLY], tested = [...TEST_FIRST];
+  if (freeOnly.length) try {
+    const lr = await db.prepare(`SELECT provider_id, model_id FROM models WHERE free = 1 AND provider_id IN (${freeOnly.map((_, i) => `?${i + 1}`).join(", ")})`).bind(...freeOnly).all<any>();
+    for (const x of lr.results) listed.add(`${x.provider_id}|${x.model_id}`);
+  } catch { /* no models table yet */ }
+  if (tested.length) try {
+    const vr = await db.prepare(`SELECT provider_id, model_id FROM model_tests WHERE ok = 1 AND ms <= ?1 AND provider_id IN (${tested.map((_, i) => `?${i + 2}`).join(", ")})`).bind(FAST_MS, ...tested).all<any>();
+    for (const x of vr.results) vetted.add(`${x.provider_id}|${x.model_id}`);
+  } catch { /* no model_tests table yet */ }
   let settings = { ...DEFAULT_SETTINGS };
   try {
     settings = parseSettings((await db.prepare("SELECT key, value FROM settings").all<{ key: string; value: string }>()).results);
   } catch { /* no settings table yet (migration 0003 not applied): approval stays on */ }
-  const cfg: Config = { providers, keys, routes, plans, assignments, paid, settings };
+  const cfg: Config = { providers, keys, routes, plans, assignments, paid, listed, vetted, settings };
   cached = { at: now, db, cfg };
   return cfg;
 }

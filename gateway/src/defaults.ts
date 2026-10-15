@@ -16,6 +16,22 @@ export interface ProviderSeed {
 
 export const WORKERS_AI = "workers-ai";
 
+/** Also written by migrations/0004_nous.sql (keep the two in step). */
+export const NOUS_NOTES = "Key: portal.nousresearch.com → API keys (sk-nous-…; the free plan is enough). Free models only (price 0 on the live list, which rotates). A Nous model is routed only after it passes Test and replies within 3 s.";
+
+/**
+ * Providers whose live model list carries prices (OpenRouter-style `pricing`): only models priced 0
+ * are kept, and a model is routed only while it is on the latest discovered free list.
+ */
+export const FREE_LIST_ONLY: ReadonlySet<string> = new Set(["nous"]);
+
+/**
+ * Joey's rule for these providers: a model is routed only after it passed /admin "Test"
+ * (a real completion) and replied within FAST_MS. Recorded in D1 `model_tests` (migration 0004).
+ */
+export const TEST_FIRST: ReadonlySet<string> = new Set(["nous"]);
+export const FAST_MS = 3_000;
+
 export const DEFAULT_PROVIDERS: ProviderSeed[] = [
   { id: "gemini", name: "Google Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai", type: "openai", enabled: true,
     notes: "Key: aistudio.google.com/apikey. Free quota: Google may use prompts/answers to improve products (human review); free tier not allowed for apps serving EEA/UK/CH users; users must be 18+." },
@@ -31,6 +47,8 @@ export const DEFAULT_PROVIDERS: ProviderSeed[] = [
     notes: "GitHub Models was fully retired on 2026-07-30; kept disabled so the adapter slot exists. Don't enable." },
   { id: "nvidia", name: "NVIDIA NIM", base_url: "https://integrate.api.nvidia.com/v1", type: "openai", enabled: false,
     notes: "Disabled by default: free NIM API access is aimed at prototyping (terms not re-checked for 0.1.0). Key: build.nvidia.com." },
+  { id: "nous", name: "Nous Research (Nous Portal)", base_url: "https://inference-api.nousresearch.com/v1", type: "openai", enabled: true,
+    notes: NOUS_NOTES },
   { id: WORKERS_AI, name: "Cloudflare Workers AI", base_url: "binding:AI", type: "workers-ai", enabled: true,
     notes: "No key: uses the Worker's AI binding. 10,000 Neurons/day free. Last-resort fallback." },
 ];

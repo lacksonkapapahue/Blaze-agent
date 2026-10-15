@@ -1,5 +1,32 @@
 # Blaze Gateway changelog
 
+## 0.3.1 (2026-10-16)
+
+- **Nous Research (Nous Portal) provider** (`nous`, OpenAI-compatible,
+  `https://inference-api.nousresearch.com/v1`, `Authorization: Bearer sk-nous-…`). In the provider
+  registry like Groq / NVIDIA (seeded for new databases; migration `0004_nous.sql` adds the row to
+  existing ones without touching admin edits), so its key can be pasted in /admin › Providers.
+  **No Nous model is in any route** (no key exists yet).
+- **Free only, from the live list.** Nous's `/v1/models` is public and carries OpenRouter-style
+  `pricing`; discovery keeps only models priced 0 (prompt and completion, `"0"` or
+  `"0.0000000000"`) and runs before a key exists (keyless list, refreshed by the cron about daily,
+  and on "Find models" / "Refresh list"). The free list rotates, so a Nous model is routed only
+  while it is on the latest discovered free list.
+- **Test first, reply within 3 s (Joey's rule).** For Nous, a model is routable only after
+  /admin **Test** (`POST /admin/api/test-model`, a real short completion, now timed to the end of
+  the reply and recorded in the new D1 table `model_tests`) answered within 3 s. Saving a route
+  with an untested, slow, failed or not-free Nous model is refused with the reason; such models are
+  skipped at request time and left out of "Suggest best free lineup". Picking a Nous model in the
+  route picker runs Test first and only adds it when it passes.
+- **Admin:** the Nous provider card shows "Free models right now" from the live list with context,
+  capabilities, a **free** tag, the last Test result (✓ 1.2 s / slow 4.2 s / failed 429 / untested)
+  and a Test button; the route picker flags Nous models the same way and refreshes the live list
+  when it's over 10 minutes old. `GET /admin/api/models` adds `tests`, `test_first`,
+  `free_list_only`, `fast_ms`; test-model answers add `fast`, `listed`, `vetted` for Nous.
+- **Errors:** Nous 401 ("invalid, blocked or out of funds") cools that key for 30 min, 402 rests the
+  whole provider, 429 cools the model for Retry-After (60 s default), each falling over to the next
+  model, exactly like the other providers (covered by new tests).
+
 ## 0.3.0 (2026-10-15)
 
 - **Waiting list.** Every Blaze account that reaches the gateway is recorded in D1 `accounts`
