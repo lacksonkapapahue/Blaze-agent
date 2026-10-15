@@ -12,7 +12,7 @@ import org.json.JSONObject
 object RichKit {
     /** Fence languages that are interactive blocks (```buttons is an alias of ```choices). */
     val LANGS = mapOf("chart" to "chart", "choices" to "choices", "buttons" to "choices", "form" to "form",
-        "tool" to "tool", "calculator" to "tool", "compare" to "compare")
+        "tool" to "tool", "calculator" to "tool", "compare" to "compare", "table" to "table")
 
     const val MAX_POINTS = 60
     const val MAX_SERIES = 4
@@ -54,6 +54,57 @@ object RichKit {
     data class Output(val label: String, val formula: String, val decimals: Int = 2, val prefix: String = "", val suffix: String = "",
                       val big: Boolean = false)
     data class Tool(val title: String, val inputs: List<Input>, val outputs: List<Output>, val note: String = "")
+
+    // ---------- table card (v0.28.1) ----------
+    /** A table card: bold [title] (may be blank), muted [headers], wrapping cells; [sticky] keeps the first column in view. */
+    data class TableCard(val title: String, val headers: List<String>, val rows: List<List<String>>, val sticky: Boolean = true) {
+        val cols: Int get() = maxOf(headers.size, rows.maxOfOrNull { it.size } ?: 0)
+    }
+    const val MAX_TABLE_COLS = 8
+    const val MAX_TABLE_ROWS = 60
+
+    /**
+     * ```table {"title":"..","columns":["Plan","Price"],"rows":[["Basic","K50"]],"sticky":true}; rows may also be
+     * objects keyed by column name. Null when there's nothing to show.
+     */
+    fun table(body: String): TableCard? {
+        val o = json(body) as? JSONObject ?: return null
+        val heads = (o.optJSONArray("columns") ?: o.optJSONArray("headers") ?: o.optJSONArray("header")).list()
+            .map { clean(it?.toString() ?: "", 60) }.take(MAX_TABLE_COLS)
+        val rows = o.optJSONArray("rows").list().mapNotNull { r ->
+            when (r) {
+                is JSONArray -> r.list().map { clean(it?.toString() ?: "", 300) }
+                is JSONObject -> if (heads.isEmpty()) null else heads.map { h -> clean(r.opt(h)?.toString() ?: "", 300) }
+                else -> null
+            }?.take(MAX_TABLE_COLS)?.takeIf { row -> row.any { it.isNotEmpty() } }
+        }.take(MAX_TABLE_ROWS)
+        if (rows.isEmpty() || (heads.isEmpty() && rows.first().size < 2)) return null
+        return TableCard(clean(o.str("title", "caption"), 80), heads, rows, o.optBoolean("sticky", true))
+    }
+
+    /** A Markdown pipe table (AnswerCards' rows: the first is the header) as a card. */
+    fun tableFromMd(rows: List<List<String>>, title: String = ""): TableCard? {
+        if (rows.isEmpty()) return null
+        val body = rows.drop(1).filter { r -> r.any { it.isNotBlank() } }
+        return TableCard(title, rows.first(), body, sticky = true)
+    }
+
+    /** Plain text for Copy: the title, then the rows with columns separated by two spaces (cells as plain text). */
+    fun tablePlain(t: TableCard): String = buildString {
+        if (t.title.isNotBlank()) append(t.title).append("\n\n")
+        val all = listOfNotNull(t.headers.takeIf { it.isNotEmpty() }) + t.rows
+        val w = (0 until t.cols).map { k -> all.maxOf { plainCell(it.getOrElse(k) { "" }).length } }
+        all.forEach { r -> append((0 until t.cols).joinToString("  ") { k -> plainCell(r.getOrElse(k) { "" }).padEnd(w[k]) }.trimEnd()).append('\n') }
+    }.trimEnd()
+
+    /** Tab-separated values for Copy as TSV (pastes into a spreadsheet as cells). */
+    fun tableTsv(t: TableCard): String = (listOfNotNull(t.headers.takeIf { it.isNotEmpty() }) + t.rows)
+        .joinToString("\n") { r -> (0 until t.cols).joinToString("\t") { k -> plainCell(r.getOrElse(k) { "" }).replace('\t', ' ').replace('\n', ' ') } }
+
+    /** A cell without Markdown symbols (**bold**, `code`, [text](url) → text). */
+    fun plainCell(s: String): String = s.replace(Regex("""\[([^\]]+)]\((?:[^)]+)\)"""), "$1")
+        .replace(Regex("""\*\*(.+?)\*\*|__(.+?)__"""), "$1$2").replace(Regex("""(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?!\w)"""), "$1")
+        .replace("`", "").replace("<br>", " ").replace("<br/>", " ").trim()
 
     // ---------- compare ----------
     data class CompareRow(val label: String, val values: List<String>)
@@ -428,6 +479,7 @@ object RichKit {
                     t.title + " (" + t.inputs.joinToString(", ") { "${it.label} ${showInput(it, d[it.id] ?: it.default)}" } + ")\n" +
                         t.outputs.zip(compute(t, d)).joinToString("\n") { (o, v) -> "- ${o.label}: ${v.ifEmpty { "\u2014" }}" }
                 }
+                "table" -> table(body)?.let { tablePlain(it) }
                 "choices" -> choices(body)?.let { c -> (if (c.prompt.isNotBlank()) c.prompt + "\n" else "") + c.options.joinToString("\n") { "- ${it.label}" } }
                 "form" -> form(body)?.let { f -> (f.title.ifBlank { f.submit }) + "\n" + f.fields.joinToString("\n") { "- ${it.label}:" } }
                 else -> null
