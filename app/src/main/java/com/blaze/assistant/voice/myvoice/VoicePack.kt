@@ -193,14 +193,14 @@ object VoicePack {
      * Unpacks the wanted model files from a tar stream into [dir] (via a temp dir, so a half-unpacked model is
      * never mistaken for a ready one), checking each file's size. Writes [READY_MARK] last.
      */
-    fun unpackModel(tar: InputStream, dir: File, cancelled: () -> Boolean = { false }) {
+    fun unpackModel(tar: InputStream, dir: File, cancelled: () -> Boolean = { false }, files: Map<String, Long> = modelFiles) {
         val tmp = File(dir.parentFile, dir.name + ".tmp")
         tmp.deleteRecursively(); tmp.mkdirs()
         val seen = HashSet<String>()
         TarReader(tar).forEach { name, size, body ->
             if (cancelled()) throw Cancelled()
             val rel = name.removePrefix("./").removePrefix(MODEL_DIR_IN_TAR)
-            val want = modelFiles[rel]
+            val want = files[rel]
             if (want != null) {
                 if (size != want) throw IOException("Unexpected model file size for $rel")
                 File(tmp, rel).outputStream().use { body.copyTo(it, 64 * 1024) }
@@ -208,7 +208,7 @@ object VoicePack {
                 seen += rel
             }
         }
-        val missing = modelFiles.keys - seen
+        val missing = files.keys - seen
         if (missing.isNotEmpty()) throw IOException("Model archive is missing ${missing.joinToString()}")
         File(tmp, READY_MARK).writeText("pocket-tts-int8-2026-01-26\n")
         dir.deleteRecursively()
@@ -217,8 +217,8 @@ object VoicePack {
 
     const val READY_MARK = ".ready"
 
-    fun modelReady(dir: File): Boolean =
-        File(dir, READY_MARK).exists() && modelFiles.all { (n, s) -> File(dir, n).length() == s }
+    fun modelReady(dir: File, files: Map<String, Long> = modelFiles): Boolean =
+        File(dir, READY_MARK).exists() && files.all { (n, s) -> File(dir, n).length() == s }
 }
 
 /** Minimal ustar/GNU tar reader: regular files only, with GNU long names. Enough for the model archive. */

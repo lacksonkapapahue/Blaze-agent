@@ -14,3 +14,13 @@
 # v0.26.3 blaze.db: the bundled SQLite's native code throws androidx.sqlite.SQLiteException by class name.
 -keep class androidx.sqlite.SQLiteException { *; }
 -keep class androidx.sqlite.driver.bundled.** { *; }
+# v0.28.0 My voice: libsherpa-onnx-jni.so (downloaded, loaded by path) reads these classes' fields and calls their
+# constructors/methods by name over JNI, so nothing in the package may be renamed or removed.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+# commons-compress (bzip2 for the voice model archive) has optional codecs we never use.
+-dontwarn org.tukaani.xz.**
+-dontwarn com.github.luben.zstd.**
+-dontwarn org.brotli.dec.**
+-dontwarn org.objectweb.asm.**
+-dontwarn org.osgi.**
+-dontwarn javax.annotation.**

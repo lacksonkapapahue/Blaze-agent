@@ -121,3 +121,14 @@ mermaid.min.js also contains these libraries, each under its own licence:
 | d3-sankey | BSD-3-Clause |
 | chevrotain | Apache-2.0 |
 | DOMPurify | MPL-2.0 OR Apache-2.0 |
+
+
+## sherpa-onnx (My voice, v0.28.0)
+
+`app/src/main/java/com/k2fsa/sherpa/onnx/Tts.kt` is vendored from sherpa-onnx v1.13.8 (Copyright (c) 2023 Xiaomi Corporation), Apache License 2.0, https://github.com/k2-fsa/sherpa-onnx. The native `libsherpa-onnx-jni.so` it talks to is not in the APK; it is downloaded on demand from this repository's `voice-runtime-1.13.8` release, unchanged from the official sherpa-onnx AAR. It statically links ONNX Runtime (MIT, Copyright (c) Microsoft Corporation).
+
+The PocketTTS voice model is downloaded from the sherpa-onnx `tts-models` release (`sherpa-onnx-pocket-tts-int8-2026-01-26`), an ONNX export (https://github.com/KevinAHM/pocket-tts-onnx-export) of Kyutai's Pocket TTS (https://github.com/kyutai-labs/pocket-tts). Its LICENSE file is Creative Commons Attribution 4.0; its README notes it is for non-commercial use.
+
+## Apache Commons Compress (v0.28.0)
+
+`org.apache.commons:commons-compress:1.21` (bzip2 reader for the voice model archive), Apache License 2.0, Copyright The Apache Software Foundation.

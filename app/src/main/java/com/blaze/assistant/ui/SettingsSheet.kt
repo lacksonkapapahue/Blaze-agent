@@ -160,7 +160,7 @@ fun SettingsScreen(start: String?, a11yOn: Boolean, onOpenAccessibility: () -> U
                 "control" -> ControlPage(a11yOn, onOpenAccessibility)
                 "commands" -> CommandsSection()
                 "skills" -> SkillLibraryPage()
-                "voice" -> { VoiceSection(); VoiceTuning(); VoiceExtras() }
+                "voice" -> { VoiceSection(); MyVoiceSection(); VoiceTuning(); VoiceExtras() }
                 "orb" -> OrbSection()
                 "routines" -> SchedulePage()
                 "memory" -> { MemoryPage(); LearningSection() }
