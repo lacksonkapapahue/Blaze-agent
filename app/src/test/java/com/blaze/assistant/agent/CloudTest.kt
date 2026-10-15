@@ -58,6 +58,15 @@ class CloudTest {
         assertEquals(Cloud.UNREACHABLE, Cloud.friendly(0, "timeout"))
     }
 
+    @Test fun waitingListIsNotAnExpiredSignIn() {
+        assertEquals(Cloud.WAITLISTED, Cloud.friendly(403, "waitlisted You're on the Blaze waiting list."))
+        assertEquals(Cloud.REJECTED, Cloud.friendly(403, "access_rejected nope"))
+        assertEquals(Cloud.EXPIRED, Cloud.friendly(403, "forbidden"))
+        assertFalse(Cloud.retryable(403, "waitlisted"))
+        assertEquals(Cloud.WAITLISTED, PlainError.of("""{"error":{"code":"waitlisted","message":"x"}} (403)"""))
+        assertEquals(Cloud.REJECTED, PlainError.of(Cloud.REJECTED))
+    }
+
     @Test fun oldPrefsAreIgnored() {
         // Model / provider choices are gone: the getters are fixed and the setters do nothing (old prefs stay on disk).
         assertEquals(Providers.GATEWAY, Settings.providerId)

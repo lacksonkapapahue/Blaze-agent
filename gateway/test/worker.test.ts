@@ -5,6 +5,7 @@ import worker from "../src/index";
 import { resetDbCacheForTests } from "../src/db";
 import { clearAuthCache } from "../src/auth";
 import { resetRotationForTests } from "../src/chat";
+import { clearAccessCache } from "../src/access";
 import { FakeCtx, makeEnv, makeSession, sse, type FakeAI, type FakeD1, type FakeKV } from "./helpers";
 import type { Env } from "../src/env";
 
@@ -54,7 +55,10 @@ beforeEach(async () => {
   resetDbCacheForTests();
   clearAuthCache();
   resetRotationForTests();
+  clearAccessCache();
   ({ env, db, kv, ai } = makeEnv());
+  // The usual test user is an approved account (the waiting list has its own tests below).
+  db.sqlite.prepare("INSERT INTO accounts (email, status) VALUES ('someone@example.com', 'approved')").run();
   ctx = new FakeCtx();
   userToken = await makeSession(kv, "u_user1", "someone@example.com");
   calls.length = 0;
@@ -70,7 +74,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("basics", () => {
   it("health", async () => {
     const r = await call("GET", "/health");
-    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.2.1" });
+    expect(await r.json()).toEqual({ ok: true, service: "blaze-gateway", version: "0.3.0" });
   });
   it("app endpoints need a live Blaze session", async () => {
     expect((await call("GET", "/v1/models")).status).toBe(401);

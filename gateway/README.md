@@ -1,4 +1,4 @@
-# Blaze Gateway 0.2.1
+# Blaze Gateway 0.3.0
 
 One OpenAI-compatible endpoint for every Blaze app, so users never set up models or API keys.
 A Cloudflare Worker holds Blaze's own free-tier provider keys, picks the best model for each
@@ -34,7 +34,9 @@ Content-Type: application/json
 - Errors use the OpenAI shape `{"error":{"message","type","code"}}`:
   `401 invalid_api_key` (sign in again), `429 quota_exceeded` (daily plan allowance; `Retry-After`
   = seconds to 00:00 UTC), `503 blaze_models_busy` (every model cooling; `Retry-After` = when the
-  first frees up), `400 invalid_request_error` (two models in a row rejected the request itself).
+  first frees up), `400 invalid_request_error` (two models in a row rejected the request itself),
+  `403 waitlisted` (signed in, not approved yet: "You're on the Blaze waiting list…"),
+  `403 access_rejected` (an admin rejected the account).
 
 ## How routing works (mirrors Blaze Android v0.23.4 Auto)
 
@@ -91,6 +93,20 @@ read-only (`AUTH_KV`) and checks a token with two KV reads, exactly like blaze-a
 `requireUser`; results are cached for 60 s per isolate. If `AUTH_KV` isn't bound it calls
 blaze-auth `GET /v1/me` through the `AUTH` service binding (a Worker can't fetch another
 `*.workers.dev` Worker on the same account over the internet).
+
+### Waiting list (0.3.0)
+
+Every Blaze account that reaches the gateway gets a row in D1 `accounts` (email, name, uid, first
+seen, last seen, request count, status `pending` / `approved` / `rejected`). With **Require
+approval for new accounts** on (D1 `settings.require_approval`, default on), an account that isn't
+approved is recorded as pending and `POST /v1/chat/completions` answers `403 waitlisted` (no quota
+charged); `GET /v1/models` only records it (the list is static). Rejected accounts get
+`403 access_rejected` whatever the switch says. Admins (`ADMIN_EMAILS`) are always allowed.
+Switching approval off lets everyone in and marks them approved ("auto"), so switching it back on
+doesn't lock them out. Assigning a plan to an email in Plans approves it too (even before that
+person first signs in). Approved verdicts are cached for 60 s per isolate, so a reject takes up to
+a minute on other isolates. Migration 0003 grandfathers every email with a plan assignment and
+every uid with usage as approved; a usage-only row picks up its email on the next request.
 
 ## Admin
 
@@ -158,7 +174,9 @@ says so; add them again.
 | POST | `/admin/api/providers`, PUT/DELETE `/admin/api/providers/:id` | admin |
 | POST | `/admin/api/providers/:id/keys`, PATCH/DELETE `/admin/api/keys/:id`, POST `/admin/api/keys/:id/test` | admin |
 | PUT | `/admin/api/routes/:task`, POST `/admin/api/routes/reset` | admin |
-| PUT | `/admin/api/plans/:id`, PUT `/admin/api/assignments` | admin |
+| PUT | `/admin/api/plans/:id`, PUT `/admin/api/assignments` `{email, plan}` (any plan, default too; also approves) or `{email, remove: true}` | admin |
+| PUT | `/admin/api/settings` `{require_approval: bool}` | admin |
+| POST | `/admin/api/access/approve` `{id\|email, plan?}`, `/admin/api/access/reject`, `/admin/api/access/pending` (undo) | admin |
 | POST | `/admin/api/test-model`, `/admin/api/cooldowns/clear`, `/admin/api/seed`, `/admin/api/logout` | admin |
 | GET | `/admin/api/models` (free discovered models + discovery status) | admin |
 | POST | `/admin/api/providers/:id/discover`, `/admin/api/discover` (all) | admin |
@@ -170,7 +188,7 @@ says so; add them again.
 cd gateway
 npm ci
 npx tsc --noEmit        # type check (src/)
-npx vitest run          # 60 tests: router, quota, crypto, catalogue, and the Worker end to end
+npx vitest run          # 75 tests: router, quota, crypto, catalogue, and the Worker end to end
 npx wrangler dev        # local; put KEY_ENCRYPTION_SECRET etc. in gateway/.dev.vars (git-ignored)
 ```
 

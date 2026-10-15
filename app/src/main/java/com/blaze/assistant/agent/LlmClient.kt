@@ -292,6 +292,9 @@ object LlmClient {
             val retry = conn.getHeaderField("retry-after")?.trim()?.toIntOrNull() ?: 0
             if (code == 404 || msg.contains("no longer available", true) || msg.contains("not found", true))
                 throw LlmException("$who: the model “${t.model}” isn't available to your key. Open Settings → Model and pick one from the list.", 404)
+            // Gateway 0.3.0: signed in but not approved yet / rejected. Not an expired sign-in.
+            val errCode = try { JSONObject(text).optJSONObject("error")?.optString("code").orEmpty() } catch (_: Exception) { "" }
+            Cloud.access(code, "$errCode $msg")?.let { throw LlmException(it, code) }
             if (code == 401 || code == 403)
                 throw LlmException("$who rejected its key ($code). Check the $who key in Settings → AI: ${msg.take(160)}", code)
             throw LlmException("$who · ${t.model} said ($code): ${msg.take(300)}", code, retry)

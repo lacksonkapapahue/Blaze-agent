@@ -1,7 +1,8 @@
 // /admin/api/*: providers, keys, task routes, plans, health. Every route needs requireAdmin.
 // Keys go in once and come back only as "••••" + last 4.
 
-import { adminEmails, requireAdmin } from "./auth";
+import { decide, listAccounts, type AccessStatus } from "./access";
+import { adminEmails, requireAdmin, type Admin } from "./auth";
 import { discoverAll, discoverProvider, isRoutable, loadModels, suggestLineup, TASK_INFO } from "./catalog";
 import { encryptKey, last4, masked, MIN_SECRET_LEN, decryptKey } from "./crypto";
 import { ensureSeeded, invalidateConfig, loadConfig, loadMarks, saveMarkStmt, seed } from "./db";
@@ -115,7 +116,9 @@ async function state(env: Env): Promise<Response> {
     providers, routes: cfg.routes, tasks: TASKS, task_info: TASK_INFO,
     discovery: disc.results,
     plans: cfg.plans, default_plan: DEFAULT_PLAN,
-    assignments: [...cfg.assignments.entries()].map(([email, plan]) => ({ email, plan })),
+    assignments: [...cfg.assignments.entries()].map(([email, plan]) => ({ email, plan })).sort((a, b) => a.plan.localeCompare(b.plan) || a.email.localeCompare(b.email)),
+    settings: cfg.settings,
+    accounts: await listAccounts(env.DB).catch(() => []),
     health, usage_today: (usage!.results as any[])[0] ?? { users: 0, requests: 0, tokens: 0 },
   });
 }
@@ -347,21 +350,72 @@ async function putPlan(req: Request, env: Env, id: string): Promise<Response> {
   return json({ ok: true });
 }
 
-async function putAssignment(req: Request, env: Env): Promise<Response> {
+function byOf(admin: Admin): string {
+  return admin.kind === "token" ? "admin token" : admin.email;
+}
+
+/** Plan check shared by assignments and approvals. Every plan in the table works, the default too. */
+async function checkPlan(env: Env, plan: string): Promise<string> {
+  if (!ID_RE.test(plan)) throw new HttpError(400, "no_plan", `No such plan: ${plan || "(empty)"}`);
+  const p = await env.DB.prepare("SELECT id FROM plans WHERE id = ?1").bind(plan).first();
+  if (!p) throw new HttpError(400, "no_plan", `No such plan: ${plan}`);
+  return plan;
+}
+
+async function setAssignment(env: Env, email: string, plan: string): Promise<void> {
+  await env.DB.prepare("INSERT INTO plan_assignments (email, plan, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET plan = ?2, updated_at = ?3")
+    .bind(email, plan, Date.now()).run();
+}
+
+/**
+ * PUT /admin/api/assignments {email, plan}. Saves the email on that plan, the default plan included
+ * (an explicit row, so it shows in the list; before 0.3.0 choosing the default deleted the row and
+ * the email silently vanished). Assigning also approves the account (waiting list).
+ * {email, plan: ""} or {remove: true} removes the assignment: the account goes back to the default.
+ */
+async function putAssignment(req: Request, env: Env, admin: Admin): Promise<Response> {
   const b = await readJSON(req, 16_384);
   const email = str(b.email, 254).toLowerCase();
   const plan = str(b.plan, 32);
-  if (!EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", "Email");
-  if (!plan || plan === DEFAULT_PLAN) {
+  if (!EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", email ? `Not an email address: ${email}` : "Type the account's email first");
+  if (b.remove || !plan) {
     await env.DB.prepare("DELETE FROM plan_assignments WHERE email = ?1").bind(email).run();
-  } else {
-    const p = await env.DB.prepare("SELECT id FROM plans WHERE id = ?1").bind(plan).first();
-    if (!p) throw new HttpError(400, "no_plan", "No such plan");
-    await env.DB.prepare("INSERT INTO plan_assignments (email, plan, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT (email) DO UPDATE SET plan = ?2, updated_at = ?3")
-      .bind(email, plan, Date.now()).run();
+    invalidateConfig();
+    return json({ ok: true, email, plan: DEFAULT_PLAN, removed: true });
   }
+  await checkPlan(env, plan);
+  await setAssignment(env, email, plan);
+  const acct = await decide(env.DB, { email }, "approved", byOf(admin)).catch(e => {
+    if (/no such table/i.test(String((e as Error)?.message))) return null; // migration 0003 not applied yet
+    throw e;
+  });
   invalidateConfig();
-  return json({ ok: true });
+  return json({ ok: true, email, plan, approved: !!acct });
+}
+
+async function putSettings(req: Request, env: Env): Promise<Response> {
+  const b = await readJSON(req, 16_384);
+  if (typeof b.require_approval !== "boolean") throw new HttpError(400, "bad_value", "require_approval: true or false");
+  await env.DB.prepare("INSERT INTO settings (key, value, updated_at) VALUES ('require_approval', ?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?1, updated_at = ?2")
+    .bind(b.require_approval ? "1" : "0", Date.now()).run();
+  invalidateConfig();
+  return json({ ok: true, settings: { require_approval: b.require_approval } });
+}
+
+/** POST /admin/api/access/{approve|reject|pending} {id} or {email}; approve takes an optional plan. */
+async function accessAction(req: Request, env: Env, admin: Admin, action: string): Promise<Response> {
+  const b = await readJSON(req, 16_384);
+  const id = Number(b.id) || 0;
+  const email = str(b.email, 254).toLowerCase();
+  if (!id && !EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", "id or email");
+  const status: AccessStatus = action === "approve" ? "approved" : action === "reject" ? "rejected" : "pending";
+  const plan = action === "approve" ? str(b.plan, 32) : "";
+  if (plan) await checkPlan(env, plan);
+  const row = await decide(env.DB, id ? { id } : { email }, status, byOf(admin));
+  // A non-default plan is stored as an assignment; on the default plan there's nothing to store.
+  if (plan && row.email && plan !== DEFAULT_PLAN) await setAssignment(env, row.email, plan);
+  invalidateConfig();
+  return json({ ok: true, id: row.id, email: row.email, status, plan: plan || undefined });
 }
 
 export async function handleAdminApi(req: Request, env: Env, path: string): Promise<Response> {
@@ -380,7 +434,9 @@ export async function handleAdminApi(req: Request, env: Env, path: string): Prom
   if (path === "/admin/api/routes/suggest" && m === "POST") return suggestRoutes(req, env);
   if (path === "/admin/api/models" && m === "GET") return listModels(env);
   if (path === "/admin/api/discover" && m === "POST") return discoverEvery(env);
-  if (path === "/admin/api/assignments" && m === "PUT") return putAssignment(req, env);
+  if (path === "/admin/api/assignments" && m === "PUT") return putAssignment(req, env, admin);
+  if (path === "/admin/api/settings" && m === "PUT") return putSettings(req, env);
+  if ((path === "/admin/api/access/approve" || path === "/admin/api/access/reject" || path === "/admin/api/access/pending") && m === "POST") return accessAction(req, env, admin, path.slice("/admin/api/access/".length));
   let x: RegExpExecArray | null;
   if ((x = /^\/admin\/api\/providers\/([a-z0-9_-]{1,32})$/.exec(path))) {
     if (m === "PUT") return upsertProvider(req, env, x[1]);

@@ -1,5 +1,19 @@
 # Blaze Gateway status
 
+- **2026-10-15, v0.3.0 (branch `gateway-waitlist`, PR open, not merged / not deployed):** waiting
+  list (D1 `accounts` + `settings`, migration 0003, admin tab "Waiting list", 403 `waitlisted` /
+  `access_rejected`, approval on by default, admins always allowed, current users grandfathered)
+  and the plan-assignment fix (default plan now stored and shown; dropdown rebuilt every render;
+  in-card errors). App side: `Cloud.access` turns the two 403 codes into plain lines (no version
+  bump). **Deploy (Joey, needs his Cloudflare login), in this order:**
+  `cd gateway && npx wrangler login && ./scripts/ensure-d1.sh && npx wrangler d1 migrations apply blaze-gateway --remote && npm run deploy && git checkout wrangler.toml`
+  (`ensure-d1.sh` writes the real D1 id `f27cf26b-799b-418b-8298-913c7515fe7e` into wrangler.toml,
+  which holds a placeholder in git).
+  Note: merging to `main` also runs the Gateway workflow's deploy job (migrations apply + deploy)
+  when the CLOUDFLARE_API_TOKEN secret is set. After deploy: open /admin › Waiting list and check
+  the grandfathered approved list (the 4 pro emails plus usage-only accounts shown as
+  "account u_… (email not seen yet)" until their next request).
+
 - **2026-10-14, v0.2.1:** picker / naming polish after the first live discovery (gemini 29,
   mistral 27, workers-ai 35 free chat models found via "Find models", Workers AI from the binding
   catalogue). Next: add Groq / Cerebras / OpenRouter keys (discovery runs on add), then press

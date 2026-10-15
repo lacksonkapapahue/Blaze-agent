@@ -23,6 +23,20 @@ object Cloud {
     const val EXPIRED = "Your Blaze sign-in has expired. Sign in again and I'll carry on."
     const val UNREACHABLE = "I couldn't reach Blaze Cloud just now. Check your data or Wi-Fi, then tap Retry."
     const val BUSY = "Blaze Cloud is busy right now. Tap Retry in a moment."
+    /** Gateway 0.3.0 waiting list: 403 `waitlisted` (signed in, not approved yet) / `access_rejected`. */
+    const val WAITLISTED = "You're on the Blaze waiting list. You'll get access as soon as you're approved."
+    const val REJECTED = "Your Blaze account doesn't have access to Blaze AI. If you think this is a mistake, contact the Blaze team."
+
+    /** The waiting-list line for a gateway 403 (by its error code, or a line already made plain), else null. */
+    fun access(code: Int, text: String): String? {
+        if (code != 403) return null
+        val t = text.lowercase()
+        return when {
+            "access_rejected" in t || "doesn't have access to blaze" in t -> REJECTED
+            "waitlisted" in t || "waiting list" in t -> WAITLISTED
+            else -> null
+        }
+    }
 
     private val codeCue = Regex("""(```|\b(code|coding|function|bug|stack ?trace|compile|kotlin|python|javascript|typescript|java|rust|golang|sql|regex|script|refactor|debug)\b)""", RegexOption.IGNORE_CASE)
 
@@ -85,6 +99,7 @@ object Cloud {
     fun friendly(code: Int, text: String): String {
         val t = text.lowercase()
         return when {
+            access(code, text) != null -> access(code, text)!!
             code == 401 || code == 403 -> EXPIRED
             code == 429 && ("allowance" in t || "quota_exceeded" in t) -> "You've used today's free messages. They come back tomorrow."
             code == 429 || code in 500..599 || gone(t) || code == 404 -> BUSY
@@ -125,6 +140,7 @@ object Cloud {
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: LlmClient.LlmException) {
                 if (trim(e)) continue
+                access(e.code, e.message.orEmpty())?.let { throw LlmClient.LlmException(it, e.code) }
                 if (e.code == 401 || e.code == 403) throw LlmClient.LlmException(EXPIRED, e.code)
                 if (!retryable(e.code, e.message.orEmpty())) {
                     if (ToolCalls.isShapeError(e)) throw e
