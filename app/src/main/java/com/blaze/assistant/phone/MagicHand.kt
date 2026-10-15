@@ -45,6 +45,7 @@ import com.blaze.assistant.ui.composeView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -160,6 +161,8 @@ object MagicHand {
         touchAt = SystemClock.uptimeMillis(); beatAt = touchAt
         startWatchdog()
         keyFilter(s, true)
+        // v0.28.1: load the OCR model now (off the main thread), so the first grab doesn't pay for it.
+        if (MagicHandGuard.canGrab(isPrivate())) scope?.launch(Dispatchers.Default) { MagicHandScreen.warm() }
         showNote(s)
     }
 
@@ -259,6 +262,7 @@ object MagicHand {
             askJob?.cancel(); askJob = null; askedAgent = false
             regrabJob?.cancel(); regrabJob = null; grabBox = null; boxHistory.clear(); drawPts.clear()
             scope?.cancel(); scope = null
+            worker.execute { MagicHandScreen.release() }
             recorder = null; lastHit = null; pendingHit = null
             val w = wm
             listOf(hand, hi, dock, boxView, drawView).forEach { v -> if (v != null) try { w?.removeViewImmediate(v) } catch (_: Exception) { } }
@@ -541,13 +545,32 @@ object MagicHand {
         try { s.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { }
     }
 
-    /** Hides every Magic Hand window, waits a frame, runs [block], shows them again. */
-    private suspend fun <T> hidden(block: suspend () -> T): T {
-        val views = listOfNotNull(hand, hi, dock, boxView)
+    /**
+     * Hides Magic Hand's windows, waits for the frame, runs [block], shows them again. v0.28.1: with [area] only the
+     * windows over that area are hidden (the dock and the new grab card stay on screen while the text is read), and
+     * the wait is two frames instead of 160 ms.
+     */
+    private suspend fun <T> hidden(area: MagicHandLogic.Box? = null, block: suspend () -> T): T {
+        val views = listOfNotNull(hand, hi, dock, boxView).filter { v -> area == null || v === boxView || v === hi || overlaps(v, area) }
         val was = views.map { it.visibility }
+        val any = views.any { it.visibility == View.VISIBLE }
         views.forEach { it.visibility = View.INVISIBLE }
-        delay(160)
+        if (any) delay(if (area == null) 160 else 40)
         try { return block() } finally { views.forEachIndexed { i, v -> v.visibility = was[i] } }
+    }
+
+    private fun overlaps(v: View, a: MagicHandLogic.Box): Boolean {
+        if (v.visibility != View.VISIBLE || v.width <= 0) return false
+        val xy = IntArray(2); v.getLocationOnScreen(xy)
+        return xy[0] < a.r && xy[0] + v.width > a.l && xy[1] < a.b && xy[1] + v.height > a.t
+    }
+
+    /** v0.28.1: a full screenshot for reading [area], hiding only what covers it. Null in Private / before Android 11. */
+    private suspend fun shotFor(area: MagicHandLogic.Box): android.graphics.Bitmap? {
+        val s = svc ?: return null
+        if (!MagicHandGuard.canScreenshot(isPrivate())) return null
+        val m = dp(MagicHandOcr.MARGIN_DP)
+        return hidden(MagicHandLogic.Box(area.l - m, area.t - m, area.r + m, area.b + m)) { kotlinx.coroutines.withTimeoutOrNull(3_000) { MagicHandScreen.screenshot(s) } }
     }
 
     private suspend fun crop(b: MagicHandLogic.Box, around: Boolean): android.graphics.Bitmap? {
@@ -643,23 +666,38 @@ object MagicHand {
         showBox(drawn)
         tick(confirm = true)
         val tips = tipsShown()
-        set { it.copy(grabMode = false, note = "Reading what you grabbed\u2026", canUndo = false) }
+        // v0.28.1: the card opens now (shimmer, actions ready); snapping, the screenshot and OCR run in parallel off
+        // the main thread and fill it in. Was: "Reading what you grabbed…" until everything had finished.
+        val src = grabSource(s)
+        set { MagicHandState.reading(it, src).copy(coach = MagicHandBox.showTip(tips)) }
         regrabJob = scope?.launch {
             val around = MagicHandBox.window(drawn, maxOf(drawn.w, drawn.h) / 2)
-            val nodes = withContext(Dispatchers.Default) {
+            val nodesJob = async(Dispatchers.Default) {
                 kotlinx.coroutines.withTimeoutOrNull(700) { try { MagicHandScreen.textBoxes(s, around) } catch (_: Exception) { emptyList() } }.orEmpty()
             }
+            // The screenshot is taken once, around the drawn box plus room to snap; the snapped box is cropped from it.
+            val full = shotFor(around)
+            val nodes = nodesJob.await()
             if (gen != grabGen) return@launch
             val snapped = MagicHandBox.snap(drawn, nodes, dp(MagicHandBox.SNAP_PAD_DP), boxBounds(), dp(MagicHandBox.MIN_DP))
             val b = if (MagicHandBox.snapped(drawn, snapped, dp(4))) { boxHistory.push(drawn); showBox(snapped); tick(confirm = false); snapped } else drawn
-            val text = readText(s, b)
+            if (gen == grabGen) set { if (it.panel == Panel.GRAB) it.copy(canUndo = boxHistory.canUndo) else it }
+            val text = readText(s, b, full)
             if (gen != grabGen || grabBox != b) return@launch
             set {
-                val g = MagicHandState.grabbed(it.copy(note = ""), text, grabSource(s))
-                if (g.panel == Panel.GRAB) g.copy(canUndo = boxHistory.canUndo, coach = MagicHandBox.showTip(tips)) else g
+                val g = MagicHandState.grabbed(it, text, src)
+                if (g.panel == Panel.GRAB) g.copy(canUndo = boxHistory.canUndo) else g
             }
-            if (_ui.value.panel != Panel.GRAB) hideBox() else bumpTips(tips)
+            if (_ui.value.panel != Panel.GRAB) hideBox() else { bumpTips(tips); runQueued() }
         }
+    }
+
+    /** v0.28.1: an action tapped while the text was being read runs as soon as the text is there. */
+    private fun runQueued() {
+        val q = _ui.value.queued ?: return
+        if (_ui.value.panel != Panel.GRAB || _ui.value.grabBusy || _ui.value.grabbed.isBlank()) return
+        set { it.copy(queued = null, note = "") }
+        onGrab(q)
     }
 
     /** Grab mode on / off (the dock's Grab button, "Grab again"). The hint is full for the first few times. */
@@ -743,10 +781,16 @@ object MagicHand {
 
     private fun grabSource(s: BlazeAccessibilityService): String = lastHit?.pkg?.let(::appLabel) ?: s.currentPkg().let(::appLabel)
 
-    /** The words inside [b]: OCR of a screenshot crop (Magic Hand's windows hidden), else the accessibility text. */
-    private suspend fun readText(s: BlazeAccessibilityService, b: MagicHandLogic.Box): String {
-        val bmp = crop(b, around = false)
-        val ocr = if (bmp != null) kotlinx.coroutines.withTimeoutOrNull(8_000) { MagicHandScreen.ocr(bmp) }.orEmpty() else ""
+    /**
+     * The words inside [b]: OCR of a screenshot (Magic Hand's windows over it hidden), else the accessibility text.
+     * v0.28.1: the crop has a margin and lines mostly outside [b] are dropped; the OCR runs on Dispatchers.Default
+     * on the warm recogniser, downscaled. [full] reuses a screenshot already taken for this grab.
+     */
+    private suspend fun readText(s: BlazeAccessibilityService, b: MagicHandLogic.Box, full: android.graphics.Bitmap? = null): String {
+        val shot = full ?: shotFor(b)
+        val ocr = if (shot != null) withContext(Dispatchers.Default) {
+            kotlinx.coroutines.withTimeoutOrNull(8_000) { MagicHandScreen.readRegion(shot, b, dp(MagicHandOcr.MARGIN_DP)) }.orEmpty()
+        } else ""
         return ocr.ifBlank { withContext(Dispatchers.Default) { kotlinx.coroutines.withTimeoutOrNull(2_000) { try { MagicHandScreen.textIn(s, b) } catch (_: Exception) { "" } }.orEmpty() } }
     }
 
@@ -851,14 +895,18 @@ object MagicHand {
             val src = grabSource(s)
             // Still on the card: update it. A drag before the first read finished: this is the first read.
             set { if (it.panel == Panel.GRAB) MagicHandState.regrabbed(it, text, src) else MagicHandState.grabbed(it.copy(note = ""), text, src) }
-            if (_ui.value.panel != Panel.GRAB) hideBox()
+            if (_ui.value.panel != Panel.GRAB) hideBox() else runQueued()
         }
     }
 
-    private fun onGrab(g: GrabAction) {
+    private fun onGrab(g0: GrabAction) {
         val s = svc ?: return
+        // v0.28.1: tapped while reading = queued, run by runQueued() when the text lands.
+        var now: GrabAction? = null
+        set { val (n, g) = MagicHandState.tapGrab(it, g0); now = g; n }
+        val g = now ?: return
         val t = _ui.value.grabbed
-        if (t.isBlank() || _ui.value.grabBusy) return
+        if (t.isBlank()) return
         when (g) {
             // v0.26.0: Copy keeps the card and the box (fix the box, copy again); X closes.
             GrabAction.COPY -> { PointerActions.copy(s, "Text", t); set { it.copy(note = "Copied.") } }
