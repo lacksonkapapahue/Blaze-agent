@@ -105,12 +105,70 @@ object MagicHandBox {
     /** The touch window around the box: the box plus [pad] on every side for the handles (it may poke off-screen). */
     fun window(b: Box, pad: Int): Box = Box(b.l - pad, b.t - pad, b.r + pad, b.b + pad)
 
+    // ---------- v0.27.0: drawing, snapping, undo ----------
+
+    /**
+     * The live preview while a circle or a drag is being drawn: the bounding box of the points so far, once it is at
+     * least [minPx] on both sides (null before that, so a tap or a short wobble shows nothing).
+     */
+    fun liveBox(points: List<MagicHandLogic.P>, minPx: Int): Box? {
+        if (points.size < 2) return null
+        val l = points.minOf { it.x }.toInt(); val t = points.minOf { it.y }.toInt()
+        val r = kotlin.math.ceil(points.maxOf { it.x }.toDouble()).toInt(); val b = kotlin.math.ceil(points.maxOf { it.y }.toDouble()).toInt()
+        return if (r - l < minPx || b - t < minPx) null else Box(l, t, r, b)
+    }
+
+    /**
+     * The drawn box snapped to the text under it on release: the union of the text blocks ([nodes], screen px) that sit
+     * mostly inside it (at least half of a block's area, or its centre), grown by [pad]. Blocks far bigger than the
+     * drawing (a whole page container) are ignored, and no side moves out more than [maxGrow] of the drawing's size,
+     * so a long paragraph never swallows the screen. With no text under it, the drawing stays as drawn.
+     */
+    fun snap(drawn: Box, nodes: List<Box>, pad: Int, bounds: Bounds, minSize: Int, maxGrow: Float = 0.5f): Box {
+        if (drawn.isEmpty()) return drawn
+        val area = drawn.w.toLong() * drawn.h
+        val picked = nodes.filter { n ->
+            if (n.isEmpty() || n.w.toLong() * n.h > area * 6) return@filter false
+            val iw = minOf(n.r, drawn.r) - maxOf(n.l, drawn.l); val ih = minOf(n.b, drawn.b) - maxOf(n.t, drawn.t)
+            val inter = if (iw > 0 && ih > 0) iw.toLong() * ih else 0L
+            inter * 2 >= n.w.toLong() * n.h || drawn.contains(n.cx, n.cy)
+        }
+        if (picked.isEmpty()) return drawn
+        val gx = (drawn.w * maxGrow).toInt(); val gy = (drawn.h * maxGrow).toInt()
+        val l = (picked.minOf { it.l } - pad).coerceAtLeast(drawn.l - gx)
+        val t = (picked.minOf { it.t } - pad).coerceAtLeast(drawn.t - gy)
+        val r = (picked.maxOf { it.r } + pad).coerceAtMost(drawn.r + gx)
+        val b = (picked.maxOf { it.b } + pad).coerceAtMost(drawn.b + gy)
+        if (r <= l || b <= t) return drawn
+        return fit(Box(l, t, r, b), bounds, minSize)
+    }
+
+    /** Earlier boxes for Undo (newest last, at most [cap]); the box on screen is never in it. */
+    class History(private val cap: Int = 12) {
+        private val items = ArrayDeque<Box>()
+        val canUndo: Boolean get() = items.isNotEmpty()
+        /** Remember [b] before it changes (a repeat of the newest is skipped). */
+        fun push(b: Box) { if (items.lastOrNull() != b) { items.addLast(b); while (items.size > cap) items.removeFirst() } }
+        /** The box to go back to, or null. */
+        fun undo(): Box? = items.removeLastOrNull()
+        fun clear() = items.clear()
+    }
+
+    /** First-time help: the drawing hint and the corner coach mark show for the first [TIPS_TIMES] grabs only. */
+    fun showTip(timesShown: Int): Boolean = timesShown < TIPS_TIMES
+    const val TIPS_TIMES = 3
+
+    /** How far (px) the box must change on snap to count as a snap (and get its own haptic tick). */
+    fun snapped(drawn: Box, snapped: Box, slop: Int): Boolean = changed(drawn, snapped, slop)
+
     /** How long after the finger lifts the text is read again (a quick second drag cancels the first read). */
     const val REREAD_DELAY_MS = 350L
     /** The smallest box, in dp. */
     const val MIN_DP = 40
-    /** How far from a corner or edge still grabs it, in dp. */
-    const val REACH_DP = 22
-    /** The touch margin around the box, in dp. */
-    const val PAD_DP = 26
+    /** How far from a corner or edge still grabs it, in dp (v0.27.0: 24, so each handle is a 48 dp touch target). */
+    const val REACH_DP = 24
+    /** The touch margin around the box, in dp (at least [REACH_DP], so the outer half of every handle is touchable). */
+    const val PAD_DP = 28
+    /** Text-block padding when the box snaps to text, in dp. */
+    const val SNAP_PAD_DP = 6
 }

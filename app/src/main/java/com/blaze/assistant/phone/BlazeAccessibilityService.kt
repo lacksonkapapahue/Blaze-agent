@@ -66,8 +66,13 @@ class BlazeAccessibilityService : AccessibilityService() {
                 lastWindowPkg = pkg
                 com.blaze.assistant.agent.ScreenMemory.onWindow(this, pkg)
                 try { com.blaze.assistant.proactive.Triggers.onApp(pkg, appLabel(pkg)) } catch (_: Exception) { }
-                try { com.blaze.assistant.proactive.Habits.onApp(pkg, appLabel(pkg)) } catch (_: Exception) { }
             }
+            // v0.27.0: habit offers only from apps opened on purpose (no keyboards, home, system UI, overlays, brief visits).
+            if (pkg.isNotEmpty()) try {
+                val dm = resources.displayMetrics
+                com.blaze.assistant.proactive.HabitApps.onWindow(this, pkg, { com.blaze.assistant.proactive.HabitApps.windowOf(this, event) },
+                    dm.widthPixels, dm.heightPixels)
+            } catch (_: Exception) { }
         }
     }
 

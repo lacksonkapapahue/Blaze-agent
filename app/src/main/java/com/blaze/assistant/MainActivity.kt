@@ -24,6 +24,7 @@ class MainActivity : FragmentActivity() {
     companion object { const val EXTRA_LISTEN = "listen"; const val ACTION_CALL = "com.blaze.assistant.CALL" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        com.blaze.assistant.ui.MotionTokens.refresh(this)
         super.onCreate(savedInstanceState)
         // v0.24.7: one Blaze window. "Open Blaze" from the hold-Home panel starts MainActivity through
         // startAssistantActivity, which Android puts in a separate (assistant) task even with singleTask, so two Blaze
@@ -128,6 +129,7 @@ class MainActivity : FragmentActivity() {
     override fun onStop() { leftAt = System.currentTimeMillis(); super.onStop() }
 
     override fun onResume() {
+        com.blaze.assistant.ui.MotionTokens.refresh(this)   // v0.27.0: follow "Remove animations"
         super.onResume(); Agent.inForeground = true
         com.blaze.assistant.agent.SelfControl.activity = java.lang.ref.WeakReference(this)
         Notifier.clearReplies(); Notifier.visible(true)

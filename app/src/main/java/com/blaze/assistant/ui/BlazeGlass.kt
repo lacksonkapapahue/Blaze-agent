@@ -77,9 +77,12 @@ fun GlassIconButton(
     icon: ImageVector, desc: String, modifier: Modifier = Modifier, size: Dp = 40.dp, tint: Color = Glass.text,
     bg: Color = Glass.raised, enabled: Boolean = true, bordered: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit,
 ) {
-    Box(modifier.size(size).clip(CircleShape).background(bg, CircleShape)
+    // v0.27.0: shrinks slightly while pressed (MotionTokens; none with Remove animations on).
+    val press = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Box(modifier.pressScale(press).size(size).clip(CircleShape).background(bg, CircleShape)
         .let { if (bordered) it.border(1.dp, Glass.border, CircleShape) else it }
-        .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick, onClickLabel = desc)
+        .combinedClickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current,
+            enabled = enabled, onClick = onClick, onLongClick = onLongClick, onClickLabel = desc)
         .semantics { contentDescription = desc }, contentAlignment = Alignment.Center) {
         Icon(icon, contentDescription = null, tint = if (enabled) tint else Glass.weak, modifier = Modifier.size(size * 0.5f))
     }

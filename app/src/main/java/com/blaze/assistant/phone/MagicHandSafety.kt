@@ -21,7 +21,8 @@ object MagicHandSafety {
     const val FLAG_WATCH_OUTSIDE_TOUCH = 0x00040000
 
     /** BOX (v0.26.0) = the movable, resizable grab rectangle: a window just around the box, only while grabbing. */
-    enum class Win { HIGHLIGHT, HAND, DOCK, BOX }
+    /** DRAW (v0.27.0) = Grab mode's drawing layer: the screen above the navigation bar, touchable only while Grab is on. */
+    enum class Win { HIGHLIGHT, HAND, DOCK, BOX, DRAW }
 
     /**
      * The flags for each Magic Hand window. [typing] = the dock's name field needs the keyboard (teach review only).
@@ -33,6 +34,7 @@ object MagicHandSafety {
         Win.DOCK -> FLAG_NOT_TOUCH_MODAL or FLAG_WATCH_OUTSIDE_TOUCH or (if (typing) 0 else FLAG_NOT_FOCUSABLE)
         Win.BOX -> FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCH_MODAL or FLAG_LAYOUT_IN_SCREEN or FLAG_LAYOUT_NO_LIMITS or
             (if (active) 0 else FLAG_NOT_TOUCHABLE)
+        Win.DRAW -> FLAG_NOT_FOCUSABLE or FLAG_NOT_TOUCH_MODAL or FLAG_LAYOUT_IN_SCREEN or (if (active) 0 else FLAG_NOT_TOUCHABLE)
     }
 
     /** True when a window with [flags] could swallow touches meant for other apps or the system bars. */

@@ -69,7 +69,7 @@ fun CalmSteps(steps: List<ChatMessage>, live: Boolean, endAt: Long) {
             }
             Text(if (open) "⌃" else "⌄", modifier = Modifier.padding(start = 6.dp), style = TextStyle(fontSize = 13.sp, color = c.sub))
         }
-        AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(open, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
             Column(Modifier.padding(start = 3.dp).drawBehind { drawRect(c.hair, Offset.Zero, Size(1.dp.toPx(), size.height)) }
                 .padding(start = 13.dp, top = 2.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 steps.forEachIndexed { i, s ->

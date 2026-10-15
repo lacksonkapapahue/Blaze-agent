@@ -1,6 +1,10 @@
 package com.blaze.assistant.phone
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,6 +31,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Gesture
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.Link
@@ -50,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
@@ -79,6 +86,9 @@ import com.blaze.assistant.ui.Glass
 import com.blaze.assistant.ui.GlassIconButton
 import com.blaze.assistant.ui.LocalBlaze
 import com.blaze.assistant.ui.MascotGlyph
+import com.blaze.assistant.ui.MotionTokens
+import com.blaze.assistant.ui.pressScale
+import com.blaze.assistant.ui.shimmer
 import com.blaze.assistant.ui.Md
 import com.blaze.assistant.ui.PageHead
 import com.blaze.assistant.ui.raised
@@ -100,6 +110,10 @@ class DockCalls(
     val onTeachSave: () -> Unit = {},
     val onTeachDiscard: () -> Unit = {},
     val onTeachStart: () -> Unit = {},
+    /** v0.27.0: the grab box goes back to its previous shape. */
+    val onGrabUndo: () -> Unit = {},
+    /** v0.27.0: drop this grab and draw a new one (Grab mode on). */
+    val onGrabAgain: () -> Unit = {},
 )
 
 object MagicHandIcons {
@@ -172,11 +186,28 @@ private fun SelectionBar(bar: DockToolbar) {
 }
 
 @Composable
-private fun SmallPill(text: String, primary: Boolean, onClick: () -> Unit) =
-    Box(Modifier.height(30.dp).clip(Glass.pill).background(if (primary) Glass.blue else Glass.raised2)
-        .clickable(onClickLabel = text, onClick = onClick).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-        Text(text, style = sans.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White))
+private fun SmallPill(text: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    Box(Modifier.pressScale(press).height(32.dp).clip(Glass.pill).background(if (!enabled) Glass.raised else if (primary) Glass.blue else Glass.raised2)
+        .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, onClickLabel = text, onClick = onClick)
+        .padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = sans.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium, color = if (enabled) Color.White else Glass.weak))
     }
+}
+
+/** v0.27.0: the dock's visible Grab toggle (blue while Grab mode is on). */
+@Composable
+private fun GrabToggle(on: Boolean, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    Row(Modifier.pressScale(press).height(36.dp).clip(Glass.pill).background(if (on) Glass.blue else Glass.raised)
+        .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current,
+            onClickLabel = if (on) "Stop grabbing" else DockButton.GRAB.desc, onClick = onClick)
+        .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.Gesture, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(5.dp))
+        Text("Grab", style = sans.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Color.White))
+    }
+}
 
 @Composable
 private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar: DockToolbar) {
@@ -198,13 +229,19 @@ private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar
             }
             MagicHandState.dockButtons(u).forEach { b ->
                 Spacer(Modifier.width(4.dp))
+                if (b == DockButton.GRAB) { GrabToggle(u.grabMode) { calls.onButton(b) }; return@forEach }
                 GlassIconButton(when (b) {
+                    DockButton.GRAB -> Icons.Rounded.Gesture
                     DockButton.TEACH -> Icons.Rounded.School; DockButton.DONE -> Icons.Rounded.Check
                     DockButton.DROP_CHAT -> Icons.Rounded.Forum; DockButton.CLOSE -> Icons.Rounded.Close
                 }, b.desc, size = 36.dp, bg = if (b == DockButton.DONE) Glass.blue else Glass.raised) { calls.onButton(b) }
             }
         }
-        when (u.panel) {
+        // v0.27.0: panels cross-fade and the card resizes smoothly (instant with Remove animations on).
+        AnimatedContent(u.panel, modifier = Modifier.fillMaxWidth().animateContentSize(MotionTokens.medium()),
+            transitionSpec = { MotionTokens.fade() togetherWith MotionTokens.fadeAway() }, label = "dock-panel") { panel ->
+        Column(Modifier.fillMaxWidth()) {
+        when (panel) {
             Panel.STATUS -> Unit
             Panel.MENU -> Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
                 MagicHandMenuCard(u, widthDp - 36f, calls.onMenu)
@@ -247,6 +284,8 @@ private fun DockCard(u: MagicHandState.Ui, calls: DockCalls, widthDp: Float, bar
             }
             Panel.TEACH_REVIEW -> TeachReviewCard(u, calls)
         }
+        }
+        }
         Spacer(Modifier.height(8.dp))
     }
 }
@@ -264,11 +303,26 @@ private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = 
                 style = sans.copy(fontSize = 11.5.sp, color = Glass.orange, fontWeight = FontWeight.Medium))
             if (u.grabBusy) Text("Reading\u2026", style = sans.copy(fontSize = 11.5.sp, color = Glass.sub))
         }
-        Text(MagicHandState.GRAB_HINT, style = sans.copy(fontSize = 11.sp, lineHeight = 15.sp, color = Glass.sub))
-        Spacer(Modifier.height(4.dp))
+        // v0.27.0: a short coach mark on the first few grabs (the old long hint after that is gone).
+        if (u.coach) {
+            Spacer(Modifier.height(4.dp))
+            Text("\u2196 " + MagicHandState.COACH, style = sans.copy(fontSize = 11.5.sp, color = Color.White, fontWeight = FontWeight.Medium),
+                modifier = Modifier.clip(Glass.pill).background(Glass.blue.copy(alpha = 0.85f)).padding(horizontal = 10.dp, vertical = 3.dp))
+        }
+        Spacer(Modifier.height(6.dp))
         SelectionBar(bar)
-        Column(Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState())) {
-            if (u.grabbed.isBlank()) Text(if (u.grabBusy) "Reading the new area\u2026" else MagicHandState.GRAB_EMPTY, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp, color = Glass.sub))
+        val scroll = rememberScrollState()
+        // A new read scrolls back to its first line, so the result is always in view.
+        LaunchedEffect(u.grabbed) { if (scroll.value != 0) scroll.animateScrollTo(0, MotionTokens.medium()) }
+        Column(Modifier.heightIn(max = 120.dp).verticalScroll(scroll)) {
+            // v0.27.0: shimmer lines while the new area is read, instead of a bare "Reading…".
+            if (u.grabbed.isBlank() && u.grabBusy) Column {
+                listOf(1f, 0.82f, 0.6f).forEach { f ->
+                    Box(Modifier.fillMaxWidth(f).height(12.dp).shimmer(Glass.raised2, Color.White.copy(alpha = 0.12f), Glass.pill))
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+            else if (u.grabbed.isBlank()) Text(MagicHandState.GRAB_EMPTY, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp, color = Glass.sub))
             // A new key per text, so an old selection never points into replaced text after the box moves.
             else androidx.compose.runtime.key(u.grabbed) { SelectionContainer { Text(u.grabbed, style = sans.copy(fontSize = 14.sp, lineHeight = 20.sp)) } }
         }
@@ -276,15 +330,24 @@ private fun GrabCard(u: MagicHandState.Ui, calls: DockCalls, bar: DockToolbar = 
     val enabled = u.grabbed.isNotBlank() && !u.grabBusy
     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
         MagicHandState.grabActions(u.private).forEach { g ->
-            Column(Modifier.clip(RoundedCornerShape(16.dp)).clickable(enabled = enabled, onClickLabel = g.label) { calls.onGrab(g) }.padding(horizontal = 6.dp, vertical = 4.dp),
+            val press = remember { MutableInteractionSource() }
+            Column(Modifier.pressScale(press).clip(RoundedCornerShape(16.dp))
+                .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, onClickLabel = g.label) { calls.onGrab(g) }
+                .padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(38.dp).clip(CircleShape).background(if (g == GrabAction.COPY) Glass.blue else Glass.raised2), contentAlignment = Alignment.Center) {
-                    Icon(MagicHandIcons.of(g), contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Box(Modifier.size(42.dp).clip(CircleShape).background(if (!enabled) Glass.raised else if (g == GrabAction.COPY) Glass.blue else Glass.raised2), contentAlignment = Alignment.Center) {
+                    Icon(MagicHandIcons.of(g), contentDescription = null, tint = if (enabled) Color.White else Glass.weak, modifier = Modifier.size(21.dp))
                 }
                 Spacer(Modifier.height(4.dp))
-                Text(g.label, style = sans.copy(fontSize = 10.5.sp))
+                Text(g.label, style = sans.copy(fontSize = 11.sp, fontWeight = FontWeight.Medium, color = if (enabled) Glass.text else Glass.weak))
             }
         }
+    }
+    // v0.27.0: fix a wrong grab in one tap.
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.End) {
+        SmallPill("Undo", false, enabled = u.canUndo && !u.grabBusy) { calls.onGrabUndo() }
+        Spacer(Modifier.width(6.dp))
+        SmallPill("Grab again", false) { calls.onGrabAgain() }
     }
 }
 
@@ -333,11 +396,14 @@ private fun Chip(s: String, bg: Color, fg: Color) =
     Text(s, maxLines = 1, modifier = Modifier.clip(Glass.pill).background(bg).padding(horizontal = 8.dp, vertical = 2.dp), style = sans.copy(fontSize = 10.5.sp, color = fg))
 
 @Composable
-private fun Pill(text: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) =
-    Box(Modifier.height(40.dp).clip(Glass.pill).background(if (!enabled) Glass.raised else if (primary) Glass.blue else Glass.raised2)
-        .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+private fun Pill(text: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    val press = remember { MutableInteractionSource() }
+    Box(Modifier.pressScale(press).height(40.dp).clip(Glass.pill).background(if (!enabled) Glass.raised else if (primary) Glass.blue else Glass.raised2)
+        .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, onClick = onClick)
+        .padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
         Text(text, style = sans.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Medium, color = if (enabled) Color.White else Glass.weak))
     }
+}
 
 @Composable
 private fun Buttons(labels: List<Pair<String, Boolean>>, onPick: (Int) -> Unit) {

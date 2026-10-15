@@ -280,7 +280,8 @@ fun FollowupRow(list: List<String>, modifier: Modifier = Modifier, onPick: (Stri
         contentPadding = androidx.compose.foundation.layout.PaddingValues(end = 12.dp)) {
         items(chips.size) { i ->
             val s = chips[i]
-            Row(Modifier.clip(RoundedCornerShape(18.dp)).background(c.accentSoft).clickable { onPick(s) }
+            // v0.27.0: the chips fade up one after another under a new reply.
+            Row(Modifier.appearIn(true, delayMs = 40 * i.coerceAtMost(4)).clip(RoundedCornerShape(18.dp)).background(c.accentSoft).clickable { onPick(s) }
                 .semantics { contentDescription = "Suggestion: $s" }
                 .heightIn(min = 36.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("\u21b3", style = TextStyle(fontFamily = Type.Mono, fontSize = 11.sp, color = c.accent))

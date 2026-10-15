@@ -134,9 +134,12 @@ private fun Pill(mode: String, onMode: (String) -> Unit) {
     Row(Modifier.clip(RoundedCornerShape(20.dp)).background(c.faint).padding(3.dp)) {
         listOf("chat" to "Chat", "projects" to "Projects").forEach { (id, label) ->
             val on = mode == id
-            Box(Modifier.clip(RoundedCornerShape(17.dp)).background(if (on) c.ink else Color.Transparent)
+            // v0.27.0: the Chat | Projects highlight fades across (MotionTokens).
+            val fill by androidx.compose.animation.animateColorAsState(if (on) c.ink else Color.Transparent, MotionTokens.medium(), label = "tab")
+            val ink by androidx.compose.animation.animateColorAsState(if (on) c.paper else c.sub, MotionTokens.medium(), label = "tabText")
+            Box(Modifier.clip(RoundedCornerShape(17.dp)).background(fill)
                 .clickable(onClickLabel = "Switch to $label") { onMode(id) }.padding(horizontal = 14.dp, vertical = 7.dp)) {
-                Text(label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = if (on) c.paper else c.sub))
+                Text(label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.sp, color = ink))
             }
         }
     }
@@ -219,7 +222,8 @@ fun AvatarMenu(name: String, email: String, items: List<MenuItem>, onPick: (Stri
 @Composable
 fun BoxScope.SheetScrim(onDismiss: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.matchParentSize().background(c.ink.copy(alpha = 0.14f)).clickable(remember { MutableInteractionSource() }, null, onClick = onDismiss))
+    // v0.27.0: fades in with the sheet.
+    Box(Modifier.matchParentSize().appearIn(true).background(c.ink.copy(alpha = 0.14f)).clickable(remember { MutableInteractionSource() }, null, onClick = onDismiss))
 }
 
 // ---------------------------------------------------------------- /views picker
@@ -378,7 +382,7 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
         // Token meter (v0.15.0): what the last model call sent and got back, on its own line so the title never clips.
         if (meter.isNotBlank()) Label(meter, color = if (meterHigh) c.accent else c.weak, size = 9.sp, maxLines = 1,
             modifier = Modifier.padding(start = 29.dp, end = 12.dp, bottom = 10.dp))
-        AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+        AnimatedVisibility(open, enter = MotionTokens.expand(), exit = MotionTokens.collapse()) {
             Column(Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 6.dp)) {
                 steps.forEachIndexed { i, s ->
                     val running = live && i == n - 1

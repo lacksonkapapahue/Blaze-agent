@@ -42,6 +42,12 @@ object MagicHandState {
         val intro: String = "",
         /** v0.26.0: the grab box was moved or resized and its text is being read again. */
         val grabBusy: Boolean = false,
+        /** v0.27.0: Grab mode is on (the Grab button): circle or drag anywhere on the screen with a finger. */
+        val grabMode: Boolean = false,
+        /** v0.27.0: the grab box has an earlier shape to go back to (Undo). */
+        val canUndo: Boolean = false,
+        /** v0.27.0: show the "Drag corners to adjust" coach mark on the grab card (first few grabs only). */
+        val coach: Boolean = false,
     ) {
         val carrying: Boolean get() = carried.isNotBlank()
     }
@@ -80,11 +86,25 @@ object MagicHandState {
 
     /** Back to the plain status line (after an answer, a cancel or a done action). */
     fun back(u: Ui, note: String = ""): Ui = u.copy(panel = if (u.mode == MagicHandLogic.Mode.TEACH) Panel.TEACH else Panel.STATUS,
-        menu = emptyList(), confirm = null, note = note, grabBusy = false)
+        menu = emptyList(), confirm = null, note = note, grabBusy = false, canUndo = false, coach = false)
 
     fun grabbed(u: Ui, text: String, source: String): Ui =
-        if (text.isBlank()) back(u, "I couldn't read any text in that circle.")
-        else u.copy(panel = Panel.GRAB, grabbed = text.trim(), grabSource = source, menu = emptyList(), grabBusy = false)
+        if (text.isBlank()) back(u.copy(grabMode = false), "I couldn't read any text there. Tap Grab and try a bigger area.")
+        else u.copy(panel = Panel.GRAB, grabbed = text.trim(), grabSource = source, menu = emptyList(), grabBusy = false, grabMode = false)
+
+    /**
+     * v0.27.0: the Grab button. On: a finger circles or drags anywhere on the screen to grab (the hand's own circle
+     * still works too); [firstTimes] shows the full hint. Off: back to pointing. Not in Private or while teaching.
+     */
+    fun grabMode(u: Ui, on: Boolean, firstTimes: Boolean = true): Ui = when {
+        !on -> u.copy(grabMode = false, note = if (u.grabMode) "" else u.note)
+        !MagicHandGuard.canGrab(u.private) -> back(u.copy(grabMode = false), MagicHandGuard.PRIVATE_NOTE)
+        u.mode == MagicHandLogic.Mode.TEACH -> u
+        else -> back(u, if (firstTimes) GRAB_MODE_HINT else GRAB_MODE_SHORT).copy(grabMode = true)
+    }
+
+    const val GRAB_MODE_HINT = "Circle or drag over what you want"
+    const val GRAB_MODE_SHORT = "Grab: circle or drag"
 
     /** v0.26.0: the grab box moved or was resized; the card stays open while its text is read again. */
     fun regrabbing(u: Ui): Ui = if (u.panel == Panel.GRAB) u.copy(grabBusy = true, note = "") else u
@@ -95,6 +115,8 @@ object MagicHandState {
 
     const val GRAB_EMPTY = "No text in this area. Move the box or drag its corners."
     const val GRAB_HINT = "Drag the blue box to move it, or its corners to resize."
+    /** v0.27.0: the short coach mark on the first few grabs. */
+    const val COACH = "Drag corners to adjust"
 
     /**
      * v0.26.0: a long-press on the dock closes Magic Hand, except where the dock shows text you can select (the
@@ -124,8 +146,10 @@ object MagicHandState {
     fun endTeach(u: Ui, note: String): Ui = u.copy(mode = MagicHandLogic.Mode.POINT, panel = Panel.STATUS, teachSteps = emptyList(), teachName = "", note = note)
 
     /** Dock header buttons for the current state (pure, tested). Close is always last and always there. */
-    enum class DockButton(val desc: String) { TEACH("Teach Blaze a task"), DONE("Done teaching"), DROP_CHAT("Drop in chat"), CLOSE("Close Magic Hand") }
+    enum class DockButton(val desc: String) { GRAB("Grab: circle or drag over text"), TEACH("Teach Blaze a task"), DONE("Done teaching"), DROP_CHAT("Drop in chat"), CLOSE("Close Magic Hand") }
     fun dockButtons(u: Ui): List<DockButton> = buildList {
+        // v0.27.0: Grab is a visible button now, not only a hidden circle gesture.
+        if (u.mode == MagicHandLogic.Mode.POINT && MagicHandGuard.canGrab(u.private) && u.panel != Panel.TEACH_INTRO && u.panel != Panel.TEACH_REVIEW) add(DockButton.GRAB)
         if (u.mode == MagicHandLogic.Mode.TEACH) { if (u.panel == Panel.TEACH) add(DockButton.DONE) }
         else if (!u.private && u.panel != Panel.TEACH_INTRO) add(DockButton.TEACH)
         if (u.carrying && !u.private && u.mode == MagicHandLogic.Mode.POINT) add(DockButton.DROP_CHAT)
@@ -137,6 +161,7 @@ object MagicHandState {
         u.note.isNotBlank() -> u.note
         u.pointing.isNotBlank() -> (if (u.app.isNotBlank()) u.app + " \u00b7 " else "") + MagicHandLogic.preview(u.pointing, 60)
         u.mode == MagicHandLogic.Mode.TEACH -> TEACH_HELLO
+        u.grabMode -> GRAB_MODE_SHORT
         else -> HELLO
     }
 

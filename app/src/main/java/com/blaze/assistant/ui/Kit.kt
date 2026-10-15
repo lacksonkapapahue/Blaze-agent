@@ -153,7 +153,9 @@ fun BlazeButton(text: String, modifier: Modifier = Modifier, kind: BtnKind = Btn
                 height: androidx.compose.ui.unit.Dp = 44.dp, lead: String = "", onClick: () -> Unit) {
     val c = LocalBlaze.current
     val shape = BlazeShapes.pill
-    val base = modifier.height(height).widthIn(min = 64.dp).clip(shape)
+    // v0.27.0: shrinks slightly while pressed (MotionTokens; none with Remove animations on).
+    val press = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val base = modifier.pressScale(press).height(height).widthIn(min = 64.dp).clip(shape)
     val filled = when {
         !enabled -> base.background(c.faint, shape)
         kind == BtnKind.PRIMARY -> base.background(BlazeBrush.primary, shape)
@@ -168,7 +170,8 @@ fun BlazeButton(text: String, modifier: Modifier = Modifier, kind: BtnKind = Btn
         kind == BtnKind.GHOST -> c.sub
         else -> c.ink
     }
-    Box(filled.clickable(enabled = enabled, onClick = onClick).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+    Box(filled.clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, onClick = onClick)
+        .padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
         Text((if (lead.isNotBlank()) "$lead  " else "") + text.sentence(), maxLines = 1, overflow = TextOverflow.Ellipsis,
             style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = fg))
     }
@@ -285,7 +288,9 @@ fun Segmented(options: List<Pair<String, String>>, value: String, modifier: Modi
     Row(modifier.hairline(c.hair2, BlazeShapes.pill).background(c.raised, BlazeShapes.pill).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         options.forEach { (id, label) ->
             val on = id == value
-            Box(Modifier.height(30.dp).clip(BlazeShapes.pill).background(if (on) c.ink else Color.Transparent, BlazeShapes.pill).clickable { onPick(id) }.padding(horizontal = 14.dp),
+            // v0.27.0: the selected segment's fill fades across instead of jumping.
+            val fill by androidx.compose.animation.animateColorAsState(if (on) c.ink else Color.Transparent, MotionTokens.medium(), label = "seg")
+            Box(Modifier.height(30.dp).clip(BlazeShapes.pill).background(fill, BlazeShapes.pill).clickable { onPick(id) }.padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center) {
                 Text(label, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 12.5.sp,
                     color = if (on) c.paper else c.sub))
@@ -375,9 +380,11 @@ fun BlazeDialogCard(
 fun PillButton(text: String, primary: Boolean, warm: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
     val bg = if (!primary) androidx.compose.ui.graphics.SolidColor(Color.Transparent) else if (warm) androidx.compose.ui.graphics.SolidColor(DialogColors.primaryWarm) else BlazeBrush.primary
-    Box(modifier.height(40.dp).widthIn(min = 72.dp).clip(shape).background(bg, shape)
+    val press = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    Box(modifier.pressScale(press).height(40.dp).widthIn(min = 72.dp).clip(shape).background(bg, shape)
         .let { if (!primary) it.border(1.dp, DialogColors.border, shape) else it }
-        .clickable(onClick = onClick).padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
+        .clickable(interactionSource = press, indication = androidx.compose.foundation.LocalIndication.current, onClick = onClick)
+        .padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
         Text(text, maxLines = 1, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp,
             color = if (primary) DialogColors.onPrimary else DialogColors.ghost))
     }
