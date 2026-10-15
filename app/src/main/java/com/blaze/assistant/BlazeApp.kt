@@ -70,6 +70,8 @@ class BlazeApp : Application() {
             kotlinx.coroutines.delay(2_500)
             val tools = try { Agent.toolCatalog() } catch (_: Throwable) { null }
             try { com.blaze.assistant.agent.BlazeDocs.init(app, tools) } catch (_: Throwable) { }
+            // v0.28.5: index each project's full instructions / brief / notes (only what changed) for project_docs_search.
+            try { com.blaze.assistant.agent.ProjectDocs.init() } catch (_: Throwable) { }
         }
     }
 }

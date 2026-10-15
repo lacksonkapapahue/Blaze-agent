@@ -52,7 +52,7 @@ object Modes {
         "file_read", "file_list", "file_search", "terminal_status", "terminal_jobs",
         "processes", "list_routines", "list_triggers", "use_skill", "find_skill", "skill_file",
         "find_tool", "load_tools", "ask_user", "get_location",
-        "list_agents", "check_agent", "open_view", "about_blaze", "blaze_docs_search", "blaze_docs_read",
+        "list_agents", "check_agent", "open_view", "about_blaze", "blaze_docs_search", "blaze_docs_read", "project_docs_search", "project_docs_read",
         // checked by action below
         "git", "clipboard", "call_control", "blaze_self", "process", "gallery",
     )
