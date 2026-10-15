@@ -198,10 +198,15 @@ object DevTools {
     private fun http(a: JSONObject): String {
         val url = a.optString("url")
         if (!url.startsWith("http")) return "url must start with http:// or https://"
+        // v0.28.2: never send credentials in the clear to the internet (a LAN / localhost server is fine), and a
+        // credentialed request to plain http doesn't follow redirects off the LAN.
+        val hdrs = a.optJSONObject("headers")?.let { h -> h.keys().asSequence().associateWith { h.optString(it) } }.orEmpty()
+        val secret = com.blaze.assistant.connect.UrlSafety.carriesSecret(url, hdrs)
+        if (secret) com.blaze.assistant.connect.UrlSafety.problem(url)?.let { return "Refused. $it" }
         val c = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = a.optString("method", "GET").uppercase()
             connectTimeout = 15_000; readTimeout = a.optInt("timeout_seconds", 30).coerceIn(5, 120) * 1000
-            instanceFollowRedirects = true
+            instanceFollowRedirects = !(secret && com.blaze.assistant.connect.UrlSafety.isPlainHttp(url))
             setRequestProperty("User-Agent", "Blaze/1.0 (Android)")
             a.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> setRequestProperty(k, h.optString(k)) } }
         }

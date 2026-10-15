@@ -131,7 +131,7 @@ object Mcp {
     private val ids = AtomicLong(1)
 
     private fun httpOpen(url: String, method: String, headers: Map<String, String>, readMs: Int): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
+        UrlSafety.open(url).apply {
             requestMethod = method; connectTimeout = 15_000; readTimeout = readMs
             setRequestProperty("User-Agent", "Blaze-Android")
             headers.forEach { (k, v) -> setRequestProperty(k, v) }

@@ -8,7 +8,7 @@ providers, keys, model order, plan quotas and health from `/admin`.
 - Will deploy to: `https://blaze-gateway.blaze-app.workers.dev` (`GET /health`)
 - Admin: `https://blaze-gateway.blaze-app.workers.dev/admin`
 - Free tier only: one Worker, one D1 database, Workers AI's free 10,000 Neurons/day, plus each
-  provider's free plan. Same Cloudflare account as blaze-auth (`ef895b6795ee39066c863c39a42ec8b6`).
+  provider's free plan. Same Cloudflare account as blaze-auth (the Cloudflare account).
 - First-time setup: **[SETUP.md](SETUP.md)**. Provider terms: **[PROVIDER-TERMS.md](PROVIDER-TERMS.md)**.
 
 ## For app developers

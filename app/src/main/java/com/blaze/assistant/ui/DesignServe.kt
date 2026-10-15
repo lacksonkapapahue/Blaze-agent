@@ -55,6 +55,53 @@ object DesignServe {
         return fileUrl
     }
 
+    /**
+     * v0.28.2: the URL the Design view loads. Like [virtualUrl], and a file:// page outside Blaze's home is served
+     * from the virtual origin too (/ext/<name>, with its own folder as the root, see [extRoot]), so the WebView
+     * never needs file access. A file inside the app's private data ([appData]) but outside Blaze's home is
+     * not served (404).
+     */
+    fun servedUrl(fileUrl: String, home: File?): String {
+        val v = virtualUrl(fileUrl, home)
+        if (!v.startsWith("file://")) return v
+        val f = File(v.removePrefix("file://"))
+        return "$ORIGIN/ext/" + enc(f.name)
+    }
+
+    /** The folder a /ext/ page (and its images, scripts) is served from, or null (not a file, or in the app's private data). */
+    fun extRoot(fileUrl: String, home: File?, appData: File? = null): File? {
+        if (!fileUrl.startsWith("file://") || !virtualUrl(fileUrl, home).startsWith("file://")) return null
+        val f = try { File(fileUrl.removePrefix("file://")).canonicalFile } catch (_: Exception) { return null }
+        if (appData != null) {
+            val d = try { appData.canonicalPath } catch (_: Exception) { return null }
+            if (f.path == d || f.path.startsWith(d + File.separator)) return null
+        }
+        return f.parentFile
+    }
+
+    /** "scheme://host[:port]" of [url] (lowercase), or "" for data:, about:, file: and anything unparsable. */
+    fun originOf(url: String): String {
+        val m = Regex("^(https?)://([^/?#]+)", RegexOption.IGNORE_CASE).find(url.trim()) ?: return ""
+        val scheme = m.groupValues[1].lowercase()
+        val auth = m.groupValues[2].substringAfterLast('@').lowercase()
+        val port = Regex(":(\\d+)$").find(auth)?.groupValues?.get(1)
+        val host = if (port != null) auth.removeSuffix(":$port") else auth
+        val def = if (scheme == "https") "443" else "80"
+        return "$scheme://$host" + if (port != null && port != def) ":$port" else ""
+    }
+
+    /**
+     * v0.28.2: may the Design view's top frame go to [next]? Only within the origin it was opened on ([loaded],
+     * normally [ORIGIN]); everything else is held, and offered as "Open in browser" when the user tapped a link.
+     */
+    fun allowNavigation(loaded: String, next: String): Boolean {
+        val o = originOf(loaded)
+        return o.isNotEmpty() && o == originOf(next)
+    }
+
+    /** Caps what a page may hand the [DesignBridge] (it only updates the view's state). */
+    fun bridgeText(s: String?, max: Int = 500): String = (s ?: "").take(max)
+
     /** What a request to the virtual origin maps to: a file in Blaze's home or an APK asset. */
     sealed class Target {
         abstract val mime: String
@@ -63,7 +110,7 @@ object DesignServe {
     }
 
     /** Maps [url] to a [Target], or null when it isn't ours (other origins pass through to the network). */
-    fun resolve(url: String, home: File?): Target? {
+    fun resolve(url: String, home: File?, ext: File? = null): Target? {
         val clean = url.substringBefore('#').substringBefore('?')
         if (!clean.startsWith("$ORIGIN/", ignoreCase = true)) return null
         val path = clean.substring(ORIGIN.length)
@@ -73,6 +120,7 @@ object DesignServe {
             path == "/diagram/mermaid.min.js" -> Target.Asset("diagram/mermaid.min.js", "text/javascript")
             path.startsWith("/designs/") -> home?.let { disk(File(home, "designs"), path.removePrefix("/designs/")) }
             path.startsWith("/home/") -> home?.let { disk(home, path.removePrefix("/home/")) }
+            path.startsWith("/ext/") -> ext?.let { disk(ext, path.removePrefix("/ext/")) }
             else -> null
         }
     }

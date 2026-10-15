@@ -75,7 +75,18 @@ object BrowserTools {
         when (name) {
             "browser_open" -> BrowserEngine.open(ctx, a.optString("url"), a.optBoolean("new_tab", false), a.optBoolean("private", false)).also { if (a.optBoolean("show")) show(ctx) }
             "browser_read" -> BrowserEngine.read(ctx)
-            "browser_click" -> BrowserEngine.click(ctx, if (a.has("number")) a.optInt("number") else null, a.optString("text").ifBlank { null })
+            "browser_click" -> {
+                // v0.28.2: a button that pays, sends, posts or deletes always asks first (ConfirmGate: outbound in the user's name).
+                val n = if (a.has("number")) a.optInt("number") else null
+                val text = a.optString("text").ifBlank { null }
+                val label = BrowserEngine.labelOf(n, text).ifBlank { text.orEmpty() }
+                val site = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { BrowserEngine.host() }.ifBlank { "this page" }
+                if (com.blaze.assistant.phone.Pointer.risky(label) &&
+                    !com.blaze.assistant.agent.Agent.confirm("Click \u201c${label.trim().take(40)}\u201d on $site?",
+                        "This looks like it pays, sends, posts or deletes something.", "Click", always = true))
+                    "The user did NOT approve clicking \"${label.trim().take(40)}\". Don't retry; tell them it's ready for them to finish (browser_show)."
+                else BrowserEngine.click(ctx, n, text)
+            }
             "browser_type" -> BrowserEngine.type(ctx, if (a.has("number")) a.optInt("number") else null, a.optString("label").ifBlank { null },
                 a.optString("text"), a.optBoolean("submit", false))
             "browser_scroll" -> BrowserEngine.scroll(ctx, a.optString("direction", "down") != "up")

@@ -86,7 +86,7 @@ class NotificationBrain : NotificationListenerService() {
         suspend fun reply(ctx: Context, n: Int, text: String): String {
             val it = lastList.getOrNull(n) ?: return "Call recent_notifications first and use its number."
             val action = it.reply ?: return "That notification has no reply box."
-            if (!Agent.confirm("Reply to ${it.title}?", "\u201c$text\u201d (in ${it.app})", "Send")) return "The user declined. Nothing was sent."
+            if (!Agent.confirm("Reply to ${it.title}?", "\u201c$text\u201d (in ${it.app})", "Send", always = true)) return "The user declined. Nothing was sent."
             val ri = action.remoteInputs?.firstOrNull() ?: return "That notification has no reply box."
             val intent = Intent(); val b = Bundle(); b.putCharSequence(ri.resultKey, text)
             RemoteInput.addResultsToIntent(action.remoteInputs, intent, b)

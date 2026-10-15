@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time manual setup from a computer (CI does the same on every push to main once the GitHub
 # secrets exist). Run from Blaze-agent/gateway:
-#   export CLOUDFLARE_API_TOKEN=…   CLOUDFLARE_ACCOUNT_ID=ef895b6795ee39066c863c39a42ec8b6
+#   export CLOUDFLARE_API_TOKEN=…   CLOUDFLARE_ACCOUNT_ID=<the Cloudflare account ID>
 #   ./scripts/first-deploy.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."

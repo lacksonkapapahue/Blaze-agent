@@ -34,7 +34,7 @@ object Web {
     }
 
     suspend fun fetch(url: String, max: Int = 9000): String = withContext(Dispatchers.IO) {
-        val (code, body) = try { Http.req("GET", url, headers = mapOf("User-Agent" to UA, "Accept" to "text/html,application/json,text/plain"), timeoutMs = 20_000) }
+        val (code, body) = try { Http.req("GET", url, headers = mapOf("User-Agent" to UA, "Accept" to "text/html,application/json,text/plain"), timeoutMs = 20_000, strict = false) }
             catch (e: Exception) { return@withContext "Error: couldn't open $url (${e.message})" }
         if (code !in 200..299) return@withContext "Error: HTTP $code from $url"
         val t = body.trimStart()

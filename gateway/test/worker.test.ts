@@ -99,6 +99,38 @@ describe("basics", () => {
   });
 });
 
+describe("cors", () => {
+  const withOrigin = (method: string, path: string, origin: string, token?: string) => {
+    const headers: Record<string, string> = { Origin: origin };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (method === "OPTIONS") headers["Access-Control-Request-Method"] = "POST";
+    return worker.fetch(new Request(BASE + path, { method, headers }), env, ctx as unknown as ExecutionContext);
+  };
+  it("allows no cross-origin access by default, and only the ALLOWED_ORIGINS list when set", async () => {
+    // Default: no Access-Control-* at all (preflight, answers and errors), so a website can't read anything.
+    for (const r of [await withOrigin("OPTIONS", "/v1/chat/completions", "https://evil.example"),
+                     await withOrigin("GET", "/v1/models", "https://evil.example", userToken),
+                     await withOrigin("GET", "/v1/models", "https://evil.example")]) {
+      expect(r.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect([...r.headers.keys()].some(k => k.startsWith("access-control-"))).toBe(false);
+    }
+    // A native app (no Origin) still works.
+    expect((await call("GET", "/v1/models", undefined, userToken)).status).toBe(200);
+    // Opt-in list: exact origins only; "*" is ignored.
+    env.ALLOWED_ORIGINS = "https://app.example.com, *, https://other.example/";
+    const ok = await withOrigin("GET", "/v1/models", "https://app.example.com", userToken);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+    expect(ok.headers.get("Vary")).toContain("Origin");
+    const pre = await withOrigin("OPTIONS", "/v1/chat/completions", "https://other.example");
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get("Access-Control-Allow-Origin")).toBe("https://other.example");
+    expect(pre.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+    expect((await withOrigin("GET", "/v1/models", "https://evil.example", userToken)).headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect((await withOrigin("GET", "/v1/models", "https://app.example.com.evil.example", userToken)).headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
 describe("chat", () => {
   it("routes to the first model with a key and passes the answer through", async () => {
     await addKey("groq", "gsk_test_key_AAAA");
