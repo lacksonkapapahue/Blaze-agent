@@ -166,7 +166,7 @@ object Linux {
     } catch (_: Throwable) { emptyList() }
 
     /** The command line that runs [cmd] (or a login shell) inside Alpine. */
-    fun command(cmd: String?): List<String> {
+    fun command(cmd: String?, term: String = "xterm"): List<String> {
         prepare()
         val r = rootfs().absolutePath
         val fake = File(base(), "fake")
@@ -177,9 +177,10 @@ object Linux {
         if (!File("/proc/uptime").canRead()) { args += "-b"; args += "${fake.absolutePath}/uptime:/proc/uptime" }
         if (!File("/proc/version").canRead()) { args += "-b"; args += "${fake.absolutePath}/version:/proc/version" }
         if (File("/sdcard").canRead()) { args += "-b"; args += "/sdcard" }
-        args += listOf("-w", "/root", "/usr/bin/env", "-i", "HOME=/root", "TERM=xterm", "LANG=C.UTF-8",
+        args += listOf("-w", "/root", "/usr/bin/env", "-i", "HOME=/root", "TERM=$term", "LANG=C.UTF-8", "COLORTERM=truecolor",
             "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-        args += if (cmd == null) listOf("/bin/sh", "-l") else listOf("/bin/sh", "-lc", cmd)
+        // v0.29.2: the interactive terminal gets bash when the user installed it (apk add bash), else Alpine's ash.
+        args += if (cmd == null) listOf(if (File(rootfs(), "bin/bash").exists()) "/bin/bash" else "/bin/sh", "-l") else listOf("/bin/sh", "-lc", cmd)
         return args
     }
 

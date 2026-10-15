@@ -13,8 +13,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 107
-        versionName = "0.29.1"
+        versionCode = 108
+        versionName = "0.29.2"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -215,6 +215,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("com.github.termux.termux-app:terminal-view:v0.118.0")   // v0.29.2 Blaze Terminal (pulls terminal-emulator + libtermux.so)
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.material:material-icons-extended")   // v0.24.6: rounded icon buttons (browser, pointer menu, overlay)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
