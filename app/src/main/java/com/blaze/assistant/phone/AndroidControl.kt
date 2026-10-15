@@ -24,7 +24,7 @@ import org.json.JSONObject
  * directly opens the right settings page for the user instead.
  */
 object AndroidControl {
-    val names = setOf("clipboard", "post_notification", "share_text", "phone_mode", "open_settings_page", "system_action", "app_usage", "uninstall_app", "open_camera", "list_apps")
+    val names = setOf("clipboard", "post_notification", "share_text", "phone_mode", "open_settings_page", "system_action", "app_usage", "uninstall_app", "open_camera", "list_apps", "blaze_camera")
 
     private fun fn(name: String, desc: String, props: JSONObject, req: List<String>) = JSONObject().put("type", "function").put("function",
         JSONObject().put("name", name).put("description", desc).put("parameters", JSONObject().put("type", "object").put("properties", props).put("required", JSONArray(req))))
@@ -59,7 +59,9 @@ object AndroidControl {
         fn("uninstall_app", "Ask Android to uninstall an app (the user confirms).", JSONObject().put("package", str("Package name")), listOf("package")),
         fn("list_apps", "List the apps installed on this phone (name and package), optionally filtered by a word. Use it instead of asking the user what they have.",
             JSONObject().put("filter", str("Optional word, e.g. 'bank', 'secure', 'whatsapp'")), emptyList()),
-        fn("open_camera", "Open the camera to take a photo, record video, or scan a QR code.", JSONObject().put("mode", en("photo", "video", "qr")), emptyList()),
+        fn("open_camera", "Open the phone's own camera app for the user (photo or video, saved to their gallery), or scan a QR code. To SEE something yourself use blaze_camera instead.", JSONObject().put("mode", en("photo", "video", "qr")), emptyList()),
+        fn("blaze_camera", "Open Blaze Camera so the user can show you something. The capture comes back into this chat as their next message. Modes: ask (look at a thing and answer), photo, text (read words, on-device OCR), translate (read words and translate them), scan (QR code / barcode), document (scan a page, crop and clean it).",
+            JSONObject().put("mode", en("ask", "photo", "text", "translate", "scan", "document")), listOf("mode")),
     )
 
     private fun start(ctx: Context, i: Intent): Boolean = try { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true } catch (_: Exception) { false }
@@ -89,14 +91,39 @@ object AndroidControl {
             if (apps.isEmpty()) "No installed app matches \u201c$f\u201d." else "${apps.size} apps:\n" + apps.take(150).joinToString("\n") { "${it.first} (${it.second})" }
         }
         "uninstall_app" -> if (start(ctx, Intent(Intent.ACTION_DELETE, Uri.parse("package:" + a.optString("package"))))) "Android is asking the user to confirm the uninstall." else "Couldn't start the uninstall."
-        "open_camera" -> when (a.optString("mode", "photo")) {
-            "video" -> if (start(ctx, Intent(android.provider.MediaStore.INTENT_ACTION_VIDEO_CAMERA))) "Opened the video camera." else "No camera app found."
-            "qr" -> if (start(ctx, Intent("com.google.zxing.client.android.SCAN")) || start(ctx, Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)))
-                "Opened the scanner/camera: point it at the QR code (most cameras read QR codes automatically)." else "No camera app found."
-            else -> if (start(ctx, Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))) "Opened the camera." else "No camera app found."
-        }
+        "blaze_camera" -> com.blaze.assistant.device.BlazeCamera.openFromTool(ctx, a.optString("mode"), a.optString("_chat").ifBlank { null }, a.optString("_asked").ifBlank { null })
+        "open_camera" -> openCamera(ctx, a.optString("mode", "photo"))
         else -> "Unknown tool"
     } }
+
+    /**
+     * v0.28.x camera-fix: the camera app first (STILL_IMAGE / VIDEO_CAMERA need no permission), then Blaze Camera; QR goes
+     * straight to Blaze Camera's Scan mode (ML Kit, it can act on the code). Every failure is logged with its real
+     * exception, and the reply says what really happened instead of a blanket "No camera app found."
+     */
+    private fun openCamera(ctx: Context, mode: String): String {
+        val cs = com.blaze.assistant.device.CameraSupport
+        if (!cs.hasCamera(ctx)) return "This phone has no camera."
+        fun tryStart(i: Intent, what: String): Throwable? = try { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); null }
+            catch (e: Exception) { cs.log("open_camera $what failed", e); e }
+        val blaze = com.blaze.assistant.device.BlazeCamera
+        return when (mode) {
+            "qr" -> if (blaze.open(ctx, com.blaze.assistant.device.CameraModes.Mode.SCAN, com.blaze.assistant.device.CameraModes.Origin.STANDALONE)) "Opened Blaze Camera's scanner: point it at the code." else "Couldn't open the scanner (it's in Blaze's log)."
+            "video" -> {
+                val e1 = tryStart(Intent(android.provider.MediaStore.INTENT_ACTION_VIDEO_CAMERA), "video camera") ?: return "Opened the video camera."
+                // ACTION_VIDEO_CAPTURE needs Blaze's CAMERA permission (declared by the QR library), so only try it when granted.
+                if (cs.granted(ctx) && tryStart(Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE), "video capture") == null) return "Opened the video camera."
+                if (e1 is SecurityException) "Android blocked the video camera (${e1.message?.take(80)}). Blaze's own camera takes photos only."
+                else if (!cs.granted(ctx)) "No video camera app answered directly, and Blaze's Camera permission is off. Turn it on in Settings → Apps → Blaze → Permissions."
+                else "This phone has no video camera app Blaze can open."
+            }
+            else -> {
+                tryStart(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA), "still camera") ?: return "Opened the camera."
+                if (blaze.open(ctx, com.blaze.assistant.device.CameraModes.Mode.PHOTO, com.blaze.assistant.device.CameraModes.Origin.STANDALONE)) "The phone's camera app didn't open, so I opened Blaze Camera (photos save to Pictures/Blaze)."
+                else "Couldn't open any camera (the reason is in Blaze's log)."
+            }
+        }
+    }
 
     private var nextNote = 500
 

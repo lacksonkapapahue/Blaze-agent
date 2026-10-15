@@ -29,6 +29,12 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <!-- CAMERA itself comes from zxing-android-embedded's manifest (merged); it is kept on purpose: Blaze Camera, the
+         Desktop pairing scanner and ACTION_IMAGE_CAPTURE all need it. No camera is required to install Blaze. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -69,6 +75,20 @@
             <action android:name="android.intent.action.SEND" />
             <data android:mimeType="text/plain" />
         </intent>
+        <!-- v0.28.x camera-fix: see camera apps on Android 11+ (package visibility), so the capture chain can tell
+             "no camera app" from "camera app refused". -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.VIDEO_CAMERA" />
+        </intent>
+        <intent>
+            <action android:name="android.media.action.VIDEO_CAPTURE" />
+        </intent>
     </queries>
 
     <application
@@ -89,6 +109,16 @@
             android:name="com.journeyapps.barcodescanner.CaptureActivity"
             android:screenOrientation="fullSensor"
             tools:replace="screenOrientation" />
+
+        <!-- v0.28.x Blaze Camera (CameraX): fallback for + → Camera and the multi-mode camera. Keeps running through
+             rotation (no restart on low-end phones). -->
+        <activity
+            android:name=".ui.CameraActivity"
+            android:exported="false"
+            android:label="Blaze Camera"
+            android:theme="@style/Theme.Blaze"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:screenOrientation="unspecified" />
 
         <activity
             android:name=".device.PermissionActivity"

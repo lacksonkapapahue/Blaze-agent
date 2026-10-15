@@ -13,8 +13,8 @@ android {
         applicationId = "com.blaze.assistant"
         minSdk = 26
         targetSdk = 34
-        versionCode = 101
-        versionName = "0.28.5"
+        versionCode = 102
+        versionName = "0.28.6"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
     // One permanent key kept with the project, so every new APK installs over the old one
@@ -222,7 +222,16 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")   // one mind: idle memory review (MindReviewWorker)
     // v0.26.3 one memory store: blaze.db (Desktop / CLI schema v1, FTS5) on a bundled modern SQLite, the same on every Android.
     implementation("androidx.sqlite:sqlite-bundled:2.5.2")
-    implementation("com.google.mlkit:text-recognition:16.0.1")   // v0.24.7 Magic Hand: circle to grab, on-device OCR (bundled model, no network)
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    // v0.28.x Blaze Camera: CameraX (works with no camera app, on low-end phones), ML Kit barcode scanning (bundled model,
+    // offline), and Google's document scanner (Play services; used only when present, else a framed photo).
+    val camerax = "1.3.4"
+    implementation("androidx.camera:camera-core:$camerax")
+    implementation("androidx.camera:camera-camera2:$camerax")
+    implementation("androidx.camera:camera-lifecycle:$camerax")
+    implementation("androidx.camera:camera-view:$camerax")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")   // v0.24.7 Magic Hand: circle to grab, on-device OCR (bundled model, no network)
     implementation("com.alphacephei:vosk-android:0.3.47") { exclude(group = "net.java.dev.jna") }
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     // v0.28.0 My voice: bzip2 for the downloaded PocketTTS model archive (pure Java; R8 keeps only the bzip2 reader).

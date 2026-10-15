@@ -368,7 +368,33 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         }
         // Typing or speaking while Blaze waits on a question answers it.
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
+        // v0.28.x Blaze Camera: "scan this document", "read this sign", "look at this", "escanea este documento"… open the
+        // camera in that mode at once (no model guess); the capture comes back into this chat as the answer (fromCamera).
+        if (attachments.isEmpty() && untrusted == null && cur.job?.isActive != true) {
+            CameraIntent.match(text)?.let { mode ->
+                val s = cur
+                if (com.blaze.assistant.device.BlazeCamera.open(app, mode, com.blaze.assistant.device.CameraModes.Origin.REQUEST, s.id, text.trim())) {
+                    com.blaze.assistant.device.Haptics.tick(app)
+                    s.selfTurn(text.trim(), com.blaze.assistant.device.CameraModes.openingLine(mode), byVoice, "\uD83D\uDCF7 Blaze Camera")
+                    return
+                }
+            }
+        }
         cur.send(text, byVoice, attachments, untrusted = untrusted)
+    }
+
+    /**
+     * v0.28.x Blaze Camera: a capture (photo / document / text read / scanned code) goes into the chat that asked for it as
+     * the next message, so Blaze answers about it in that turn's thread. Falls back to the chat on screen.
+     */
+    fun fromCamera(chatId: String?, text: String, attachments: List<Attachment>) {
+        scope.launch {
+            val s = chatId?.takeIf { it.isNotBlank() }?.let { sessions[it] ?: load(it) } ?: cur
+            sessions[s.id] = s
+            if (s !== cur) show(s)
+            if (s.busy) s.job?.join()
+            s.send(text, attachments = attachments)
+        }
     }
     fun retry(messageId: Long) = cur.retry(messageId)
     fun stop() = cur.stop()
@@ -2364,8 +2390,11 @@ When you finish, say what you did in one short sentence.
                     }
                 }
                 in com.blaze.assistant.phone.AndroidControl.names -> {
-                    add(Role.STEP, name.replace('_', ' ').replaceFirstChar { it.uppercase() })
-                    try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, args) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
+                    add(Role.STEP, if (name == "blaze_camera") "Opening Blaze Camera" else name.replace('_', ' ').replaceFirstChar { it.uppercase() })
+                    // v0.28.x: Blaze Camera brings its capture back into this chat, as an answer to the user's last message.
+                    val a2 = if (name != "blaze_camera") args else JSONObject(args.toString()).put("_chat", id)
+                        .put("_asked", msgs.lastOrNull { it.role == Role.USER }?.text.orEmpty())
+                    try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, a2) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 in SkillPacks.names -> {
                     add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; "save_workflow" -> "Saving a workflow"; else -> "Reading a skill file" })

@@ -468,8 +468,12 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
 /** What the + menu offers. [id] is handled by the screen. */
 data class PlusItem(val id: String, val label: String, val sub: String = "", val on: Boolean = false)
 
-fun plusItems(work: String, approval: String, model: String, hasClipImage: Boolean, inProject: Boolean = false): List<PlusItem> = buildList {
-    add(PlusItem("camera", "Camera", "Take a photo"))
+fun plusItems(work: String, approval: String, model: String, hasClipImage: Boolean, inProject: Boolean = false, hasCamera: Boolean = true): List<PlusItem> = buildList {
+    // v0.28.x: camera entries only when the phone really has a camera (PackageManager.FEATURE_CAMERA_ANY).
+    if (hasCamera) {
+        add(PlusItem("camera", "Camera", "Take a photo"))
+        add(PlusItem("blazecam", "Blaze Camera", "Ask, read text, translate, scan"))
+    }
     add(PlusItem("photos", "Photos", "Pick pictures"))
     add(PlusItem("files", "Files", "Photos, PDFs, text"))
     add(PlusItem("atfile", "@ files", "Mention a file from Blaze's home"))
