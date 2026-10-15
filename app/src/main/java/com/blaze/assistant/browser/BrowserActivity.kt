@@ -353,7 +353,7 @@ internal fun BrowserScreen(onClose: () -> Unit, onImport: () -> Unit, onPopOut: 
     }
 
     if (askOpen) PageAskSheet(title = tab?.title.orEmpty(), initial = askFirst,
-        readPage = { BrowserEngine.read(ctx, 6000) }, web = tab?.web?.takeIf { previewAsk == null },
+        readPage = { BrowserEngine.capture(ctx) }, web = tab?.web?.takeIf { previewAsk == null },
         onDismiss = { askOpen = false; askFirst = null }, preview = previewAsk)
 }
 

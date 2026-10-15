@@ -357,6 +357,20 @@ object BrowserEngine {
         return SecureInput.scrub(sb.toString())
     }
 
+    /**
+     * v0.27.1: the open page for "Ask Blaze about this page", as a person sees it (title, readable text, button / link /
+     * field labels, pictures and their descriptions). Field values are never read; secrets are scrubbed.
+     */
+    suspend fun capture(ctx: Context, max: Int = 30_000): PageAsk.Capture {
+        val t = withContext(Dispatchers.Main) { tab() } ?: return PageAsk.Capture.NONE
+        val r = try { js(t, ASK_JS) as? JSONObject } catch (_: Exception) { null }
+            ?: return PageAsk.Capture(t.title, t.url, "")
+        fun list(k: String) = r.optJSONArray(k)?.let { a -> (0 until a.length()).map { SecureInput.scrub(a.optString(it)) } } ?: emptyList()
+        return PageAsk.Capture(title = r.optString("title").ifBlank { t.title }, url = r.optString("url").ifBlank { t.url },
+            text = SecureInput.scrub(r.optString("text").take(max)), labels = list("labels"), images = r.optInt("imgs"),
+            alts = list("alts"), password = r.optBoolean("pw"))
+    }
+
     /** Things Blaze should know about the page: a dialog it answered, a renderer restart, a site that refuses passwords. */
     private fun notes(t: Tab, r: JSONObject?): String? {
         val out = ArrayList<String>()
@@ -481,6 +495,22 @@ object BrowserEngine {
         var all=[].slice.call(document.querySelectorAll(sel)).filter(bzVis);var best=null,bs=1e9;
         all.forEach(function(e){var l=bzLabel(e);if(!l)return;var i=l.indexOf(q);if(i<0)return;var s=l.length-q.length+i;if(s<bs){bs=s;best=e;}});return best;}
     """
+
+    private const val ASK_JS = """(function(){
+      function vis(e){var r=e.getBoundingClientRect();var s=getComputedStyle(e);return r.width>0&&r.height>0&&s.visibility!='hidden'&&s.display!='none';}
+      var labels=[];
+      [].slice.call(document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=tab]')).filter(vis).slice(0,150).forEach(function(e){
+        var tag=e.tagName.toLowerCase(), field=(tag=='input'||tag=='textarea'||tag=='select');
+        var l=(field?'':(e.innerText||''))||e.getAttribute('aria-label')||e.getAttribute('placeholder')||e.getAttribute('title')||e.getAttribute('name')||'';
+        l=l.replace(/\s+/g,' ').trim().slice(0,60); if(!l) return;
+        labels.push(field?'Field: '+l:l);
+      });
+      var imgs=[].slice.call(document.querySelectorAll('img,[role=img]')).filter(function(e){if(!vis(e))return false;var r=e.getBoundingClientRect();return r.width>=60&&r.height>=60;});
+      var alts=[]; imgs.forEach(function(e){var a=(e.getAttribute('alt')||e.getAttribute('aria-label')||e.getAttribute('title')||'').replace(/\s+/g,' ').trim(); if(a) alts.push(a.slice(0,100));});
+      var pw=[].slice.call(document.querySelectorAll('input[type=password]')).some(vis);
+      var text=(document.body?document.body.innerText:'').replace(/\n{3,}/g,'\n\n').trim();
+      return {title:document.title,url:location.href,text:text,labels:labels,imgs:imgs.length,alts:alts.slice(0,40),pw:pw};
+    })()"""
 
     private const val READ_JS = """(function(){
       function vis(e){var r=e.getBoundingClientRect();var s=getComputedStyle(e);return r.width>0&&r.height>0&&s.visibility!='hidden'&&s.display!='none';}
