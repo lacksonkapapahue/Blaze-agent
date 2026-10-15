@@ -141,6 +141,7 @@ object Memory {
 
     fun recall(query: String): String {
         if (Mind.ready) return Mind.run("memory_search", JSONObject().put("query", query))
+        if (MemoryIntent.meansAll(query)) return MemoryIntent.formatPlain(_facts.value)
         val q = words(query)
         val hits = _facts.value.filter { (words(it) intersect q).isNotEmpty() || it.contains(query, true) }
         return if (hits.isEmpty()) "Nothing saved about \"$query\"." else hits.take(25).joinToString("\n") { "- $it" }
@@ -156,7 +157,7 @@ object Memory {
                 .put("required", JSONArray(listOf("fact"))))),
         JSONObject().put("type", "function").put("function", JSONObject()
             .put("name", "recall_memory")
-            .put("description", "Search everything you've saved about the user (same as memory_search).")
+            .put("description", "Search everything you've saved about the user (same as memory_search). query=all lists every saved line.")
             .put("parameters", JSONObject().put("type", "object")
                 .put("properties", JSONObject().put("query", JSONObject().put("type", "string")))
                 .put("required", JSONArray(listOf("query"))))),

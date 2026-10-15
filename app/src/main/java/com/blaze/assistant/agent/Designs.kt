@@ -37,7 +37,49 @@ object Designs {
     }
 
     /** What a call did: [text] goes back to the model; [open] = the file the Design view should show. */
-    data class Outcome(val text: String, val open: String? = null, val ok: Boolean = open != null)
+    data class Outcome(val text: String, val open: String? = null, val ok: Boolean = open != null, val kind: String? = null)
+
+    // ---------------- honesty (v0.27.x) ----------------
+
+    /**
+     * The kinds of design shown this turn (create / update / open / undo). The agent clears it at the start of a turn
+     * and grounds the final reply in it ([groundReply]): a flat diagram is never described as a 3D model.
+     */
+    val touched = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    fun is3d(kind: String?): Boolean = kind.orEmpty().trim().lowercase().replace("-", "") == "3d"
+
+    /** What a kind is, in words: "3D model", "flat 2D diagram", "flat 2D page". */
+    fun kindLabel(kind: String?): String {
+        val k = kind.orEmpty().trim().lowercase()
+        if (is3d(k)) return "3D model"
+        val noun = when (k) {
+            "diagram" -> "diagram"; "chart" -> "chart"; "svg" -> "drawing"; "site" -> "website"; "ui" -> "app screen mockup"
+            "poster" -> "poster"; "slides" -> "slide deck"; "floorplan" -> "floor plan"; "mockup" -> "mockup"; "game" -> "game"
+            else -> "page"
+        }
+        return "flat 2D $noun"
+    }
+
+    /** The line every non-3D result carries, so the model doesn't parrot 3D boilerplate. */
+    fun flatNote(kind: String?): String = if (is3d(kind)) "" else
+        " It is a ${kindLabel(kind)}, not 3D: describe it as that, and don't mention orbiting, zooming, 3D or a fallback drawing."
+
+    private val threeDTalk = Regex("""(?i)\b(3-?d|three\.?js|webgl|orbit\w*|zoom with two|pinch|rotate the model|spin the model|native drawing|falls? back to a simple)\b""")
+
+    /**
+     * v0.27.x: the final reply may only describe what the design tool produced. When designs were shown this turn and
+     * none is 3D, sentences about 3D, orbiting, zooming or the 3D fallback are dropped (and a plain line given if
+     * nothing is left). [kinds] empty = no design this turn: the reply is returned as it is.
+     */
+    fun groundReply(reply: String, kinds: List<String>): String {
+        if (kinds.isEmpty() || kinds.any { is3d(it) }) return reply
+        val parts = reply.split(Regex("""(?<=[.!?…])\s+""")).map { it.trim() }.filter { it.isNotEmpty() }
+        val keep = parts.filterNot { threeDTalk.containsMatchIn(it) }
+        if (keep.size == parts.size) return reply
+        val rest = keep.joinToString(" ").replace(Regex("""(?i)\bthe model\b"""), "the design").trim()
+        return if (rest.length < 12) "It's open in Design as a ${kindLabel(kinds.last())}." else rest
+    }
 
     @Volatile var rootOverride: File? = null
     /** Reads the 3D starter (the three-d-design skill's mockup.html). Set by the agent from assets; tests read the file. */
@@ -321,11 +363,14 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
         else -> "Checking designs"
     }
 
-    fun run(args: JSONObject, now: Long = System.currentTimeMillis()): Outcome = withErrorNote(args, runInner(args, now))
+    fun run(args: JSONObject, now: Long = System.currentTimeMillis()): Outcome =
+        withErrorNote(args, runInner(args, now)).also { o -> if (o.open != null && o.kind != null) touched.add(o.kind) }
 
     /** v0.23.3: create / update / open / read results mention ~/designs/.last_error.txt when the Design view left one. */
     private fun withErrorNote(args: JSONObject, o: Outcome): Outcome {
         if (args.optString("action").lowercase() !in setOf("create", "update", "edit", "open", "read")) return o
+        // v0.27.x: the three.js render error (and its native-drawing fallback) only concerns 3D designs.
+        if (o.kind != null && !is3d(o.kind)) return o
         val note = lastErrorNote() ?: return o
         return o.copy(text = o.text + note)
     }
@@ -336,12 +381,25 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
             "update", "edit" -> update(args, now)
             "read" -> target(args)?.let { f -> Outcome("Current design ${f.absolutePath} (${current()?.kind ?: "page"}):\n" + f.readText().let { if (it.length > 24_000) it.take(24_000) + "\n…(cut)" else it }, null, true) }
                 ?: Outcome("Error: there's no current design yet. Use action=create.")
-            "open" -> target(args)?.let { f -> touch(f, now); Outcome("Opened ${f.absolutePath} in Design. The user can tap Exit to come back to the chat.", f.absolutePath) }
+            "open" -> target(args)?.let { f -> openOutcome(f, now) }
                 ?: Outcome("Error: there's no current design yet. Use action=create.")
             "undo" -> undo(args, now)
             else -> Outcome(list(), null, true)
         }
     } catch (e: Exception) { Outcome("Error: ${e.message ?: e.javaClass.simpleName}") }
+
+    private fun openOutcome(f: File, now: Long): Outcome {
+        val before = current()?.takeIf { it.path == f.absolutePath }
+        touch(f, now)
+        val cur = current()?.takeIf { it.path == f.absolutePath }
+        val kind = cur?.kind ?: if (specFrom(f.readText()) != null) "3d" else "page"
+        val title = cur?.title?.ifBlank { null } ?: f.parentFile?.name ?: "design"
+        val age = before?.at?.let { now - it }?.takeIf { it > 30 * 60_000L }
+        return Outcome("Opened \u201c$title\u201d (${kindLabel(kind)}) from ${f.absolutePath} in Design." +
+            (if (age != null) " It was made in an earlier conversation, not this turn." else "") +
+            (if (is3d(kind)) " The user can orbit with one finger and zoom with two." else flatNote(kind)) +
+            " The user can tap Exit to come back to the chat.", f.absolutePath, kind = kind)
+    }
 
     private fun target(args: JSONObject): File? {
         val p = args.optString("path").trim()
@@ -379,8 +437,9 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
         val f = File(dir, "index.html"); f.writeText(html)
         setCurrent(Current(f.absolutePath, kind, title, 1, now))
         val count = if (kind == "3d") " with ${specFrom(html)?.optJSONArray("parts")?.length() ?: 0} parts" else ""
-        return Outcome("Created the $kind design \u201c$title\u201d$count at ${f.absolutePath} and opened it in Design (orbit with one finger, zoom with two). " +
-            "It's the current design: follow-on changes go through design action=update." + problems.joinToString("") { "\nNote: $it" }, f.absolutePath)
+        return Outcome("Created \u201c$title\u201d, a ${kindLabel(kind)}$count, at ${f.absolutePath} and opened it in Design" +
+            (if (kind == "3d") " (the user can orbit with one finger and zoom with two)." else "." + flatNote(kind)) +
+            " It's the current design: follow-on changes go through design action=update." + problems.joinToString("") { "\nNote: $it" }, f.absolutePath, kind = kind)
     }
 
     private fun update(args: JSONObject, now: Long): Outcome {
@@ -418,7 +477,8 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
         File(f.parentFile, ".v${v - KEEP_VERSIONS}.html").delete()
         f.writeText(html)
         setCurrent(cur.copy(version = v + 1, at = now))
-        return Outcome("Updated \u201c${cur.title}\u201d ($summary), version ${v + 1}, and showed it in Design." + problems.joinToString("") { "\nNote: $it" }, f.absolutePath)
+        return Outcome("Updated \u201c${cur.title}\u201d, a ${kindLabel(cur.kind)} ($summary), version ${v + 1}, and showed it in Design." + flatNote(cur.kind) +
+            problems.joinToString("") { "\nNote: $it" }, f.absolutePath, kind = cur.kind)
     }
 
     private fun undo(args: JSONObject, now: Long): Outcome {
@@ -428,7 +488,7 @@ setTimeout(function () { if (window.__blazeScene) return; var el = document.getE
         if (cur.version <= 1 || !prev.isFile) return Outcome("Error: there's no earlier version to go back to.")
         f.writeText(prev.readText()); prev.delete()
         setCurrent(cur.copy(version = cur.version - 1, at = now))
-        return Outcome("Went back to version ${cur.version - 1} of \u201c${cur.title}\u201d and showed it in Design.", f.absolutePath)
+        return Outcome("Went back to version ${cur.version - 1} of \u201c${cur.title}\u201d (${kindLabel(cur.kind)}) and showed it in Design." + flatNote(cur.kind), f.absolutePath, kind = cur.kind)
     }
 
     fun list(): String {

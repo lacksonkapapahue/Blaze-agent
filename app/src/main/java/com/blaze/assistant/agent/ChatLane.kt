@@ -28,6 +28,8 @@ object ChatLane {
         val t = text.trim()
         if (t.isEmpty() || t.length > 300 || t.startsWith("[") || t.startsWith("/")) return false
         if (ToolRouter.guess(t).isNotEmpty()) return false
+        // v0.27.x: "how do I get / install / enable X" goes to the tool lane, so Blaze can offer to do it (AnswerStyle).
+        if (AnswerStyle.offerVerb(t) != null) return false
         val small = smalltalk.containsMatchIn(t)
         // A short reply to a question Blaze just asked is probably part of a task ("yes", "the second one").
         if (!small && lastAssistant.trim().endsWith("?") && t.split(Regex("\\s+")).size < 8) return false
