@@ -1,5 +1,8 @@
 package com.blaze.assistant.ui
 
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -19,6 +22,19 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.SportsSoccer
+import androidx.compose.material.icons.rounded.ShowChart
+import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -151,6 +167,47 @@ object HomeLook {
         listOf(Color(0xFFFFF9DB), Color(0xFFFFE8CC)) to listOf(Color(0xFF332B10), Color(0xFF3A2414)))
 }
 
+/**
+ * v0.29.3 glass look. Over the sky (the default) or a photo, cards turn to frosted glass: a translucent fill that is
+ * brighter at the top, a bright hairline edge, and dark ink so text reads on a light sky in any app theme.
+ */
+data class HomeGlassStyle(val fill: Brush, val edge: Color, val chip: Color)
+val LocalGlass = staticCompositionLocalOf<HomeGlassStyle?> { null }
+
+object HomeGlass {
+    fun on(kind: String) = kind == "sky" || kind == "image"
+    val light = HomeGlassStyle(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.66f), Color.White.copy(alpha = 0.40f))),
+        Color.White.copy(alpha = 0.80f), Color.White.copy(alpha = 0.55f))
+    val dark = HomeGlassStyle(Brush.verticalGradient(listOf(Color(0xFF2A2A30).copy(alpha = 0.62f), Color(0xFF18181C).copy(alpha = 0.48f))),
+        Color.White.copy(alpha = 0.20f), Color(0xFF2A2A30).copy(alpha = 0.60f))
+    /** The sky is light whatever the app theme, so the board uses light ink on it; a photo follows the theme. */
+    fun lightInk(kind: String, dark: Boolean) = kind == "sky" || (kind == "image" && !dark)
+    val skyTop = Color(0xFF6CB8F2); val skyMid = Color(0xFFA9D8FB); val skyLow = Color(0xFFDDF0FF); val skyHorizon = Color(0xFFF4FAFF)
+}
+
+/** A card / button surface: glass over the sky or a photo, the kit's raised paper otherwise. */
+fun Modifier.homeSurface(c: BlazeColors, g: HomeGlassStyle?, shape: androidx.compose.ui.graphics.Shape): Modifier =
+    if (g != null) clip(shape).background(g.fill).border(1.dp, g.edge, shape) else clip(shape).background(c.raised).border(1.dp, c.hair2, shape)
+
+/** A soft daytime sky: blue to pale horizon, a warm sun glow, and a few cloud puffs. Drawn, no image to load. */
+fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSky() {
+    val w = size.width; val h = size.height
+    drawRect(Brush.verticalGradient(0f to HomeGlass.skyTop, 0.35f to HomeGlass.skyMid, 0.75f to HomeGlass.skyLow, 1f to HomeGlass.skyHorizon))
+    drawCircle(Brush.radialGradient(listOf(Color(0x66FFF6D6), Color(0x00FFF6D6)), center = Offset(w * 0.85f, h * 0.06f), radius = w * 0.75f),
+        radius = w * 0.75f, center = Offset(w * 0.85f, h * 0.06f))
+    fun cloud(cx: Float, cy: Float, r: Float, a: Float) {
+        listOf(Triple(0f, 0f, 1f), Triple(-0.9f, 0.25f, 0.7f), Triple(0.95f, 0.2f, 0.75f), Triple(-0.35f, -0.35f, 0.75f), Triple(0.4f, -0.3f, 0.8f)).forEach { (dx, dy, k) ->
+            val c = Offset(cx + dx * r, cy + dy * r); val rr = r * k * 1.25f
+            drawCircle(Brush.radialGradient(listOf(Color.White.copy(alpha = a), Color.White.copy(alpha = 0f)), center = c, radius = rr), radius = rr, center = c)
+        }
+    }
+    cloud(w * 0.22f, h * 0.16f, w * 0.13f, 0.75f)
+    cloud(w * 0.78f, h * 0.30f, w * 0.10f, 0.6f)
+    cloud(w * 0.35f, h * 0.52f, w * 0.16f, 0.5f)
+    cloud(w * 0.85f, h * 0.70f, w * 0.12f, 0.45f)
+    cloud(w * 0.15f, h * 0.86f, w * 0.14f, 0.55f)
+}
+
 // ---------------------------------------------------------------- the screen
 
 /**
@@ -173,6 +230,7 @@ fun HomePane(onAsk: (String) -> Unit) {
     var customise by rememberSaveable { mutableStateOf(false) }
     var create by rememberSaveable { mutableStateOf(false) }
     var cityFor by remember { mutableStateOf<String?>(null) }
+    var glassUrl by rememberSaveable { mutableStateOf<String?>(null) }
     var askChange by remember { mutableStateOf<Widget?>(null) }
     var toast by remember { mutableStateOf("") }
     var look by remember { mutableIntStateOf(0) }   // bumps when the look changes
@@ -189,13 +247,18 @@ fun HomePane(onAsk: (String) -> Unit) {
         owner.lifecycle.addObserver(obs); onDispose { owner.lifecycle.removeObserver(obs) }
     }
 
-    val accent = remember(look, base.dark) { HomeLook.accent(HomeBoard.accent, base.dark) }
-    val c = if (accent != null) base.copy(accent = accent) else base
+    val kind = HomeBoard.background
+    val lightInk = HomeGlass.lightInk(kind, base.dark)
+    val ink0 = if (HomeGlass.on(kind)) (if (lightInk) LightColors else DarkColors) else base
+    val accent = remember(look, ink0.dark) { HomeLook.accent(HomeBoard.accent, ink0.dark) }
+    val c = if (accent != null) ink0.copy(accent = accent) else ink0
+    val glass = if (HomeGlass.on(kind)) (if (c.dark) HomeGlass.dark else HomeGlass.light) else null
     val bgImage = rememberHomeBackground(look)
 
     fun open(url: String, w: Widget?) {
         if (w != null) { HomeBoard.tapped(w.id); if (w.type == WidgetTypes.CREATORS) HomeBoard.markSeen(w.id) }
-        openHomeLink(ctx, url)
+        // v0.29.3: web links open in the glass window on Home; app, calendar and other links go where they always did.
+        if (url.startsWith("https://") || url.startsWith("http://")) glassUrl = url else openHomeLink(ctx, url)
     }
 
     fun action(w: Widget, a: String) {
@@ -212,10 +275,11 @@ fun HomePane(onAsk: (String) -> Unit) {
         }
     }
 
-    CompositionLocalProvider(LocalBlaze provides c) {
+    CompositionLocalProvider(LocalBlaze provides c, LocalGlass provides glass) {
         Box(Modifier.fillMaxSize().homeBackground(c, HomeBoard.background, HomeBoard.bgColor, look)) {
             if (bgImage != null && HomeBoard.background == "image") {
-                Image(bgImage, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (c.dark) 0.35f else 0.45f })
+                // v0.29.3: the photo shows in full now; the glass cards keep text readable over it.
+                Image(bgImage, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (c.dark) 0.9f else 1f })
             }
             if (!onboarded) {
                 InterestPicker(onDone = { chosen, subs, typed ->
@@ -241,6 +305,7 @@ fun HomePane(onAsk: (String) -> Unit) {
                 }
             }
             if (toast.isNotBlank()) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 18.dp).navigationBarsPadding()) { HomeToast(toast) }
+            glassUrl?.let { u -> GlassWindow(u, onClose = { glassUrl = null }, onOpenOutside = { openHomeLink(ctx, it) }) }
 
             menuFor?.let { id ->
                 val w = widgets.firstOrNull { it.id == id }
@@ -357,6 +422,7 @@ private fun rememberHomeBackground(look: Int): ImageBitmap? {
 }
 
 private fun Modifier.homeBackground(c: BlazeColors, kind: String, idx: Int, @Suppress("UNUSED_PARAMETER") look: Int): Modifier = when (kind) {
+    "sky", "image" -> drawBehind { drawSky() }   // the photo draws over the sky; the sky shows while it loads
     "gradient" -> HomeLook.gradients.getOrNull(idx)?.let { (l, d) -> background(Brush.verticalGradient(if (c.dark) d else l)) } ?: background(c.paper)
     else -> HomeLook.solids.getOrNull(idx)?.let { (l, d) -> val col = if (c.dark) d else l; background(if (col == Color.Unspecified) c.paper else col) } ?: background(c.paper)
 }
@@ -471,7 +537,7 @@ private fun RoundIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, des
     val c = LocalBlaze.current
     Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClickLabel = desc, role = Role.Button, onClick = onClick).semantics { contentDescription = desc },
         contentAlignment = Alignment.Center) {
-        Box(Modifier.size(size.dp).clip(CircleShape).background(if (filled) c.accent else c.raised).border(1.dp, if (filled) c.accent else c.hair2, CircleShape),
+        Box(Modifier.size(size.dp).then(if (filled) Modifier.clip(CircleShape).background(c.accent).border(1.dp, c.accent, CircleShape) else Modifier.homeSurface(c, LocalGlass.current, CircleShape)),
             contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = null, tint = if (filled) c.onAccent else c.ink, modifier = Modifier.size(20.dp))
         }
@@ -507,7 +573,7 @@ fun StackItem(
                 StackState.peeks(s.widgets.size).asReversed().forEach { p ->
                     Box(Modifier.matchParentSize().graphicsLayer {
                         translationY = p.offsetDp.dp.toPx() * 1.6f; scaleX = p.scale; alpha = p.alpha
-                    }.clip(BlazeShapes.large).background(c.raised).border(1.dp, c.hair2, BlazeShapes.large))
+                    }.homeSurface(c, LocalGlass.current, BlazeShapes.large))
                 }
             }
             WidgetCard(s.main, data[s.main.id], s.main.id in loading, offline, now, grip,
@@ -527,7 +593,7 @@ fun StackItem(
                         onMenu = { onMenu(w) }, onLine = { onLine(w, it) }, onAction = { onAction(w, it) }, onMove = onMove, onRemove = onRemove)
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Box(Modifier.clip(BlazeShapes.pill).background(c.raised).border(1.dp, c.hair2, BlazeShapes.pill)
+                    Box(Modifier.homeSurface(c, LocalGlass.current, BlazeShapes.pill)
                         .clickable(onClickLabel = "Fold the ${s.category} stack", onClick = onToggle).heightIn(min = 40.dp).padding(horizontal = 16.dp, vertical = 9.dp),
                         contentAlignment = Alignment.Center) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -543,10 +609,23 @@ fun StackItem(
 }
 
 /** A type's small mark colour (on the accent). */
-private fun typeGlyph(type: String): String = when (type) {
-    WidgetTypes.WEATHER -> "\u2600"; WidgetTypes.NEWS -> "\u25A4"; WidgetTypes.CREATORS -> "\u25B6"; WidgetTypes.SPORTS -> "\u26BD"
-    WidgetTypes.PRICES -> "\u2197"; WidgetTypes.CALENDAR -> "\u25F7"; WidgetTypes.ROUTINES -> "\u21BB"; WidgetTypes.DEADLINES -> "\u2691"
-    WidgetTypes.GITHUB -> "\u2325"; WidgetTypes.APPS -> "\u25A6"; WidgetTypes.INTO -> "\u2726"; else -> "\u270E"
+/** v0.29.3: real rounded icons (the 0.29.0 glyphs looked like keyboard emoji). */
+fun typeIcon(type: String): androidx.compose.ui.graphics.vector.ImageVector = when (type) {
+    WidgetTypes.WEATHER -> Icons.Rounded.WbSunny; WidgetTypes.NEWS -> Icons.Rounded.Newspaper; WidgetTypes.CREATORS -> Icons.Rounded.SmartDisplay
+    WidgetTypes.SPORTS -> Icons.Rounded.SportsSoccer; WidgetTypes.PRICES -> Icons.Rounded.ShowChart; WidgetTypes.CALENDAR -> Icons.Rounded.Event
+    WidgetTypes.ROUTINES -> Icons.Rounded.Autorenew; WidgetTypes.DEADLINES -> Icons.Rounded.Flag; WidgetTypes.GITHUB -> Icons.Rounded.Code
+    WidgetTypes.APPS -> Icons.Rounded.Apps; WidgetTypes.INTO -> Icons.Rounded.AutoAwesome; else -> Icons.Rounded.Edit
+}
+
+/** The icon tile at the top of a card: a small rounded square in a soft accent gradient with a crisp white icon. */
+@Composable
+fun TypeTile(type: String, size: Int = 28) {
+    val c = LocalBlaze.current
+    Box(Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.36f).dp))
+        .background(Brush.linearGradient(listOf(c.accent.copy(alpha = 0.95f), c.accent.copy(alpha = 0.70f))))
+        .border(1.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape((size * 0.36f).dp)), contentAlignment = Alignment.Center) {
+        Icon(typeIcon(type), contentDescription = null, tint = Color.White, modifier = Modifier.size((size * 0.58f).dp))
+    }
 }
 
 /** One widget card. */
@@ -566,7 +645,7 @@ fun WidgetCard(
         if (d != null) { if (d.value.isNotBlank()) append(", ").append(d.value); if (d.change.isNotBlank()) append(", ").append(d.change); if (d.error.isNotBlank()) append(". ").append(d.error) }
         if (stackCount > 1) append(". Stack of $stackCount, ").append(if (stackOpen) "expanded" else "collapsed")
     }
-    Column(Modifier.fillMaxWidth().clip(BlazeShapes.large).background(c.raised).border(1.dp, c.hair2, BlazeShapes.large)
+    Column(Modifier.fillMaxWidth().homeSurface(c, LocalGlass.current, BlazeShapes.large)
         .combinedClickable(onClickLabel = if (stackCount > 1) (if (stackOpen) "Fold the stack" else "Expand the stack") else "Open",
             onLongClickLabel = "Widget options", onClick = onClick, onLongClick = onMenu)
         .semantics {
@@ -579,10 +658,8 @@ fun WidgetCard(
         }
         .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(24.dp).clip(CircleShape).background(c.accentSoft), contentAlignment = Alignment.Center) {
-                Text(typeGlyph(w.type), style = TextStyle(fontSize = 12.sp, color = c.accent))
-            }
-            Spacer(Modifier.width(8.dp))
+            TypeTile(w.type)
+            Spacer(Modifier.width(10.dp))
             Text(w.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp, color = c.ink))
             if (stackCount > 1 && !stackOpen) { Tag("+${stackCount - 1}", on = true); Spacer(Modifier.width(2.dp)) }
@@ -654,12 +731,30 @@ private fun WidgetBody(w: Widget, d: WidgetData, size: String, onLine: (WidgetLi
     val n = WidgetSize.lines(size).let { if (size == WidgetSize.S) 0 else it }
     if (n > 0 && d.lines.isNotEmpty()) {
         Spacer(Modifier.height(6.dp))
+        val hero = d.lines.firstOrNull()?.takeIf { it.image.isNotBlank() && size != WidgetSize.S }
+        if (hero != null) {
+            val img = rememberHomeImage(hero.image)
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(BlazeShapes.medium).background(c.faint)
+                .border(1.dp, Color.White.copy(alpha = 0.35f), BlazeShapes.medium)
+                .clickable(onClickLabel = "Preview ${hero.title}") { onLine(hero) }) {
+                if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+            Spacer(Modifier.height(4.dp))
+        }
         d.lines.take(n).forEachIndexed { i, l ->
             Row(Modifier.fillMaxWidth().clip(BlazeShapes.small).let { if (l.url.isNotBlank()) it.clickable(onClickLabel = "Open ${l.title}") { onLine(l) } else it }
                 .let { if (i > 0) it.hairlineTopInset(c.hair, 0.dp) else it }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(l.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 13.5.sp, lineHeight = 18.sp, color = c.ink))
                     if (l.sub.isNotBlank()) Text(l.sub, maxLines = 1, overflow = TextOverflow.Ellipsis, style = TextStyle(fontFamily = Type.Sans, fontSize = 11.5.sp, color = c.sub))
+                }
+                if (l.image.isNotBlank() && l !== hero) {
+                    Spacer(Modifier.width(10.dp))
+                    val img = rememberHomeImage(l.image)
+                    Box(Modifier.size(width = 68.dp, height = 50.dp).clip(BlazeShapes.small).background(c.faint)
+                        .border(1.dp, Color.White.copy(alpha = 0.35f), BlazeShapes.small)) {
+                        if (img != null) Image(img, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    }
                 }
                 if (l.note.isNotBlank()) {
                     Spacer(Modifier.width(8.dp))
@@ -725,12 +820,13 @@ fun CustomiseSheet(
             KitButton("Done", Btn.LINE, onClick = onClose)
         }
         GroupHead("Background")
-        Segmented(listOf("plain" to "Solid", "gradient" to "Gradient", "image" to "Image"), bg) { bg = it; onBackground(it) }
+        Segmented(listOf("sky" to "Sky", "plain" to "Solid", "gradient" to "Gradient", "image" to "Image"), bg) { bg = it; onBackground(it) }
         Spacer(Modifier.height(10.dp))
         when (bg) {
+            "sky" -> Label("A light daytime sky with glass cards. Pick Image to use your own photo.", size = 11.sp)
             "image" -> Row(verticalAlignment = Alignment.CenterVertically) {
                 if (imagePicker != null) imagePicker() else KitButton("Pick image", Btn.LINE, onClick = onPickImage)
-                Spacer(Modifier.width(10.dp)); Label("Shown softly behind your cards.", size = 11.sp)
+                Spacer(Modifier.width(10.dp)); Label("Your photo behind glass cards.", size = 11.sp)
             }
             "gradient" -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 HomeLook.gradients.forEachIndexed { i, (l, d) -> Swatch(Brush.linearGradient(if (c.dark) d else l), bgc == i, "Gradient ${i + 1}") { bgc = i; onBgColor(i) } }
@@ -829,7 +925,7 @@ fun CreateWidgetSheet(onAdd: (String) -> Unit, onClose: () -> Unit, initial: Str
 @Composable
 fun HomeChip(label: String, on: Boolean, onClick: () -> Unit) {
     val c = LocalBlaze.current
-    Box(Modifier.clip(BlazeShapes.pill).background(if (on) c.ink else c.raised).border(1.dp, if (on) c.ink else c.hair2, BlazeShapes.pill)
+    Box(Modifier.then(if (on) Modifier.clip(BlazeShapes.pill).background(c.ink).border(1.dp, c.ink, BlazeShapes.pill) else Modifier.homeSurface(c, LocalGlass.current, BlazeShapes.pill))
         .clickable(onClickLabel = label, role = Role.Checkbox, onClick = onClick).semantics { selected = on }
         .heightIn(min = 40.dp).padding(horizontal = 14.dp, vertical = 9.dp), contentAlignment = Alignment.Center) {
         Text(label, style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 13.5.sp, color = if (on) c.paper else c.ink))
@@ -866,7 +962,7 @@ fun InterestPicker(onDone: (Set<String>, Set<String>, String) -> Unit, onSkip: (
             BlazeTextField(typed, { typed = it }, "e.g. Kaizer Chiefs, Veritasium, Formula 1")
             Spacer(Modifier.height(16.dp))
         }
-        Row(Modifier.fillMaxWidth().background(c.paper).padding(horizontal = 18.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().then(LocalGlass.current?.let { Modifier.background(it.fill) } ?: Modifier.background(c.paper)).padding(horizontal = 18.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             KitButton("Skip", Btn.GHOST, onClick = onSkip)
             Spacer(Modifier.weight(1f))
             KitButton("Set up my board", Btn.ACCENT, enabled = chosen.isNotEmpty() || subs.isNotEmpty() || typed.isNotBlank()) { onDone(chosen, subs, typed) }

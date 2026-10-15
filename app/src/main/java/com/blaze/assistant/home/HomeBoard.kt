@@ -55,7 +55,7 @@ object HomeBoard {
     var refreshHours: Int get() = Settings.str("home_refresh_hours", HomeSchedule.DEFAULT_HOURS.toString()).toIntOrNull() ?: HomeSchedule.DEFAULT_HOURS
         set(v) { Settings.setStr("home_refresh_hours", HomeSchedule.plan(v, false).hours.toString()); schedule() }
     /** "plain" | "gradient" | "image". */
-    var background: String get() = Settings.str("home_bg", "plain"); set(v) = Settings.setStr("home_bg", v)
+    var background: String get() = Settings.str("home_bg", "sky"); set(v) = Settings.setStr("home_bg", v)
     /** Index into the swatch list (solid / gradient colour). */
     var bgColor: Int get() = Settings.str("home_bg_color", "0").toIntOrNull() ?: 0; set(v) = Settings.setStr("home_bg_color", v.toString())
     /** Accent theme name ("" = Blaze's own). */

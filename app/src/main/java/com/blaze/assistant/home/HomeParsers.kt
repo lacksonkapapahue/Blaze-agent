@@ -10,7 +10,7 @@ import java.util.TimeZone
  * are tested on fixture data (HomeParsersTest). The fetching lives in [HomeSources].
  */
 object Rss {
-    data class Entry(val title: String, val link: String, val source: String, val published: Long, val videoId: String = "")
+    data class Entry(val title: String, val link: String, val source: String, val published: Long, val videoId: String = "", val image: String = "")
 
     private val itemRe = Regex("(?is)<(item|entry)\\b[^>]*>(.*?)</\\1>")
 
@@ -21,8 +21,47 @@ object Rss {
         val link = tag(b, "link").let { text(it) }.ifBlank { attr(b, "link", "href") }
         val source = text(tag(b, "source")).ifBlank { text(tag(tag(b, "author"), "name")) }
         val date = tag(b, "pubDate").ifBlank { tag(b, "published") }.ifBlank { tag(b, "updated") }.ifBlank { tag(b, "dc:date") }
-        Entry(cleanTitle(title, source), link, source, Dates.parse(text(date)), text(tag(b, "yt:videoId")))
+        val vid = text(tag(b, "yt:videoId"))
+        val source2 = source.ifBlank { text(tag(b, "News:Source")) }
+        Entry(cleanTitle(title, source2), link, source2, Dates.parse(text(date)), vid, image(b, vid))
     }.toList()
+
+    /**
+     * v0.29.3: the picture for one feed item: media:thumbnail / media:content, an image enclosure, Bing's News:Image, an
+     * <img> in the description, or a YouTube thumbnail. Always https (http thumbnails are rewritten, others dropped).
+     */
+    fun image(b: String, videoId: String = ""): String {
+        if (videoId.isNotBlank()) return "https://i.ytimg.com/vi/$videoId/mqdefault.jpg"
+        val raw = attr(b, "media:thumbnail", "url").ifBlank { attr(b, "media:content", "url") }
+            .ifBlank { Regex("(?is)<enclosure\\b[^>]*type=\"image[^>]*>").find(b)?.value?.let { Regex("(?i)url\\s*=\\s*\"([^\"]+)\"").find(it)?.groupValues?.get(1) }.orEmpty() }
+            .ifBlank { text(tag(b, "News:Image")) }
+            .ifBlank { Regex("(?i)<img[^>]+src=[\"']([^\"']+)").find(unescape(Regex("(?s)<!\\[CDATA\\[(.*?)]]>").replace(tag(b, "description")) { it.groupValues[1] }))?.groupValues?.get(1).orEmpty() }
+        val u = unescape(raw.trim())
+        return when {
+            u.contains("bing.com/th?") -> "https://" + u.substringAfter("://") + "&w=480&h=270&c=7"
+            u.startsWith("https://") -> u
+            u.startsWith("http://") -> "https://" + u.removePrefix("http://")
+            u.startsWith("//") -> "https:$u"
+            else -> ""
+        }
+    }
+
+    /** Words of a headline for matching the same story across two feeds. */
+    fun words(t: String): Set<String> = t.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length > 2 }.toSet()
+
+    /** Gives entries without a picture the picture of the same story in [other] (at least 60% of the shorter headline's words shared). */
+    fun borrowImages(entries: List<Entry>, other: List<Entry>): List<Entry> {
+        val pics = other.filter { it.image.isNotBlank() }.map { words(it.title) to it.image }
+        if (pics.isEmpty()) return entries
+        return entries.map { e ->
+            if (e.image.isNotBlank()) e else {
+                val w = words(e.title)
+                val best = pics.maxByOrNull { (o, _) -> (w intersect o).size.toDouble() / maxOf(1, minOf(w.size, o.size)) }
+                val score = best?.let { (o, _) -> (w intersect o).size.toDouble() / maxOf(1, minOf(w.size, o.size)) } ?: 0.0
+                if (best != null && score >= 0.6 && w.size >= 3) e.copy(image = best.second) else e
+            }
+        }
+    }
 
     /** The feed's own title (channel / feed name). */
     fun feedTitle(xml: String): String {
@@ -68,7 +107,7 @@ object Rss {
             value = if (video && fresh > 0) (if (fresh == 1) "1 new video" else "$fresh new videos") else "",
             lines = entries.map { e ->
                 WidgetLine(e.title, listOf(e.source.takeIf { !video }.orEmpty(), Dates.relative(e.published, now)).filter { it.isNotBlank() }.joinToString(" · "),
-                    e.link, if (video && seenAfter > 0 && e.published > seenAfter) "New" else "")
+                    e.link, if (video && seenAfter > 0 && e.published > seenAfter) "New" else "", e.image)
             })
     }
 }
