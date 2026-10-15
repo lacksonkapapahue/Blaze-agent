@@ -2,6 +2,19 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.0: Gallery albums, music and videos
+
+- Gallery has a pill switcher like the rest of Blaze: **All · Albums · Images · Music · Videos**.
+- Songs and videos Blaze downloads to shared storage (Music/Blaze, Movies/Blaze, Blaze/Music, Blaze/Videos, Download/Blaze) show up next to what Blaze made, with real cover art or a video frame and the length on the tile. Songs with no cover get a coloured tile with a note instead of a grey box. New downloads appear while the Gallery is open.
+- **Albums**: automatic ones (Generated images, Music, Videos, Downloads, plus Screenshots and Camera after you tap "Show Screenshots and Camera") and your own: create, rename, delete (the files stay), add items, move items between albums, remove from an album. Saved on the phone (`gallery_albums.json`).
+- **Viewer**: swipe between items, pinch or double-tap to zoom, tap to hide the controls. Songs play with cover art, a seek bar and pause; videos play inline with the system controls. Share, Rename (keeps the extension), Info (size, date, resolution, length, folder), Set as wallpaper (home, lock or both) and Delete (asks first; Android asks again for files Blaze didn't save).
+- **Select**: long-press a tile, tap more, then Share, Album, Move, Remove or Delete; Select all in the header.
+- **Timeline**: sorted by date, the grid is grouped by day ("Today", "Yesterday", "Mon, 12 Oct", "16 Oct 2025"); while selecting, tap a day's tick to select the whole day.
+- **Fast on low-end phones**: at most 3 thumbnails decode at once, tiles that scroll away cancel theirs, thumbnails are kept in memory (LRU, ~1/10 of the app's heap) and Blaze's own files and song covers on disk (cache/gallery_thumbs); shared-storage pictures use Android's thumbnail cache. Thumbnails fade in.
+- Opening an item grows it out of its tile and closing shrinks it back into the tile of the item you ended on (the grid scrolls to it if needed).
+- **Sort** by date, name (natural order: "track 2" before "track 10") or size, either way, and **search** by name.
+- Pictures Blaze saved to Pictures/Blaze aren't shown twice. New permissions: READ_MEDIA_IMAGES / READ_MEDIA_VIDEO (READ_EXTERNAL_STORAGE up to Android 12), only asked from Albums, and SET_WALLPAPER. Code: `media/GalleryModel.kt` (GalleryModelTest), `media/GalleryRepo.kt`, `ui/GalleryScreen.kt`.
+
 ## v0.29.9: Page window grips, page selection pill, clearer bubbles
 
 - **The glass page window on Home moves only by its rim or title bar.** Hold the glass edge (an 18 dp rim) or the title bar to carry it around; it leans a little as it moves and springs back. The page in the middle is never a handle any more, so scrolling, selecting and copying there never drags the window. The two bottom corners resize it (small ticks show where; never smaller than 220 × 260 dp, never off-screen). Sliding on the dim area outside no longer tilts anything (`ui/GlassPaneGrip.kt`, GlassPaneGripTest).
