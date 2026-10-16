@@ -72,6 +72,20 @@ object QwenImage {
         } catch (e: Exception) { log("couldn't open the sign-in page: ${e.message}"); false }
     }
 
+    /** v0.30.8: a quiet heads-up (no screen takeover), at most every 12 hours, offering the one-time Qwen sign-in. */
+    fun nudgeSignIn() {
+        try {
+            val s = com.blaze.assistant.agent.Settings
+            val last = s.str(PREF_SIGNIN_NUDGED).toLongOrNull() ?: 0L
+            if (System.currentTimeMillis() - last < 12 * 3600_000L) return
+            s.setStr(PREF_SIGNIN_NUDGED, System.currentTimeMillis().toString())
+            com.blaze.assistant.proactive.Proactive.say("Sign in to chat.qwen.ai once and your pictures come from Qwen. Tap to sign in.",
+                "qwen_signin", urgent = false, suggest = "use qwen for images")
+        } catch (e: Exception) { log("sign-in nudge failed: ${e.message}") }
+    }
+
+    private const val PREF_SIGNIN_NUDGED = "qwen_signin_nudged"
+
     private fun userAgent(ctx: Context): String = try { android.webkit.WebSettings.getDefaultUserAgent(ctx) } catch (_: Throwable) {
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"
     }

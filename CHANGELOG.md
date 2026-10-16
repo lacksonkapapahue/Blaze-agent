@@ -4,6 +4,8 @@ Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has
 
 ## v0.30.8: Qwen image generation
 
+- **Qwen by default, no phrase needed.** Every picture tries Qwen first and falls back to Pollinations. Signed out of chat.qwen.ai, the picture still arrives and a quiet heads-up (at most every 12 hours) offers the one-time sign-in; nothing takes over the screen.
+
 - **Pictures come from Qwen's image model by default.** `generate_image` and the instant "draw a …" shortcut now go to chat.qwen.ai's text-to-image (the same flow the web app uses) with your own chat.qwen.ai sign-in from Blaze's browser: `GET /api/models` picks the first model that lists `t2i` (fallback `qwen3.7-plus`), `POST /api/v2/chats/new` opens a `t2i` chat, and `POST /api/v2/chat/completions?chat_id=…` streams the answer; the picture's CDN link comes in the `image_gen` phase and is saved to the Gallery as before. Width × height pick the nearest ratio Qwen offers (1:1, 4:3, 3:4, 16:9, 9:16), so 1080×1920 wallpapers come out 9:16 (`QwenImage`, `QwenImageApi`, QwenImageApiTest).
 - **Sign-in comes from the browser.** The `token` cookie for chat.qwen.ai (or `localStorage.token`, read whenever a chat.qwen.ai page finishes loading) is used as the Bearer token and kept encrypted in settings; requests carry the browser's whole chat.qwen.ai cookie line and user agent. An expired JWT is dropped.
 - **Nothing breaks when Qwen can't.** Signed out, a refused sign-in, the image limit, a security check page (Aliyun WAF), a network error or an answer with no picture all fall back to Pollinations and write a line to the log. None of this is shown in the chat. Nothing opens by itself: saying "use qwen for images" while signed out opens the chat.qwen.ai sign-in page in Blaze's browser.

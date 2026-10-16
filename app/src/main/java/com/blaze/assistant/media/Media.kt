@@ -107,8 +107,10 @@ object Media {
             } catch (e: QwenImageApi.QwenFailure) {
                 QwenImage.log("${e.kind}: ${e.message}; using Pollinations instead")
                 lastNote = when (e.kind) {
-                    // v0.30.8: silent. Nothing opens by itself; "use qwen for images" opens the sign-in when asked.
-                    QwenImageApi.Kind.NO_TOKEN, QwenImageApi.Kind.AUTH -> "Made with Pollinations: not signed in to chat.qwen.ai."
+                    // v0.30.8 (Luke: "routing should automatically be to qwen, pollinations is the backup"): Qwen is the
+                    // default with no phrase needed. Signed out, the picture still comes (Pollinations) and a quiet heads-up,
+                    // at most every 12 hours, offers the one-time chat.qwen.ai sign-in. Nothing takes the screen.
+                    QwenImageApi.Kind.NO_TOKEN, QwenImageApi.Kind.AUTH -> { QwenImage.nudgeSignIn(); "Made with Pollinations: not signed in to chat.qwen.ai." }
                     QwenImageApi.Kind.RATE_LIMIT -> "Made with Pollinations: ${e.message}."
                     else -> "Made with Pollinations: Qwen didn't work this time (${e.message})."
                 }
