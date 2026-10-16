@@ -297,6 +297,9 @@ object BrowserEngine {
                 if (!t.isPrivate && !url.isNullOrBlank() && url != "about:blank" && !SavedPages.isSavedUrl(url)) BrowserData.addHistory(app, v.title ?: url, url)
                 if (!t.isPrivate) {
                     if (captureLate) v.evaluateJavascript(BrowserLogins.CAPTURE_JS, null)
+                    // v0.30.8: the chat.qwen.ai sign-in token (localStorage) for Qwen image generation.
+                    if (com.blaze.assistant.media.QwenImage.isQwenUrl(url))
+                        v.evaluateJavascript("(function(){try{return localStorage.getItem('token')}catch(e){return null}})()") { r -> com.blaze.assistant.media.QwenImage.onPageToken(r) }
                     offerSoon(t, 700)
                     scheduleSave(); flushCookies()
                 }

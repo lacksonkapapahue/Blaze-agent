@@ -457,6 +457,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 
     /** Open a chat. If it's still working in the background you see it live. */
     fun open(id: String) { load(id)?.let { show(it) } }
+    /** v0.30.8: Try again on a picture that didn't come through (the chat on screen). */
+    fun retryImage(token: String) { cur.retryImage(token) }
 
     /**
      * v0.28.3: put [id] on screen for the shell (ChatNav.visibleChat): the main thread on the Chat tab, or a project
@@ -497,7 +499,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             val mid = m.getLong("id"); maxId = maxOf(maxId, mid)
             val files = m.optJSONArray("files")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
-            val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }?.filter { java.io.File(it).exists() } ?: emptyList()
+            val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }
+                ?.let { l -> com.blaze.assistant.media.ImageSlot.onLoad(l, com.blaze.assistant.media.ImageJobs::isLive) { java.io.File(it).exists() } } ?: emptyList()
             // v0.30.6: "reply_to" is optional (chats saved before it load with none).
             val replyTo = m.optJSONArray("reply_to")?.let { a -> (0 until a.length()).map { a.optLong(it) } }?.filter { it > 0 } ?: emptyList()
             list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"), thinkMs = m.optLong("think_ms"), startAt = m.optLong("start_at"), replyTo = replyTo)
@@ -1170,8 +1173,9 @@ When you finish, say what you did in one short sentence.
         /** Media made during this turn; shown under the final reply. */
         val pendingMedia = mutableListOf<String>()
 
-        fun addReply(liveId: Long, raw: String, thinking: String, fu: List<String> = emptyList(), meta: String = "") {
-            val media = synchronized(pendingMedia) { pendingMedia.toList().also { pendingMedia.clear() } }
+        fun addReply(liveId: Long, raw: String, thinking: String, fu: List<String> = emptyList(), meta: String = "") { synchronized(pendingMedia) {
+            // v0.30.8: under the lock, so a background picture finishing right now lands either here or in the message.
+            val media = pendingMedia.toList().also { pendingMedia.clear() }
             val p = ReplyParts.split(raw, final = true).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
             val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
             val tms = if (think.isNotBlank()) thinkClock.ms() else 0L
@@ -1197,6 +1201,57 @@ When you finish, say what you did in one short sentence.
                     msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = th, followups = fu2, meta = meta2, media = media2, thinkMs = ms, replyTo = part.refs)
                 }
             }
+        } }
+
+        /**
+         * v0.30.8: starts a picture in the background (the turn doesn't wait). A placeholder slot goes under this
+         * turn's reply and is swapped for the picture, in place, when it arrives (or for Try again if it fails).
+         */
+        fun startImage(prompt: String, width: Int, height: Int, seed: Int?, model: String, provider: String): String {
+            val job = com.blaze.assistant.media.ImageJobs.newId()
+            synchronized(pendingMedia) { pendingMedia += com.blaze.assistant.media.ImageSlot.pending(job, width, height, prompt) }
+            runImage(job, prompt, width, height, seed, model, provider)
+            return job
+        }
+
+        private fun runImage(job: String, prompt: String, width: Int, height: Int, seed: Int?, model: String, provider: String) {
+            com.blaze.assistant.media.ImageJobs.start(io, job,
+                make = { com.blaze.assistant.media.Media.generate(prompt, width, height, seed, model, provider).getOrNull() },
+                done = { f -> kotlinx.coroutines.withContext(Dispatchers.Main) { resolveImage(job, f) } })
+        }
+
+        /** The picture for [job] arrived ([f]) or failed (null): swap the slot in place, save, and tell the user if they're elsewhere. */
+        fun resolveImage(job: String, f: java.io.File?) {
+            val S = com.blaze.assistant.media.ImageSlot
+            fun swap(m: String): String {
+                val slot = S.parse(m) ?: return m
+                return if (slot.job != job) m else f?.absolutePath ?: slot.failed().token()
+            }
+            val shown = synchronized(pendingMedia) {
+                for (i in pendingMedia.indices) pendingMedia[i] = swap(pendingMedia[i])
+                val had = msgs.any { S.holds(it.media, job) }
+                if (had) msgs = msgs.map { if (S.holds(it.media, job)) it.copy(media = it.media.map(::swap)) else it }
+                had
+            }
+            if (!shown) return   // still waiting for this turn's reply; it carries the result
+            try { persist() } catch (_: Exception) { }
+            if (S.shouldNotify(this === cur, inForeground, overlayOpen))
+                Notifier.reply(if (f != null) S.READY else S.FAILED_NOTE, f == null, id)
+        }
+
+        /** Try again on a failed slot: it becomes a fresh placeholder in the same place. */
+        fun retryImage(token: String) {
+            val S = com.blaze.assistant.media.ImageSlot
+            val old = S.parse(token)?.takeIf { it.state == com.blaze.assistant.media.ImageSlot.State.FAILED } ?: return
+            val job = com.blaze.assistant.media.ImageJobs.newId()
+            val fresh = S.pending(job, old.width, old.height, old.prompt)
+            var found = false
+            synchronized(pendingMedia) {
+                msgs = msgs.map { m -> if (token in m.media) { found = true; m.copy(media = m.media.map { if (it == token) fresh else it }) } else m }
+            }
+            if (!found) return
+            persist()
+            runImage(job, old.prompt, old.width, old.height, null, "", "")
         }
 
         /** Adds a chip (e.g. "Memory updated") to a reply's footer. */
@@ -1438,18 +1493,31 @@ When you finish, say what you did in one short sentence.
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
                 if (single && attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
                     mood = Mood.THINKING
+                    // v0.30.8: "use pollinations for images" / "use qwen for images" switches the picture service.
+                    val imgRoute = com.blaze.assistant.media.QwenImageApi.routePhrase(shown)
+                    if (imgRoute != null) {
+                        Settings.imageRoute = imgRoute
+                        // Asked for Qwen and not signed in: open chat.qwen.ai's sign-in now (the only time it's opened).
+                        val openedSignIn = imgRoute == "qwen" && com.blaze.assistant.media.QwenImage.token() == null &&
+                            com.blaze.assistant.media.QwenImage.openSignIn(app, force = true)
+                        val reply = if (openedSignIn) "Done. I opened chat.qwen.ai in my browser: sign in once and I'll make pictures with Qwen from then on. Say \u201cuse Pollinations for images\u201d to switch back."
+                            else if (imgRoute == "pollinations") "Done. I'll make pictures with Pollinations from now on. Say \u201cuse Qwen for images\u201d to switch back."
+                            else "Done. I'll make pictures with Qwen from now on (it needs you signed in to chat.qwen.ai in my browser; until then I use Pollinations). Say \u201cuse Pollinations for images\u201d to switch back."
+                        history.put(JSONObject().put("role", "assistant").put("content", reply))
+                        addReply(-1, reply, "")
+                        mood = Mood.IDLE
+                        persist(); announce()
+                        return@launch
+                    }
                     val fast = try { kotlinx.coroutines.withContext(ConfirmGate.Direct) { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
                     val pic = if (fast == null && !offline && !Settings.lowData) com.blaze.assistant.media.Media.directPrompt(shown) else null
                     if (pic != null) {
-                        mood = Mood.ACTING
-                        add(Role.STEP, "Drawing \u201c${pic.take(60)}\u201d")
-                        val t0 = System.currentTimeMillis()
-                        val r = com.blaze.assistant.media.Media.generate(pic)
-                        val reply = r.fold({ f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }; "Here you go. It's saved in your Gallery." },
-                            { "I couldn't reach the image service just now (${it.message}). Try again in a moment." })
-                        history.put(JSONObject().put("role", "assistant").put("content", if (r.isSuccess) "[Generated an image of: $pic, shown to the user and saved in their Gallery]" else reply))
-                        addReply(-1, reply, "", meta = "\uD83C\uDFA8 free image · %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
+                        // v0.30.8: silent and async. One short line now; the picture grows in its placeholder and
+                        // replaces it when ready. No step lines, no service names.
+                        startImage(pic, 1024, 1024, null, "", "")
+                        history.put(JSONObject().put("role", "assistant").put("content", "[Started an image of: $pic. It appears in the chat and the Gallery by itself when ready]"))
+                        addReply(-1, com.blaze.assistant.media.ImageSlot.ACK, "")
                         mood = Mood.IDLE
                         persist(); announce()
                         return@launch
@@ -2481,12 +2549,16 @@ When you finish, say what you did in one short sentence.
                     "Refused: the AI picture tool can't draw exact charts, tables or documents (it makes a random look-alike). Make it with run_code (Python matplotlib / reportlab) and save under /root/phone/. " +
                         "If the terminal isn't installed yet, call linux_install first and wait for it, then run_code. Never send the user an AI picture instead of a real chart."
                 } else {
-                    add(Role.STEP, "Drawing \u201c${args.optString("prompt").take(60)}\u201d")
-                    com.blaze.assistant.media.Media.generate(args.optString("prompt"), args.optInt("width", 1024), args.optInt("height", 1024),
-                        if (args.has("seed")) args.optInt("seed") else null, args.optString("model")).fold(
-                        { f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }
-                            "Image made and shown to the user in the chat (saved in their Gallery as ${f.name}). Reply with one short line about it; don't describe it at length or paste a link." },
-                        { e -> "Image service failed (${e.message}). Try once more with a simpler prompt, or draw it with run_code (Python + Pillow) and save it under /root/phone/." })
+                    // v0.30.8: silent and async: no step line; the picture is made in the background and replaces its
+                    // placeholder under this reply when ready.
+                    if (args.optString("prompt").isBlank()) "Refused: generate_image needs a prompt."
+                    else {
+                        startImage(args.optString("prompt"), args.optInt("width", 1024), args.optInt("height", 1024),
+                            if (args.has("seed")) args.optInt("seed") else null, args.optString("model"), args.optString("provider"))
+                        "Started. The picture is being made in the background and appears in the chat (and the Gallery) by itself when it's ready; don't wait for it. " +
+                            "Reply with one short line saying you'll bring the picture here when it's ready. Don't mention which service makes it, steps, progress or links. " +
+                            "To send it to someone, call message_contact with image=\"last\" (it waits for the new picture)."
+                    }
                 }
                 "gallery" -> {
                     val M = com.blaze.assistant.media.Media

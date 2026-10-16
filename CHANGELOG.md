@@ -2,6 +2,17 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.8: Qwen image generation
+
+- **Qwen by default, no phrase needed.** Every picture tries Qwen first and falls back to Pollinations. Signed out of chat.qwen.ai, the picture still arrives and a quiet heads-up (at most every 12 hours) offers the one-time sign-in; nothing takes over the screen.
+
+- **Pictures come from Qwen's image model by default.** `generate_image` and the instant "draw a …" shortcut now go to chat.qwen.ai's text-to-image (the same flow the web app uses) with your own chat.qwen.ai sign-in from Blaze's browser: `GET /api/models` picks the first model that lists `t2i` (fallback `qwen3.7-plus`), `POST /api/v2/chats/new` opens a `t2i` chat, and `POST /api/v2/chat/completions?chat_id=…` streams the answer; the picture's CDN link comes in the `image_gen` phase and is saved to the Gallery as before. Width × height pick the nearest ratio Qwen offers (1:1, 4:3, 3:4, 16:9, 9:16), so 1080×1920 wallpapers come out 9:16 (`QwenImage`, `QwenImageApi`, QwenImageApiTest).
+- **Sign-in comes from the browser.** The `token` cookie for chat.qwen.ai (or `localStorage.token`, read whenever a chat.qwen.ai page finishes loading) is used as the Bearer token and kept encrypted in settings; requests carry the browser's whole chat.qwen.ai cookie line and user agent. An expired JWT is dropped.
+- **Nothing breaks when Qwen can't.** Signed out, a refused sign-in, the image limit, a security check page (Aliyun WAF), a network error or an answer with no picture all fall back to Pollinations and write a line to the log. None of this is shown in the chat. Nothing opens by itself: saying "use qwen for images" while signed out opens the chat.qwen.ai sign-in page in Blaze's browser.
+- **Switch back any time.** Say "use pollinations for images" (or "use qwen for images") to change the default (`Settings.imageRoute`). The `generate_image` tool also takes `provider` = `qwen` / `pollinations` for one picture; `model` (flux / turbo) only applies to Pollinations.
+- **Pictures are silent and don't hold up the chat.** `generate_image` and "draw a …" start the picture in the background and return at once; there's no "Drawing …" step. Blaze says one short line ("On it. I'll bring the picture here when it's ready.") and a placeholder card sits under it at the picture's aspect ratio: a soft, drifting colour canvas that slowly sharpens under a light sweep, with a quiet "Creating image" label (`ImageSlotCard`). The finished picture replaces the card in place and is saved with the chat; if you're in another chat or app you get "Your picture is ready." A picture that fails even after the fallback turns into "Couldn't make this picture. Try again" (tap to start it again in the same place). With Remove animations on the card stays still. A placeholder left behind when the app closed mid-way comes back as Try again (`ImageSlot`, `ImageJobs`, ImageSlotTest).
+- `message_contact` with `image="last"` waits (up to 3 min) for a picture still being made, so "draw X and send it to Y" sends the new picture.
+
 ## v0.30.6: Rapid messages (send while Blaze works; replies say which message they answer)
 
 Luke: "Let's make blaze like hark where I can send messages after messages with no pause and blaze highlights the one it's responding to and such (or replies to rapid succession questions that are related with one message)".

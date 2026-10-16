@@ -194,6 +194,14 @@ object Settings {
         get() = prefs.getBoolean("low_data", false)
         set(v) = prefs.edit().putBoolean("low_data", v).apply()
 
+    /**
+     * v0.30.8: who makes pictures: "qwen" (default; the user's chat.qwen.ai sign-in, Pollinations when signed out or
+     * failing) or "pollinations" (always the free keyless service). "use pollinations for images" / "use qwen for images".
+     */
+    var imageRoute: String
+        get() = if (prefs.getString("image_route", "qwen") == "pollinations") "pollinations" else "qwen"
+        set(v) = prefs.edit().putString("image_route", if (v == "pollinations") "pollinations" else "qwen").apply()
+
     var phoneControl: Boolean
         get() = prefs.getBoolean("phone_control", true)
         set(v) = prefs.edit().putBoolean("phone_control", v).apply()

@@ -39,6 +39,10 @@ object Messaging {
         val app = a.optString("app", "any").lowercase()
         val imageArg = a.optString("image").trim()
         val image: java.io.File? = if (imageArg.isEmpty()) null else {
+            // v0.30.8: pictures are made in the background; "last" means the one being made right now, so wait for it.
+            if (imageArg.equals("last", true) && com.blaze.assistant.media.ImageJobs.newestRunning() &&
+                com.blaze.assistant.media.ImageJobs.awaitNewest(180_000) == null)
+                return "The new picture didn't come through (or is still being made), so nothing was sent. Tell the user it's not ready and offer to send it when it is."
             com.blaze.assistant.media.Media.refresh()
             val items = com.blaze.assistant.media.Media.items.value.filter { it.kind == "image" }
             val name = SendCheck.imageArg(imageArg, items.map { it.file.name to it.time })

@@ -874,7 +874,7 @@ private fun Entry(m: ChatMessage, pos: GroupPos, canAct: Boolean, onQuote: (Stri
             // v0.28.3: old saved replies may hold raw leaked tool syntax; it's hidden when drawn too.
             val shown = remember(m.text) { com.blaze.assistant.agent.ToolLeak.bubbleText(m.text) }
             BlazeReply(m.id, shown, pos)
-            if (m.media.isNotEmpty()) MediaStrip(m.media)
+            if (m.media.isNotEmpty()) MediaStrip(m.media, onRetry = { token -> com.blaze.assistant.agent.Agent.retryImage(token) })
             if (pos.ends || followups.isNotEmpty()) Actions(m, Side.BLAZE, time, canAct, onQuote, allowQuote = true)
             else if (com.blaze.assistant.agent.ReplyChips.visible(m.meta, com.blaze.assistant.agent.ReplyChips.showTech()).isNotBlank()) Actions(m, Side.BLAZE, "", canAct, onQuote, allowQuote = true, chipOnly = true)
             if (followups.isNotEmpty()) Followups(followups, onFollowup)

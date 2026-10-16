@@ -94,12 +94,16 @@ private object Player {
 
 /** Pictures and beats under a Blaze reply. */
 @Composable
-fun MediaStrip(paths: List<String>) {
+fun MediaStrip(paths: List<String>, onRetry: (String) -> Unit = {}) {
     val c = LocalBlaze.current
     val ctx = LocalContext.current
     val playing by Player.playing.collectAsState()
     Column(Modifier.padding(top = 8.dp)) {
         paths.forEach { p ->
+            // v0.30.8: a picture still being made (or one that failed) holds its place until the file arrives.
+            val slot = com.blaze.assistant.media.ImageSlot.parse(p)
+            if (slot != null) androidx.compose.runtime.key(p) { ImageSlotCard(slot, onRetry = { onRetry(p) }) }
+            else androidx.compose.runtime.key(p) {
             val f = File(p)
             when (Media.kindOf(f)) {
                 "image" -> {
@@ -127,6 +131,7 @@ fun MediaStrip(paths: List<String>) {
             Row(Modifier.padding(top = 4.dp, bottom = 8.dp)) {
                 ActionText("Save", color = c.accent, size = 9.sp, modifier = Modifier.clickable { Toast.makeText(ctx, Media.saveToPhone(f), Toast.LENGTH_SHORT).show() }.padding(end = 14.dp, top = 4.dp, bottom = 4.dp))
                 ActionText("Share", color = c.accent, size = 9.sp, modifier = Modifier.clickable { try { ctx.startActivity(Media.shareIntent(f)) } catch (_: Exception) { } }.padding(end = 14.dp, top = 4.dp, bottom = 4.dp))
+            }
             }
         }
     }
