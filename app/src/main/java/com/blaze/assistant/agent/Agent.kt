@@ -906,11 +906,13 @@ When you finish, say what you did in one short sentence.
         com.blaze.assistant.connect.Connectors.tools().forEach { t.put(it) }
         try { com.blaze.assistant.connect.Mcp.tools().forEach { t.put(it) } } catch (_: Exception) { }
         if (Settings.phoneControl) t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "run_plan")
-            .put("description", "FASTEST way to do anything in an app. Give the whole script at once; Blaze runs it on-device in a few seconds, finding things by their visible text (no element numbers, no need to read the screen first), checking each step, and only comes back when done or stuck.")
+            .put("description", "FASTEST way to do anything in an app or settings page. Give the whole script at once; Blaze runs it on-device in a few seconds, finding things by their visible text (no element numbers, no need to read the screen first), checking each step on the phone, and only comes back when done or stuck. Steps can open a settings page by intent (do=open_settings page=… app=…).")
             .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject().put("steps", JSONObject().put("type", "array")
                 .put("items", JSONObject().put("type", "object").put("properties", JSONObject()
-                    .put("do", JSONObject().put("type", "string").put("enum", JSONArray(listOf("open_app", "tap", "long_press", "type", "enter", "scroll", "back", "home", "wait", "search_in_app"))))
-                    .put("app", JSONObject().put("type", "string").put("description", "open_app / search_in_app: app name"))
+                    .put("do", JSONObject().put("type", "string").put("enum", JSONArray(listOf("open_app", "open_settings", "tap", "long_press", "type", "enter", "scroll", "back", "home", "wait", "search_in_app"))))
+                    .put("app", JSONObject().put("type", "string").put("description", "open_app / search_in_app: app name; open_settings: the app whose page it is (optional)"))
+                    .put("page", JSONObject().put("type", "string").put("description", "open_settings: the page, same names as the open_settings tool (open_by_default, app_notifications, wifi, …)"))
+                    .put("want", JSONObject().put("type", "string").put("enum", JSONArray(listOf("on", "off"))).put("description", "tap on a switch: the state it should end in; skipped when it already is"))
                     .put("target", JSONObject().put("type", "string").put("description", "tap/type: the visible text, label or hint of the element, e.g. Search, Send, Message"))
                     .put("text", JSONObject().put("type", "string").put("description", "type: what to type"))
                     .put("submit", JSONObject().put("type", "boolean").put("description", "type: press Enter/Search after"))
@@ -1034,6 +1036,9 @@ When you finish, say what you did in one short sentence.
         val history = JSONArray()
         val historyMark = HashMap<Long, Int>()
         val trace = JSONArray()
+        /** v0.30.7: this turn's phone steps that worked (plan memory), and whether the turn touched the screen yet. */
+        val planRec = TapLoop.Recorder()
+        @Volatile var screenActed = false
         @Volatile var currentStep = 0
         var job: Job? = null
 
@@ -1725,11 +1730,17 @@ When you finish, say what you did in one short sentence.
                 var learnNudged = false
                 var tools = ToolRouter.select(allTools, groupsOn)
                 orient.reset(); lastPlan = null
-                val orientNote = if (!routine && "screen" in groupsOn) orientContext() else ""
+                planRec.reset(); screenActed = false
+                // v0.30.7 plan memory: this request worked before → its steps go with the first call as one run_plan to send.
+                val planHint = if (routine || bulk || agentId != null || isPrivate || !Settings.phoneControl) ""
+                    else try { TapLoop.Plans.find(userNow)?.let { TapLoop.hint(it) } ?: "" } catch (_: Exception) { "" }
+                if (planHint.isNotEmpty()) { groupsOn += "screen"; groupsOn += "device"; add(Role.STEP, "Using the steps that worked last time") }
+                val orientNote = (if (!routine && "screen" in groupsOn) orientContext() else "").let { o ->
+                    if (planHint.isEmpty()) o else if (o.isBlank()) planHint else "$o\n\n$planHint" }
                 var orientSent = false
                 // Chat lane: small talk and plain questions = one light call with no tools.
                 val lastBlaze = msgs.lastOrNull { it.role == Role.BLAZE }?.text.orEmpty()
-                var lite = !bulk && history.optJSONObject(history.length() - 1)?.opt("content") is String &&
+                var lite = !bulk && planHint.isEmpty() && history.optJSONObject(history.length() - 1)?.opt("content") is String &&
                     ChatLane.fits(lastUserText(), lastBlaze) && turnView == null && turnSkills.full.isEmpty()
                 var firstMs = -1L
                 streamedVoice = false
@@ -1785,7 +1796,8 @@ When you finish, say what you did in one short sentence.
                     } else null
                     val onThink: (String) -> Unit = { t -> scope.launch { thinking = listOf(before, t).filter { it.isNotBlank() }.joinToString("\n\n") } }
 
-                    if (!lite) compact()
+                    // v0.30.7: no blocking summarise call in the middle of a phone task (a context error below still folds).
+                    if (!lite && TapLoop.compactNow(step, screenActed)) compact()
                     LlmClient.liteTurn = lite
                     var req = if (lite) ChatLane.messages(requestMessages(), lastUserText(), personaText(), Settings.userName.ifBlank { null }) else requestMessages()
                     // Orient loop, step 1 (context → orientation): where the phone is, sent with the first call only, never saved.
@@ -2014,6 +2026,10 @@ When you finish, say what you did in one short sentence.
                             if (g != textOut) { textOut = g; reply.put("content", g) }
                         }
                         kotlinx.coroutines.delay(60)   // let the last streamed chunk land first
+                        // v0.30.7 plan memory: the phone steps of a task that ended well are kept for this request.
+                        if (!routine && !bulk && agentId == null && !isPrivate && !proofNudged && !claimNudged) try {
+                            planRec.recipe()?.let { TapLoop.Plans.put(userNow, it) }
+                        } catch (_: Exception) { }
                         val secs = (System.currentTimeMillis() - turnStart) / 1000.0
                     if (step > 0) { com.blaze.assistant.device.Haptics.done(app); com.blaze.assistant.device.Sounds.done() }
                         com.blaze.assistant.device.CrashLog.slow("turn ($step steps, ${LlmClient.lastRoute})", System.currentTimeMillis() - turnStart)
@@ -2264,6 +2280,9 @@ When you finish, say what you did in one short sentence.
             return "\n\nScreen now:\n" + s + com.blaze.assistant.phone.Watchers.drain()
         }
 
+        /** v0.30.7: screen tools whose steps go into plan memory (run_plan records its own steps). */
+        private val planTools = setOf("open_app", "tap", "type_text", "scroll", "press_button", "search_in_app", "open_settings", "read_screen", "look_at_screen")
+
         /** Orient loop state for this turn (v0.20.0). */
         val orient = Orient.State()
         /** v0.30.4: the last run_plan this turn (for resuming a failed script instead of restarting it). */
@@ -2327,9 +2346,20 @@ When you finish, say what you did in one short sentence.
             // Orient loop (v0.20.0): know where we are before acting on the screen.
             val (held, glance) = try { orientFirst(name, args) } catch (e: CancellationException) { throw e } catch (_: Throwable) { null to "" }
             if (held != null) return held
+            // v0.30.7 plan memory: the element's words before it's acted on (numbers change, words replay).
+            val recName = if (name == com.blaze.assistant.phone.SettingsJump.TOOL) "open_settings" else name
+            val recSvc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
+            val recLabel = if ((name == "tap" || name == "type_text") && args.has("element") && args.optString("text").isBlank())
+                try { recSvc?.labelOf(args.optInt("element")).orEmpty() } catch (_: Throwable) { "" } else ""
+            recSvc?.lastToggle = null
             val r = try { runToolRaw(name, args, shots) }
                 catch (e: CancellationException) { throw e }
                 catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
+            if (recName in planTools) {
+                screenActed = true
+                if (TapLoop.failed(r)) planRec.fail()
+                else if (recName !in TapLoop.lookOnly) planRec.ok(TapLoop.stepOf(recName, args, recLabel, if (name == "tap") recSvc?.lastToggle else null))
+            }
             // v0.28.2: outside content is now in the context: later sends / deletes this turn always ask (ConfirmGate).
             ConfirmGate.sourceOf(name)?.let { taint.mark(it) }
             // v0.30.4: any result that carries the screen (open_settings, a stopped run_plan) counts as a look, so the next
@@ -2467,7 +2497,7 @@ When you finish, say what you did in one short sentence.
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance
             // Record phone actions (with the element's label, since numbers change) for task replay.
             if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "run_plan", "do_actions", "search_in_app", "read_screen")) com.blaze.assistant.phone.Watchers.taskTick()
-            if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "open_url", "search_in_app") && trace.length() < 40) {
+            if (name in setOf("open_app", "tap", "type_text", "scroll", "press_button", "open_url", "search_in_app", com.blaze.assistant.phone.SettingsJump.TOOL) && trace.length() < 40) {
                 val label = args.optString("text").takeIf { name == "tap" && it.isNotBlank() }
                     ?: if (name == "tap" || name == "type_text") svc?.labelOf(args.optInt("element")).orEmpty() else ""
                 trace.put(JSONObject().put("tool", name).put("args", JSONObject(args.toString()).apply { remove("element") }).put("label", label))
@@ -2739,7 +2769,13 @@ When you finish, say what you did in one short sentence.
                 "tap" -> {
                     add(Role.STEP, PhoneTools.describe(name, args))
                     val label = args.optString("text").ifBlank { svc?.labelOf(args.optInt("element")).orEmpty() }
-                    if (Settings.confirmRisky && risky.containsMatchIn(label) &&
+                    // v0.30.7: want="on"/"off" on a switch: read it first and only tap when it isn't already that way.
+                    val want = TapLoop.wantOf(args.optString("want"))
+                    val wantId = if (want != null && svc != null) (if (args.optString("text").isNotBlank()) svc.reveal(args.optString("text")) else if (args.has("element")) args.optInt("element") else null) else null
+                    val wantNow = wantId?.let { svc?.switchState(it) }
+                    if (want != null && wantNow != null && !TapLoop.needsTap(want, wantNow))
+                        "Already ${TapLoop.wantWord(want)}: \u201c${(wantId?.let { svc?.labelOf(it) } ?: label).ifBlank { label }.take(40)}\u201d. Not tapped, it's already how you wanted it."
+                    else if (Settings.confirmRisky && risky.containsMatchIn(label) &&
                         !confirm("Tap \u201c${label.take(40)}\u201d?", "Blaze wants to tap this in ${svc?.currentApp() ?: "the app"}.", "Tap", always = true))
                         "The user did NOT approve tapping \"$label\". Don't retry; tell them it's ready for them to finish."
                     else PhoneTools.run(app, name, args)
@@ -2783,13 +2819,17 @@ When you finish, say what you did in one short sentence.
                 "back" -> "Go back"; "home" -> "Go home"; "enter" -> "Press Enter"
                 "wait" -> "Wait"
                 "search_in_app" -> "Search ${st.optString("app")} for \u201c${st.optString("query").take(30)}\u201d"
+                "open_settings" -> "Open ${st.optString("app").let { if (it.isBlank()) "" else "$it\u2019s " }}${st.optString("page").replace('_', ' ')} settings"
                 else -> st.optString("do")
             }
             val keys = (0 until n).map { FastActions.key(steps.getJSONObject(it)) }
             // v0.30.4: the same script sent again after it failed at step k skips the steps already done (the phone is
             // still on step k's screen), instead of reopening the app and starting over.
             val skip = FastActions.skipDone(keys, lastPlan, svc.currentPkg())
-            val labels = (0 until n).map { desc(steps.getJSONObject(it)) + if (it < skip) " (already done)" else "" }
+            val labels = (0 until n).map { desc(steps.getJSONObject(it)) + if (it < skip) " (already done)" else "" }.toMutableList()
+            screenActed = true
+            // v0.30.7: after a short settle the next step's own wait polls the new screen for its target (on-device check).
+            var shortSettle = false
             val state = MutableList(n) { if (it < skip) 2 else 0 }   // 0 todo, 1 running, 2 done, 3 failed, 4 skipped
             fun board() = labels.mapIndexed { i, l -> (when (state[i]) { 2 -> "\u2713 "; 1 -> "\u2192 "; 3 -> "\u2715 "; 4 -> "\u2013 "; else -> "\u00b7 " }) + l }.joinToString("\n")
             val boardId = add(Role.STEP, board())
@@ -2798,6 +2838,7 @@ When you finish, say what you did in one short sentence.
                 val st = steps.getJSONObject(i)
                 state[i] = 1; replace(boardId, Role.STEP, board())
                 val t0 = System.currentTimeMillis()
+                svc.lastToggle = null
                 val pkgBefore = svc.currentPkg()
                 val target = st.optString("target")
                 var fail: String? = null
@@ -2809,14 +2850,27 @@ When you finish, say what you did in one short sentence.
                             else {
                                 val end = System.currentTimeMillis() + 3000
                                 while (svc.currentPkg() == pkgBefore && System.currentTimeMillis() < end) kotlinx.coroutines.delay(100)
-                                svc.settle(1500, 250)
+                                val (omx, oq) = TapLoop.settleAfter("open_app", if (i + 1 < n) steps.optJSONObject(i + 1) else null)
+                                svc.settle(omx, oq)
                             }
+                        }
+                        // v0.30.7: settings pages by intent inside a plan (open_settings + tap in ONE call).
+                        "open_settings" -> {
+                            val r = com.blaze.assistant.phone.SettingsJump.run(app, JSONObject().put("page", st.optString("page"))
+                                .apply { st.optString("app").takeIf { it.isNotBlank() }?.let { put("app", it) } })
+                            if (TapLoop.failed(r)) fail = r.substringBefore("\n").take(200)
                         }
                         "tap", "long_press" -> {
                             // v0.30.4: a short wait for a lazy screen, then synonyms / fuzzy / off-screen rows scrolled into view
                             // (LabelMatch + reveal) instead of 3 s of polling and a single blind scroll.
-                            val id = svc.waitFor(target, 1200) ?: svc.reveal(target)
+                            val id = svc.waitFor(target, TapLoop.waitMs(shortSettle)) ?: svc.reveal(target)
+                            val want = TapLoop.wantOf(st.optString("want"))
+                            val nowOn = if (id != null && want != null) svc.switchState(id) else null
                             if (id == null) fail = "couldn't find \u201c$target\u201d on screen, even after scrolling through it"
+                            else if (!TapLoop.needsTap(want, nowOn)) {
+                                // v0.30.7: the switch is already the way the step wants it: done, nothing tapped.
+                                labels[i] = labels[i] + " (already ${TapLoop.wantWord(want == true)})"
+                            }
                             else {
                                 val label = svc.labelOf(id)
                                 if (Settings.confirmRisky && risky.containsMatchIn(label) &&
@@ -2829,7 +2883,7 @@ When you finish, say what you did in one short sentence.
                             }
                         }
                         "type" -> {
-                            val id = if (target.isNotBlank()) svc.waitFor(target, 1500, wantField = true) ?: svc.reveal(target, wantField = true, maxScrolls = 3) ?: svc.anyField() else svc.anyField()
+                            val id = if (target.isNotBlank()) svc.waitFor(target, TapLoop.waitMs(shortSettle, field = true), wantField = true) ?: svc.reveal(target, wantField = true, maxScrolls = 3) ?: svc.anyField() else svc.anyField()
                             if (id == null) fail = "no text field to type into"
                             else {
                                 svc.flash(id)
@@ -2849,18 +2903,25 @@ When you finish, say what you did in one short sentence.
                         }
                         else -> fail = "unknown step \u201c${st.optString("do")}\u201d"
                     }
-                    if (fail == null && st.optString("do") !in setOf("wait", "open_app")) svc.settle(1200, 180)
+                    val next = if (i + 1 < n) steps.optJSONObject(i + 1) else null
+                    val (mx, q) = TapLoop.settleAfter(st.optString("do"), next)
+                    shortSettle = mx < 1000L
+                    if (fail == null && st.optString("do") !in setOf("wait", "open_app", "open_settings")) svc.settle(mx, q)
                     val expect = st.optString("expect")
                     if (fail == null && expect.isNotBlank() && svc.waitFor(expect, 2500) == null) fail = "expected \u201c$expect\u201d to appear but it didn't"
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { fail = "error: ${e.message}" }
                 if (!isPrivate) Traces.log(svc.currentPkg(), st, fail == null, System.currentTimeMillis() - t0, fail ?: "")
                 if (fail != null && st.optBoolean("optional")) { state[i] = 4; replace(boardId, Role.STEP, board()); continue }
                 if (fail != null) {
+                    planRec.fail()
                     state[i] = 3; replace(boardId, Role.STEP, board())
                     lastPlan = FastActions.PlanRun(keys, i, true, svc.currentPkg())
                     return "Stopped at step ${i + 1} (${labels[i]}): $fail. " + FastActions.resumeHint(i + 1, n) + "\n\n" + svc.readScreen()
                 }
                 state[i] = 2; replace(boardId, Role.STEP, board())
+                // v0.30.7 plan memory: the step as it worked (a switch tap remembers which way it ended up).
+                planRec.ok(JSONObject(st.toString()).apply {
+                    if (st.optString("do") == "tap" && !st.has("want")) svc.lastToggle?.let { put("want", TapLoop.wantWord(it)) } })
                 com.blaze.assistant.device.Haptics.tick(app)
             }
             lastPlan = FastActions.PlanRun(keys, n, false, svc.currentPkg())
