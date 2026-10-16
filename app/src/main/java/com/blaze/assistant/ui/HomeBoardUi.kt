@@ -236,7 +236,21 @@ fun HomePane(onAsk: (String) -> Unit, onQuote: (String) -> Unit = {}) {
     var look by remember { mutableIntStateOf(0) }   // bumps when the look changes
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60_000); now = System.currentTimeMillis() } }
+    // v0.30.5: looking at Home marks what's on it as seen (Home heads-ups only tell about things you haven't seen).
+    LaunchedEffect(Unit) { com.blaze.assistant.home.HomeBoard.markSeen() }
     LaunchedEffect(toast) { if (toast.isNotBlank()) { delay(3_500); toast = "" } }
+    // v0.30.5: Blaze's browser at work → the live preview window.
+    val busyChats by com.blaze.assistant.agent.Agent.busyChats.collectAsState()
+    val liveStep by com.blaze.assistant.browser.BrowserLive.step.collectAsState()
+    var liveNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var liveHidden by remember { mutableStateOf(false) }
+    val working = busyChats.isNotEmpty()
+    LaunchedEffect(working, liveStep) {
+        liveNow = System.currentTimeMillis()
+        if (!working) liveHidden = false   // the next task shows it again
+        while (working) { delay(5_000); liveNow = System.currentTimeMillis() }
+    }
+    val liveShowing = com.blaze.assistant.browser.BrowserLive.showing(liveStep, working, liveNow) && com.blaze.assistant.browser.BrowserEngine.tabs.isNotEmpty()
 
     // Coming back from a permission / Usage access screen: retry the cards that asked for it.
     val owner = LocalLifecycleOwner.current
@@ -309,6 +323,8 @@ fun HomePane(onAsk: (String) -> Unit, onQuote: (String) -> Unit = {}) {
                 // v0.29.9: the selection pill on the page: Ask / Translate / Define go to Blaze, Quote goes into the chat box.
                 onAsk = { t -> onAsk(t); toast = "Asked Blaze. The answer is in Chat." },
                 onQuote = { t -> onQuote(t) }) }
+            // v0.30.5: while Blaze works in its browser, a fixed glass window previews the page (× hides it until the next task).
+            if (glassUrl == null && onboarded && liveShowing && !liveHidden) BrowserLivePreview(onHide = { liveHidden = true })
 
             menuFor?.let { id ->
                 val w = widgets.firstOrNull { it.id == id }

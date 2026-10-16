@@ -180,7 +180,12 @@ object HomeBoard {
     suspend fun backgroundPass() {
         if (!HomeSchedule.mayRun(metered(), dataSaver(), wifiOnly)) return
         refreshAll(onlyDue = true, maxAgeMs = (refreshHours * 60 - 10) * 60_000L)
+        // v0.30.5: new things on the board since the user last looked become one short heads-up.
+        store?.let { s -> HomeNews.afterRefresh(s.all(), s.allData()) }
     }
+
+    /** v0.30.5: the user is looking at Home, so what's on it counts as seen. */
+    fun markSeen() { scope.launch { store?.let { s -> HomeNews.markSeen(s.all(), s.allData()) } } }
 
     // ---------------- edits from the UI ----------------
 

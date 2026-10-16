@@ -87,8 +87,36 @@ object JamendoSource : StoreSource {
         dir?.let { runCatching { File(it, "jamendo.json").writeText(JSONObject().put("client_id", userId).toString()) } }
     }
 
+    /** v0.30.5: where a free client_id is made (the setup card's "Get a free ID" button). */
+    const val DEVPORTAL = "https://devportal.jamendo.com"
+
+    /** True when Jamendo answers a one-track request with this client_id. */
+    suspend fun works(id: String): Boolean = try {
+        val r = JSONObject(StoreHttp.get("https://api.jamendo.com/v3.0/tracks/?client_id=" + StoreHttp.enc(id.trim()) + "&format=json&limit=1"))
+        r.optJSONObject("headers")?.optString("status") == "success"
+    } catch (_: Exception) { false }
+
+    /** v0.30.5: the jamendo_setup tool, so "Ask Blaze to set it up" can save the id Blaze got from the dev portal. */
+    fun tool(): JSONObject = JSONObject().put("type", "function").put("function", JSONObject()
+        .put("name", TOOL)
+        .put("description", "Save a Jamendo API client_id for Blaze Music's Jamendo Store (checked against Jamendo before it's saved). " +
+            "Get one free at $DEVPORTAL: sign in or sign up (ask the user before creating an account), My applications, create an app " +
+            "(name Blaze Music, website https://github.com/lacksonkapapahue/Blaze-agent), then copy its Client ID here.")
+        .put("parameters", JSONObject().put("type", "object").put("properties", JSONObject()
+            .put("client_id", JSONObject().put("type", "string").put("description", "The app's Client ID (8 hex characters)")))
+            .put("required", JSONArray().put("client_id"))))
+    const val TOOL = "jamendo_setup"
+
+    suspend fun runTool(args: JSONObject): String {
+        val id = args.optString("client_id").trim()
+        if (id.isEmpty()) return "Error: give client_id."
+        if (!works(id)) return "Jamendo didn't accept that client_id. Check it on $DEVPORTAL (My applications) and try again."
+        setClientId(id)
+        return "Saved. The Jamendo Store in Blaze Music works now."
+    }
+
     override fun setupNeeded(): String? = if (clientId().isBlank())
-        "Jamendo isn't configured: it needs a free client_id from devportal.jamendo.com. Paste it below." else null
+        "Jamendo needs a free client_id. Blaze can get it for you, or make one on the Jamendo dev portal and paste it below." else null
 
     override suspend fun search(kind: String, query: String, next: String): StorePage {
         val id = clientId().ifBlank { throw StoreError(setupNeeded() ?: "Jamendo isn't configured") }

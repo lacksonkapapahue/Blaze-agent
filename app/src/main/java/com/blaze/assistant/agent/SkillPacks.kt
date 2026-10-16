@@ -282,7 +282,8 @@ object SkillPacks {
     private fun str(d: String = "") = JSONObject().put("type", "string").apply { if (d.isNotBlank()) put("description", d) }
 
     fun tools(): List<JSONObject> = listOf(
-        fn("use_skill", "Read a skill's full instructions (SKILL.md) before a task it covers.", JSONObject().put("name", str()), listOf("name")),
+        fn("use_skill", "Read a skill's full instructions (SKILL.md) before a task it covers. Only for a skill that is about what the user asked; unrelated skills are refused.",
+            JSONObject().put("name", str()).put("reason", str("Only after a refusal: how this skill applies to the request")), listOf("name")),
         fn("find_skill", "Search all installed and learned skills by what you need to do (best matches first, with descriptions). Use it when the skills listed this turn don't fit.",
             JSONObject().put("query", str("What the task is about, in plain words")), listOf("query")),
         fn("skill_file", "Read an extra file from a skill (reference or script).", JSONObject().put("name", str()).put("path", str()), listOf("name", "path")),

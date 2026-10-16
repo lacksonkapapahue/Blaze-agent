@@ -87,6 +87,7 @@ object Downloads {
             item.thumb.ifBlank { d.thumb }, choice.label, choice.id, choice.ext, parts, createdAt = now,
             source = item.source, licence = d.licence.ifBlank { item.licence }, fileTitle = choice.title)
         synchronized(lock) { _jobs.value = _jobs.value + job; save() }
+        Taste.note(ctx, kind, job.title, job.channel, Taste.DOWNLOAD)
         kick(ctx)
         return job
     }

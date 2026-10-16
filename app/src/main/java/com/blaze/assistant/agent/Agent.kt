@@ -219,15 +219,33 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         formSession = from
         _form.value = req
         if (!inForeground) Notifier.actionRequired(req.title, req.site)
-        val a = kotlinx.coroutines.withTimeoutOrNull(15 * 60_000L) { req.answer.await() }
-        tag?.let { BgAgents.setWaiting(it.id, false) }
-        _form.value = null
-        formSession = null
-        Notifier.clearAction()
-        a
+        // v0.30.5 (Luke: "the form wouldn't close until I force quit"): the task being stopped while the card was up
+        // cancelled this wait, and the clean-up below never ran, so the card stayed with a Cancel that answered nobody.
+        // The clean-up is now in finally, and Cancel / Stop remove the card themselves.
+        try {
+            kotlinx.coroutines.withTimeoutOrNull(15 * 60_000L) { req.answer.await() }
+        } finally {
+            tag?.let { BgAgents.setWaiting(it.id, false) }
+            clearForm(req)
+        }
     }
 
-    fun answerForm(a: com.blaze.assistant.browser.SecureInput.Answer?) { _form.value?.answer?.complete(a) }
+    private fun clearForm(req: com.blaze.assistant.browser.SecureInput.Request) {
+        if (_form.value?.id == req.id) { _form.value = null; formSession = null; Notifier.clearAction() }
+    }
+
+    /** Fill in / Cancel. The card goes at once, even if nothing is waiting on it any more. */
+    fun answerForm(a: com.blaze.assistant.browser.SecureInput.Answer?) {
+        val r = _form.value ?: return
+        r.answer.complete(a)
+        clearForm(r)
+    }
+
+    /** Stopping a chat also takes down the form it was waiting on. */
+    private fun dropFormOf(s: Session) {
+        val r = _form.value ?: return
+        if (formSession === s || formSession == null) { r.answer.complete(null); clearForm(r) }
+    }
 
     /** The "Action required" notification was tapped: show the chat that's waiting on the form. */
     fun showFormChat() { formSession?.let { s -> if (s !== cur) show(s) } }
@@ -826,6 +844,8 @@ When you finish, say what you did in one short sentence.
             append(Autonomy.promptBlock()); append(Autonomy.promptLine())
             // v0.30.4: no skills lookup for a plain device / settings action (it only ever pulled in unrelated skills).
             if (!FastActions.plainDevice(userText)) append(SkillMatch.lookupBlock(userText, skipSkills))
+            // v0.30.5: tasks the user has Blaze do often, with no skill yet, come first for a skill.
+            if (Settings.autoLearn) append(SkillGuard.Freq.promptLine(SkillGuard.Freq.load()))
         }
     }
 
@@ -834,6 +854,7 @@ When you finish, say what you did in one short sentence.
         Memory.tools().forEach { t.put(it) }
         if (Mind.ready) Mind.tools().forEach { t.put(it) }
         t.put(com.blaze.assistant.device.DeviceStatus.tool())
+        t.put(com.blaze.assistant.mediaapps.store.JamendoSource.tool())
         t.put(SelfControl.tool())
         t.put(JSONObject().put("type", "function").put("function", JSONObject().put("name", "ask_user")
             .put("description", "Pause and ask the user a question with 2-4 short tap-able options (an 'own answer' choice is added automatically). Use when a real choice is theirs (which account, which contact, which item) or the request is ambiguous. Never use it for facts you can check yourself (phone model, Android version, installed apps, settings, battery). The task waits right where it is and continues with the answer.")
@@ -1061,6 +1082,7 @@ When you finish, say what you did in one short sentence.
             // v0.30.6: Stop also closes an open burst. What was sent meanwhile stays in the conversation, but starts nothing.
             burstJob?.cancel(); burstJob = null
             settleInbox()
+            dropFormOf(this)
             job?.cancel()
             job = null
             mood = Mood.IDLE
@@ -1199,42 +1221,56 @@ When you finish, say what you did in one short sentence.
             // force (v0.24.0 /clear): an emptied thread is saved too, so cleared messages don't come back on restart.
             if (isPrivate) return   // v0.24.4: private chats are never written anywhere
             if (!force && msgs.none { it.role == Role.USER } && !(keep && msgs.isNotEmpty())) return
-            val arr = JSONArray()
-            for (m in msgs) {
-                arr.put(JSONObject().put("id", m.id).put("role", m.role.name).put("text", m.text)
-                    .put("files", JSONArray(m.files)).apply {
-                        historyMark[m.id]?.let { put("mark", it) }
-                        if (m.thinking.isNotEmpty()) put("thinking", m.thinking.take(20000))
-                        if (m.followups.isNotEmpty()) put("followups", JSONArray(m.followups))
-                        if (m.meta.isNotEmpty()) put("meta", m.meta)
-                        if (m.at > 0) put("at", m.at)
-                        if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
-                        if (m.thinkMs > 0) put("think_ms", m.thinkMs)
-                        if (m.startAt > 0) put("start_at", m.startAt)
-                        if (m.replyTo.isNotEmpty()) put("reply_to", JSONArray(m.replyTo))
-                    })
-            }
-            val hist = JSONArray()
-            for (i in 0 until history.length()) hist.put(stripImages(history.getJSONObject(i)))
-            val firstUser = msgs.firstOrNull { it.role == Role.USER }?.text ?: msgs.firstOrNull()?.text ?: title
+            // v0.30.5 (Luke: "sometimes when you send a new message the app kind of glitches and then unfreezes"): the whole
+            // chat (every message, the full model history, pictures stripped by copying) was turned into JSON on the main
+            // thread at every send, which grows with the one long main conversation. Only a cheap snapshot is taken here;
+            // the JSON is built and written in the background, newest snapshot last (ioLock keeps saves in order).
+            val snapMsgs = msgs
+            val snapHist = ArrayList<JSONObject>(history.length()).apply { for (i in 0 until history.length()) add(history.getJSONObject(i)) }
+            val marks = HashMap(historyMark)
+            val firstUser = snapMsgs.firstOrNull { it.role == Role.USER }?.text ?: snapMsgs.firstOrNull()?.text ?: title
             if (title.isEmpty()) title = firstUser.lineSequence().first().take(48)
-            val preview = msgs.lastOrNull { it.role == Role.BLAZE }?.text ?: firstUser
-            val doc = JSONObject().put("id", id).put("title", title).put("pinned", pinned)
+            val preview = snapMsgs.lastOrNull { it.role == Role.BLAZE }?.text ?: firstUser
+            val head = JSONObject().put("id", id).put("title", title).put("pinned", pinned)
                 .put("updated", System.currentTimeMillis()).put("preview", preview.take(90))
-                .put("messages", arr).put("history", hist).put("summary", summary)
+                .put("summary", summary)
                 .put("lc_summary", lcSummary).put("lc_upto", lcUpto).put("ctx_from", ctxFrom)
                 .apply { meter?.let { m -> put("meter_in", m.inTok).put("meter_out", m.outTok).put("meter_limit", m.limit) } }
                 .put("title_source", titleSource).put("title_turns", titleTurns).put("keep", keep)
                 .put("tips_pending", JSONArray(synchronized(unseenTips) { unseenTips.toList() }))
             if (this === cur && id == Mind.MAIN) Settings.lastChatId = id
             val cid = id
+            val seq = persistSeq.incrementAndGet()
             io.launch {
-                ioLock.withLock { ChatStore.save(doc) }; _chats.value = ChatStore.list()
-                try { LongChat.db()?.sync(cid, hist) } catch (_: Exception) { }
-                // One mind: every turn goes into the journal (searchable, queued for the idle review).
-                Mind.journal(cid, hist)
+                ioLock.withLock {
+                    if (seq != persistSeq.get()) return@withLock   // a newer snapshot is queued: it writes everything
+                    val arr = JSONArray()
+                    for (m in snapMsgs) {
+                        arr.put(JSONObject().put("id", m.id).put("role", m.role.name).put("text", m.text)
+                            .put("files", JSONArray(m.files)).apply {
+                                marks[m.id]?.let { put("mark", it) }
+                                if (m.thinking.isNotEmpty()) put("thinking", m.thinking.take(20000))
+                                if (m.followups.isNotEmpty()) put("followups", JSONArray(m.followups))
+                                if (m.meta.isNotEmpty()) put("meta", m.meta)
+                                if (m.at > 0) put("at", m.at)
+                                if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
+                                if (m.thinkMs > 0) put("think_ms", m.thinkMs)
+                                if (m.startAt > 0) put("start_at", m.startAt)
+                                if (m.replyTo.isNotEmpty()) put("reply_to", JSONArray(m.replyTo))
+                            })
+                    }
+                    val hist = JSONArray()
+                    // A history entry changed under us (rare): skip this save, the next one has it.
+                    try { for (h in snapHist) hist.put(stripImages(h)) } catch (_: Exception) { return@withLock }
+                    ChatStore.save(head.put("messages", arr).put("history", hist))
+                    _chats.value = ChatStore.list()
+                    try { LongChat.db()?.sync(cid, hist) } catch (_: Exception) { }
+                    // One mind: every turn goes into the journal (searchable, queued for the idle review).
+                    Mind.journal(cid, hist)
+                }
             }
         }
+        private val persistSeq = java.util.concurrent.atomic.AtomicLong(0)
 
         /** Images become a short note in saved history; the words stay. */
         fun stripImages(m: JSONObject): JSONObject {
@@ -2250,6 +2286,7 @@ When you finish, say what you did in one short sentence.
             if (fields.any { S.isCardField(it) }) return "Card details are never collected in the chat. Show the live browser with browser_show so the user types them on the page, or stop before paying."
             if (fields.any { it.kind == com.blaze.assistant.browser.SecureInput.Kind.PASSWORD }) B.passwordRefused()?.let { return it }
             val asks = (formAsks[host] ?: 0) + 1; formAsks[host] = asks
+            if (asks > 50) return "The user cancelled the form for $host in this task. Don't ask again: stop this sign-in and say what you needed."
             if (asks > 3) return "I've already asked for this on $host 3 times. Don't ask again: use ask_user to offer Continue with Google, a passkey, or the user doing it themselves in the live browser (browser_show)."
             val names = fields.map { it.name }
             val fromVault = !args.optBoolean("fresh") && V.has(host, names)
@@ -2263,7 +2300,11 @@ When you finish, say what you did in one short sentence.
                 val a = askSecure(com.blaze.assistant.browser.SecureInput.Request(ids.getAndIncrement(), host, title, args.optString("reason"), fields,
                     args.optBoolean("submit", true), kotlinx.coroutines.CompletableDeferred()), this)
                 mood = Mood.ACTING
-                a ?: return "The user cancelled the form (or didn't answer). Don't ask again right away: say what you needed, and offer the live browser (browser_show) or another way in."
+                a ?: run {
+                    // v0.30.5: a cancel ends this sign-in; the next step of the same signup doesn't pop a new card.
+                    formAsks[host] = 99
+                    return "The user cancelled the form (or didn't answer). STOP this sign-in / sign-up now: don't call browser_secure_input again for $host in this task, and don't keep filling its steps. Say in one line what you needed and offer the live browser (browser_show) if they want to finish it themselves."
+                }
             }
             answer.values.forEach { (n, v) -> S.put(n, v) }
             if (answer.save) fields.filter { it.kind.saveable }.forEach { f -> answer.values[f.name]?.takeIf { it.isNotEmpty() }?.let { V.save(host, f.name, it) } }
@@ -2408,6 +2449,17 @@ When you finish, say what you did in one short sentence.
             }
             add(Role.STEP, "Using $label")
             return m.call(t, args)
+        }
+
+        /**
+         * v0.30.5 SkillGuard: use_skill / run_skill only for a skill about what the user is asking (their last few
+         * messages, so "yes, do it" still carries the request). Null to go ahead, else the refusal the model reads.
+         */
+        private fun skillGate(name: String, args: JSONObject): String? {
+            if (name != "use_skill" && name != "run_skill") return null
+            if (lastUserText().startsWith("[Scheduled routine") || agentId != null) return null   // a routine / background agent names its own skills
+            val request = msgs.filter { it.role == Role.USER }.takeLast(3).joinToString(" ") { it.text.take(600) }
+            return try { SkillGuard.gate(args.optString("name"), request, args.optString("reason"), SkillMatch.cached()) } catch (_: Throwable) { null }
         }
 
         suspend fun runToolRaw(name: String, args: JSONObject, shots: MutableList<String>): String {
@@ -2569,6 +2621,7 @@ When you finish, say what you did in one short sentence.
                     if (act == "install") SelfSetup.install(app, args.optString("what")) else SelfControl.run(app, act, args)
                 }
                 "device_status" -> { add(Role.STEP, "Checking the phone"); com.blaze.assistant.device.DeviceStatus.describe(app) }
+                com.blaze.assistant.mediaapps.store.JamendoSource.TOOL -> { add(Role.STEP, "Setting up Jamendo"); com.blaze.assistant.mediaapps.store.JamendoSource.init(app); com.blaze.assistant.mediaapps.store.JamendoSource.runTool(args) }
                 "look_at_screen" -> if (Settings.lowData) {
                     add(Role.STEP, "Reading the screen (low-data mode)")
                     "Low-data mode is on, so no screenshot was taken. Screen as text:\n" + (com.blaze.assistant.phone.BlazeAccessibilityService.instance?.readScreen() ?: "Phone control isn't connected.")
@@ -2628,6 +2681,7 @@ When you finish, say what you did in one short sentence.
                     try { kotlinx.coroutines.withContext(Dispatchers.Main) { com.blaze.assistant.phone.AndroidControl.run(app, name, a2) } } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
                 in SkillPacks.names -> {
+                    skillGate(name, args)?.let { return it }
                     add(Role.STEP, when (name) { "use_skill" -> "Reading skill \u201c${args.optString("name")}\u201d"; "install_skill" -> "Installing skills"; "write_skill" -> "Saving a skill"; "save_workflow" -> "Saving a workflow"; else -> "Reading a skill file" })
                     try { SkillPacks.run(name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
@@ -2651,6 +2705,7 @@ When you finish, say what you did in one short sentence.
                     com.blaze.assistant.update.Updater.fromTool(app, args.optBoolean("install", true))
                 }
                 in Learning.toolNames -> {
+                    skillGate(name, args)?.let { return it }
                     add(Role.STEP, when (name) { "run_skill" -> "Replaying skill \"${args.optString("name")}\""; "skill_manage" -> "Saving a skill"; else -> "Searching past chats" })
                     try { Learning.run(app, name, args) } catch (e: CancellationException) { throw e } catch (e: Exception) { "Error: ${e.message}" }
                 }
@@ -2847,10 +2902,20 @@ When you finish, say what you did in one short sentence.
             val tools = synchronized(turnTools) { turnTools.toList() }
             val userText = msgs[lastUser].text
             val (n, distinct) = Learn.steps(tools)
-            val repeat = Learn.repeatsAndRecord(Learn.signature(userText, tools), n >= 5 && distinct >= 2)
-            val d0 = Learn.decide(Learn.Turn(userText, reply.text, tools,
+            val sig = Learn.signature(userText, tools)
+            val repeat = Learn.repeatsAndRecord(sig, n >= 5 && distinct >= 2)
+            val savedSkill = tools.any { it == "write_skill" || it == "skill_manage" || it == "save_workflow" }
+            // v0.30.5: count every real task (≥ 2 work tool calls); one done often with no skill covering it gets a skill first.
+            val usedSkill = tools.any { it == "use_skill" || it == "run_skill" }
+            val frequent = if (agentId == null && n >= 2 && !Learn.trivial(userText)) {
+                val covered = savedSkill || usedSkill || try { !SkillMatch.match(userText, SkillMatch.cached().filter { it.source == "learned" || it.source == "user" },
+                    minScore = SkillMatch.STRONG, fullMin = SkillMatch.STRONG, fullWords = SkillMatch.FULL_WORDS).isEmpty } catch (_: Throwable) { false }
+                SkillGuard.Freq.note(sig, userText, covered)
+            } else false
+            val d00 = Learn.decide(Learn.Turn(userText, reply.text, tools,
                 savedMemory = tools.any { it == "remember" || it == "forget" || it == "memory_save" || it == "memory_update" },
-                savedSkill = tools.any { it == "write_skill" || it == "skill_manage" || it == "save_workflow" }), repeat)
+                savedSkill = savedSkill), repeat || frequent)
+            val d0 = if (frequent && !savedSkill && !d00.skill) d00.copy(reflect = true, skill = true, why = "a task done often has no skill yet") else d00
             // One mind: save as you go. One cheap extraction call per real turn writes or merges memories; the
             // learning review below then only looks for skills.
             if (Mind.ready && agentId == null && userText.trim().split(Regex("\\s+")).size >= 3) {

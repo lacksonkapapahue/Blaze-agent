@@ -903,6 +903,19 @@ class ShotsTest {
         }
     }
 
+    // v0.30.5: a sent picture stands on its own (no bubble around it), the words get their own glass bubble under it.
+    @Test fun sentPictureLight() = shot("86-sent-picture-glass") { SentPictureThread() }
+    @Test fun sentPictureDark() = shot("87-sent-picture-glass-dark", dark = true) { SentPictureThread() }
+
+    @Composable
+    private fun SentPictureThread() {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SentBubble("What plant is this?", "", listOf("/sdcard/Pictures/plant.jpg"), emptyList(), GroupPos.SINGLE, bitmaps = listOf(fakePicture(1)))
+            BlazeReply(1L, "That looks like a **Monstera deliciosa**. Water it when the top few centimetres of soil are dry.")
+            UserBubble("Thanks!")
+        }
+    }
+
     // The full-screen viewer mid-flip: the current picture tilts away on Y while the next swings in.
     @Test fun imageViewerFlip() = shot("69-image-viewer-flip", dark = true) {
         ImagePagerFrame(listOf(fakePicture(0), fakePicture(1), fakePicture(2)), index = 0, progress = -0.42f, onSave = {})

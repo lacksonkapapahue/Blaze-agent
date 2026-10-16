@@ -315,7 +315,8 @@ object Pointer {
                     setPadding((12 * d).toInt(), (8 * d).toInt(), (12 * d).toInt(), (8 * d).toInt())
                     setOnClickListener { result.complete(false) } })
             }
-            val lp = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, type(),
+            val maxW = minOf(ctx.resources.displayMetrics.widthPixels - (24 * d).toInt(), (420 * d).toInt())
+        val lp = WindowManager.LayoutParams(maxW, WindowManager.LayoutParams.WRAP_CONTENT, type(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, PixelFormat.TRANSLUCENT)
                 .apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = (36 * d).toInt() }
             try { w.addView(r, lp); row = r } catch (_: Exception) { }
@@ -333,6 +334,8 @@ object Pointer {
         val d = density
         fun chip(text: String, fill: Boolean, onTap: () -> Unit) = TextView(ctx).apply {
             this.text = text; textSize = 13f; setTextColor(if (fill) Color.WHITE else Color.parseColor("#1D1A16"))
+            // v0.30.5: "Resum / e" wrapped mid-word on a narrow bar; buttons never wrap or shrink.
+            isSingleLine = true; maxLines = 1
             setPadding((14 * d).toInt(), (8 * d).toInt(), (14 * d).toInt(), (8 * d).toInt())
             setBackgroundColor(if (fill) ACCENT else Color.TRANSPARENT)
             setOnClickListener { onTap() }
@@ -341,8 +344,10 @@ object Pointer {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(Color.parseColor("#FFFAF2")); elevation = 6 * d
             setPadding((6 * d).toInt(), (4 * d).toInt(), (6 * d).toInt(), (4 * d).toInt())
+            // The hint takes what room is left and wraps on word boundaries; the buttons keep their full width.
             addView(TextView(ctx).apply { text = "Paused \u00b7 drag, double-tap to click"; textSize = 12f; setTextColor(Color.parseColor("#6B645B"))
-                setPadding((8 * d).toInt(), 0, (8 * d).toInt(), 0) })
+                setPadding((8 * d).toInt(), 0, (8 * d).toInt(), 0); maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f) })
             addView(chip("Resume", true) { resume() })
             addView(chip("Stop", false) { stop() })
         }
