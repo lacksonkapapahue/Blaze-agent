@@ -62,6 +62,28 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
+## Terminal and Linux tools bundled in the APK (app/src/main/jniLibs)
+Shipped unchanged (BusyBox: one patched branch, see tools/busybox/README.md) as `lib*.so` executables. Each keeps its own
+licence; the corresponding source is at the links below.
+
+| File | Project | Version | Licence | Source |
+|---|---|---|---|---|
+| libproot.so, libproot_loader.so, libproot_loader32.so | PRoot, Termux's fork | 5.1.107.96 (since v0.30.2) | GPL-2.0-or-later | https://github.com/termux/proot/tree/v5.1.107.96 |
+| libtalloc.so | talloc (Samba) | 2.5.0 (Termux build) | LGPL-3.0-or-later | https://www.samba.org/ftp/talloc/ |
+| libandroid-shmem.so | libandroid-shmem (Termux) | 0.7 | BSD-3-Clause, (c) 2013 Sergii Pylypenko, (c) 2017 Fredrik Fornwall | https://github.com/termux/libandroid-shmem |
+| libbusybox.so | BusyBox | 1.36.1 (arm64), 1.31.0 (armv7) | GPL-2.0-only | https://busybox.net/downloads/ |
+
+PRoot, talloc and libandroid-shmem are the files of Termux's packages (`tools/proot/README.md` names each package and
+`tools/proot/fetch_termux_proot.py` re-downloads them). libandroid-shmem's licence requires this notice: Redistribution and
+use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+redistributions of source code must retain the above copyright notice, this list of conditions and the following
+disclaimer; redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+following disclaimer in the documentation and/or other materials provided with the distribution; neither the name of the
+copyright holders nor the names of its contributors may be used to endorse or promote products derived from this software
+without specific prior written permission. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED; IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE.
+
 ## Linux desktop (v0.25.1), downloaded on first Start, not bundled
 The Desktop view installs these free and open-source packages from Alpine Linux's official repositories into Blaze's
 Alpine Linux on the phone, only when the user taps Start (or approves the agent's `desktop` start). None of them is

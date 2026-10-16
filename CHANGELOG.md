@@ -2,6 +2,14 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.2: Terminal that starts, and cd that works in Linux
+
+- **The phone tab never opens dead.** Before opening, Blaze checks BusyBox once per build (`busybox true`, then `busybox sh -c 'echo ok'`, each with a timeout); if either fails for any reason the tab starts straight on Android's own shell. If a BusyBox tab still dies (signal 31 at any time, or any error in its first 5 seconds) it is swapped at once, in place, for one on Android's shell with a short line saying why: no "[Process completed (signal 31) - press Enter]", nothing to do. The decision is remembered per build (versionCode + install time) and checked again after an update.
+- **32-bit phones:** the 32-bit BusyBox reaches chmod, ln, rmdir, rm -r, cp -a, tar x and mkfifo through old syscalls Android's 32-bit sandbox kills. A second start-up probe catches that and leaves those commands to Android's toybox. Every BusyBox syscall on both ABIs was checked against Android 11 and 12's real allowlists (`tools/busybox/seccomp_allowlist.py`).
+- **Alpine (and every Linux): `cd phone/`, `cd /sdcard` and every other `cd` work again.** They said "can't cd to phone/: Function not implemented" and `pwd` printed nothing: the bundled PRoot answered chdir/getcwd with ENOSYS under Android's app sandbox. Blaze now ships Termux's current PRoot 5.1.107.96 (with talloc 2.5.0 and libandroid-shmem), reproduced and verified off-phone under Android 11/12's seccomp filter (`tools/proot/README.md`). ~/phone and /sdcard are real mount points in the rootfs now.
+- **`blaze-doctor`** in every Linux checks cd into ~/phone and /sdcard, getcwd, stat, the file tools and fork, and says what fails. Blaze runs it once per build in the background and turns PRoot's seccomp acceleration off on phones where only that works (`LinuxDoctor`).
+- Tests: `PhoneShellTest` (per-build verdict, first-death fallback, note width on the A12, 32-bit applets), `LinuxDoctorTest` (doctor script runs, parser, seccomp decision, pinned PRoot binaries).
+
 ## v0.30.1: Blaze Music and Blaze Video
 
 - Two new apps inside Blaze, each full screen with its own **Player | Library | Store** pill: **Music** (/music, Views) and **Video** (/video, Views).

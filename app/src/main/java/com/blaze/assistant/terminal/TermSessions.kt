@@ -3,6 +3,8 @@ package com.blaze.assistant.terminal
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
 import java.io.File
@@ -17,6 +19,10 @@ object TermSessions {
     class Tab(val n: Int, val env: TermLogic.Env, val session: TerminalSession, val busybox: Boolean = false) {
         @Volatile var finished = false
         @Volatile var welcomed = false
+        /** v0.30.2: when the tab was made (a BusyBox tab that dies within seconds is BusyBox failing to start). */
+        val started = System.currentTimeMillis()
+        /** v0.30.2: printed under the welcome, e.g. why this tab runs Android's shell instead of BusyBox. */
+        @Volatile var note: String? = null
     }
 
     val tabs = mutableListOf<Tab>()
@@ -30,7 +36,11 @@ object TermSessions {
     interface Listener {
         fun changed(tab: Tab?)
         fun structure()
+        /** v0.30.2: [old] (a dead BusyBox tab) was swapped in place for [new]. */
+        fun replaced(old: Tab, new: Tab) { structure() }
     }
+
+    private val main = Handler(Looper.getMainLooper())
 
     private lateinit var app: Context
 
@@ -43,8 +53,15 @@ object TermSessions {
             // v0.29.8: a phone tab killed by Android's sandbox (signal 31) says why, and the next start skips BusyBox.
             if (t != null) {
                 val status = try { s.exitStatus } catch (_: Exception) { 0 }
-                if (t.busybox && TermLogic.signalOf(status) == TermLogic.SIGSYS) Terminal.markBusyboxBroken()
-                TermLogic.finishNote(t.env.id, t.busybox, status)?.let { note -> val b = note.toByteArray(); s.emulator?.append(b, b.size) }
+                // v0.30.2: a BusyBox tab killed by the sandbox, or dead with an error within seconds of starting, is BusyBox
+                // not working on this phone: remember that for this build and swap the tab, right away, for one on
+                // Android's own sh. No dead tab, no "press Enter".
+                if (TermLogic.autoFallback(t.env.id, t.busybox, status, System.currentTimeMillis() - t.started)) {
+                    Terminal.markBusyboxBroken()
+                    main.post { respawnWithAndroidShell(t, TermLogic.fallbackNote(status)) }
+                } else {
+                    TermLogic.finishNote(t.env.id, t.busybox, status)?.let { note -> val b = note.toByteArray(); s.emulator?.append(b, b.size) }
+                }
             }
             screen?.structure(); screen?.changed(t)
         }
@@ -81,6 +98,24 @@ object TermSessions {
         Terminal.init(app); Terminal.setup()
         val e = env ?: TermLogic.pick(lastEnv, Distros.installedIds())
         lastEnv = e.id
+        if (e.id != "phone") Linux.selfTest(e.id)      // v0.30.2: once per build, in the background
+        val tab = spawn(e)
+        synchronized(tabs) { tabs += tab; current = tabs.size - 1 }
+        screen?.structure()
+        return tab
+    }
+
+    /** v0.30.2: replaces a phone tab whose BusyBox couldn't start with one on Android's sh, at the same place. */
+    private fun respawnWithAndroidShell(old: Tab, note: String) {
+        if (synchronized(tabs) { old !in tabs }) return     // the user already closed it
+        val tab = try { spawn(old.env, old.n) } catch (_: Exception) { return }
+        tab.note = note
+        synchronized(tabs) { val j = tabs.indexOf(old); if (j >= 0) tabs[j] = tab else { tab.session.finishIfRunning(); return } }
+        screen?.replaced(old, tab)
+    }
+
+    /** A new tab (not yet listed) running [e]; [n] is its number on the chip. */
+    private fun spawn(e: TermLogic.Env, n: Int = ++counter): Tab {
         val home = Terminal.home().absolutePath
         var usedBusybox = false
         val session = if (e.id != "phone" && Distros.installed(e.id)) {
@@ -94,10 +129,7 @@ object TermSessions {
             val extra = mapOf("ENV" to Terminal.phoneRc().absolutePath, "PS1" to if (l.busybox) "phone:\\w \\$ " else "phone \$ ")
             TerminalSession(l.path, home, l.argv.toTypedArray(), TermLogic.envArray(Terminal.env(), extra), 3000, client)
         }
-        val tab = Tab(++counter, e, session, usedBusybox)
-        synchronized(tabs) { tabs += tab; current = tabs.size - 1 }
-        screen?.structure()
-        return tab
+        return Tab(n, e, session, usedBusybox)
     }
 
     fun select(i: Int) { synchronized(tabs) { if (i in tabs.indices) current = i }; screen?.structure() }
