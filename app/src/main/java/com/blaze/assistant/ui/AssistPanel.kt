@@ -146,7 +146,8 @@ private fun AssistPanelBody(autoListen: Boolean, onClose: () -> Unit, onPin: () 
         val cmd = if (text.isBlank()) null else CommandRunner.run(ctx, text.trim(), openSettings = {
             ctx.startActivity(android.content.Intent(ctx, com.blaze.assistant.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }, listen = { })
         if (cmd == "") { text = ""; return }
-        if (mood == Mood.IDLE) { Agent.send(cmd ?: text, attachments = pending); text = ""; pending = emptyList() }
+        // v0.30.6 rapid messages: sending while Blaze works is fine (the message joins the turn).
+        Agent.send(cmd ?: text, attachments = pending); text = ""; pending = emptyList()
     }
 
     val card = RoundedCornerShape(28.dp)
