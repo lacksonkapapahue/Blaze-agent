@@ -15,6 +15,8 @@ import androidx.media3.exoplayer.source.ShuffleOrder
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * v0.30.1 Blaze Music's player: media3 ExoPlayer in a MediaSessionService, so music keeps playing with Blaze closed,
@@ -85,6 +87,7 @@ class MusicService : MediaSessionService() {
             override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                 item?.mediaId?.let { id -> MediaLib.find(id)?.let { MediaLib.played(it) } }
             }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) { retryStream(error) }
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_ENDED && sleepAt.value == -1L) sleepAt.value = 0
             }
@@ -106,6 +109,35 @@ class MusicService : MediaSessionService() {
         main.postDelayed(saver, 15_000)
     }
 
+    private val scope = kotlinx.coroutines.MainScope()
+    private val retried = HashSet<String>()
+
+    /**
+     * v0.30.5 (Luke: "The stream link expired or was refused"): a Store stream the server refuses (403 / 410) is asked
+     * for again once (the YouTube plug-in then tries its next client) and picks up where it stopped, instead of
+     * leaving the error on screen.
+     */
+    private fun retryStream(e: androidx.media3.common.PlaybackException) {
+        if (e.errorCode != androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
+        val item = player.currentMediaItem ?: return
+        val id = item.mediaId
+        if (!id.startsWith("stream:") || !retried.add(id)) return
+        val parts = id.split(":", limit = 3)
+        if (parts.size < 3) return
+        val src = com.blaze.assistant.mediaapps.store.StoreSources.get(parts[1]) ?: return
+        val index = player.currentMediaItemIndex
+        val pos = player.currentPosition
+        scope.launch {
+            val d = try { src.refresh(parts[2], "audio") } catch (_: Exception) { null } ?: return@launch
+            val f = src.streamPick("audio", d).firstOrNull() ?: return@launch
+            streamUa(src.userAgent)
+            if (index !in 0 until player.mediaItemCount || player.getMediaItemAt(index).mediaId != id) return@launch
+            player.replaceMediaItem(index, item.buildUpon().setUri(f.url).build())
+            player.seekTo(index, pos.coerceAtLeast(0))
+            player.prepare(); player.play()
+        }
+    }
+
     /** Shuffle with the song that's playing first (QueueLogic, unit tested), the rest random. */
     fun reshuffle() {
         val n = player.mediaItemCount
@@ -125,6 +157,7 @@ class MusicService : MediaSessionService() {
         saveQueue()
         main.removeCallbacks(sleepTick); main.removeCallbacks(saver)
         current = null
+        scope.cancel()
         session?.run { player.release(); release() }
         session = null
         super.onDestroy()

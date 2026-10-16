@@ -42,6 +42,7 @@ object MediaLib {
             if (app != null) return
             app = ctx.applicationContext
             val c = app!!
+            Taste.init(c)
             downloads = readTracks(f(c, "library.json"))
             _playlists.value = runCatching { val a = JSONArray(f(c, "playlists.json").readText()); (0 until a.length()).map { pl(a.getJSONObject(it)) } }.getOrDefault(emptyList())
             _recent.value = readStrings(f(c, "recent.json"))
@@ -121,6 +122,7 @@ object MediaLib {
     // ---- recents / positions ----
     fun played(t: Track) {
         val c = app ?: return
+        Taste.note(c, t.kind, t.title, t.artist, Taste.PLAY)
         if (t.kind == "video") { _recentVideos.value = Recents.push(_recentVideos.value, t.key); write(f(c, "recent-videos.json"), JSONArray(_recentVideos.value).toString()) }
         else { _recent.value = Recents.push(_recent.value, t.key); write(f(c, "recent.json"), JSONArray(_recent.value).toString()) }
     }

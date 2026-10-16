@@ -453,9 +453,11 @@ fun WorkCard(steps: List<ChatMessage>, live: Boolean, startAt: Long, endAt: Long
     val time = if (startAt > 0 && end >= startAt) " · " + formatDuration(end - startAt) else ""
     val pulse = if (live) rememberInfiniteTransition(label = "p").animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "a").value else 1f
     // v0.24.0: inline with the thread, no outline: a soft rounded strip on Blaze's side; a live one gets an accent wash.
-    Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
-        .background(if (live) c.accent.copy(alpha = 0.08f) else GlassBubble.stripFill(c))
-        .border(1.dp, if (live) c.accent.copy(alpha = 0.45f) else GlassBubble.stripEdge(c), RoundedCornerShape(16.dp))) {
+    // v0.30.5: the same theme glass as Blaze's bubbles once done; a live one keeps its accent wash and edge.
+    Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).fillMaxWidth()
+        .then(if (live) Modifier.clip(RoundedCornerShape(16.dp)).background(c.accent.copy(alpha = 0.08f))
+                .border(1.dp, c.accent.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+            else Modifier.chatGlass(c, mine = false, shape = RoundedCornerShape(16.dp)))) {
         Row(Modifier.fillMaxWidth().clickable(enabled = n > 0) { open = !open }.padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(7.dp).alpha(pulse).clip(CircleShape).background(if (live) c.accent else c.weak))

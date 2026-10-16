@@ -152,6 +152,7 @@ class VideoActivity : ComponentActivity() {
                 if (Build.VERSION.SDK_INT >= 26) runCatching { setPictureInPictureParams(pipParams()) }
             }
             override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_ENDED) current.value?.let { MediaLib.savePosition(it.key, 0, 1) } }
+            override fun onPlayerError(error: PlaybackException) { retryStream(error) }
         })
         StoragePermission.asker = null
         setContent { BlazeTheme { VideoApp(this) } }
@@ -179,18 +180,39 @@ class VideoActivity : ComponentActivity() {
         tab.value = "player"
     }
 
+    private var lastWatch: Pair<StoreItem, StoreSource>? = null
+    private var retriedKey = ""
+
+    /** v0.30.5: a refused stream (403 / 410) is asked for again once and resumes where it stopped (see MusicService). */
+    private fun retryStream(e: PlaybackException) {
+        if (e.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return
+        val t = current.value ?: return
+        val (item, src) = lastWatch ?: return
+        if (t.source != "stream" || retriedKey == t.key) return
+        retriedKey = t.key
+        val pos = player.currentPosition
+        lifecycleScope.launch {
+            val d = try { src.refresh(item.id, "video") } catch (_: Exception) { null } ?: return@launch
+            if (current.value?.key == t.key) watch(item, d, src, pos)
+        }
+    }
+
     /** Watch a Store result without downloading: one progressive file, or video + audio merged while playing. */
-    fun watch(item: StoreItem, d: StoreDetail, src: StoreSource) {
+    fun watch(item: StoreItem, d: StoreDetail, src: StoreSource, at: Long = 0) {
         val picks = src.streamPick("video", d)
         if (picks.isEmpty()) return
+        lastWatch = item to src
+        if (at == 0L) retriedKey = ""
         savePos()
         http.setUserAgent(src.userAgent)
+        Taste.note(this, "video", d.title.ifBlank { item.title }, d.author.ifBlank { item.author }, Taste.PLAY)
         val t = Track("stream:${item.source}:${item.id}", picks[0].url, d.title.ifBlank { item.title }, d.author.ifBlank { item.author }, "",
             d.lengthSec * 1000L, item.thumb, "stream", 0, item.id, "video", d.licence.ifBlank { item.licence }, item.source)
         current.value = t
         val factory = ProgressiveMediaSource.Factory(DefaultDataSource.Factory(this, http))
         if (picks.size == 1) player.setMediaItem(MediaItem.Builder().setMediaId(t.key).setUri(picks[0].url).build())
         else player.setMediaSource(MergingMediaSource(*picks.map { factory.createMediaSource(MediaItem.fromUri(it.url)) }.toTypedArray()))
+        if (at > 0) player.seekTo(at)
         player.prepare(); player.play()
         tab.value = "player"
     }

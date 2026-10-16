@@ -33,7 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
@@ -153,33 +155,58 @@ object Bubbles {
  *
  * v0.29.5/0.29.6: nearly clear glass. The fills are a whisper of tint (no opaque backing anywhere, cards inside included)
  * and the particles drift across the thread. The text keeps a soft halo in the page colour ([halo]) so it stays readable.
+ *
+ * v0.30.5: theme-fitted glass instead of the blue outline (see below).
  */
 object GlassBubble {
-    // v0.29.5: nearly clear (Luke: "still looks solid / grey"). Particles drift over the thread, so they show through.
-    fun mineFill(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.10f else 0.05f)
-    fun mineEdge(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.75f else 0.60f)
-    fun blazeFill(c: BlazeColors): Color = c.accent.copy(alpha = if (c.dark) 0.04f else 0.015f)
-    fun blazeEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.30f else 0.22f)
-    /** Strips and chips in the thread (the work card, follow-ups): clear with a hairline instead of a grey slab. */
+    /*
+     * v0.30.5: glass that fits the theme (Luke: "give chat boxes the glass look as well fitted to the theme").
+     * Dark: a translucent white-tinted glass with a faint light hairline. Light: a translucent white frost with a soft
+     * darker hairline. Both are brighter at the top and keep the text halo, so particles still drift through. Your
+     * bubbles carry a whisper of the accent; Blaze's are neutral. No blue outline.
+     */
+    private fun tint(c: BlazeColors, mine: Boolean): Color = if (mine) lerp(Color.White, c.accent, if (c.dark) 0.35f else 0.10f) else Color.White
+    /** Top and bottom alpha of a bubble's glass. */
+    private fun alphas(c: BlazeColors, mine: Boolean): Pair<Float, Float> = when {
+        c.dark && mine -> 0.16f to 0.09f
+        c.dark -> 0.10f to 0.05f
+        mine -> 0.66f to 0.50f
+        else -> 0.60f to 0.44f
+    }
+    /** The glass fill of a bubble (and the work card). */
+    fun fill(c: BlazeColors, mine: Boolean): Brush = alphas(c, mine).let { (top, bottom) ->
+        val t = tint(c, mine); Brush.verticalGradient(listOf(t.copy(alpha = top), t.copy(alpha = bottom)))
+    }
+    /** The hairline: a light rim catching the light at the top, the theme's soft edge below. */
+    fun edge(c: BlazeColors): Brush = Brush.verticalGradient(listOf(hairTop(c), hairline(c)))
+    fun hairline(c: BlazeColors): Color = if (c.dark) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.11f)
+    fun hairTop(c: BlazeColors): Color = if (c.dark) Color.White.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.95f)
+    /** The most opaque the glass gets, per theme (GlassBubbleTest): frosted, never solid. */
+    fun maxAlpha(dark: Boolean): Float = if (dark) 0.20f else 0.70f
+
+    /** The glass's top colour (for fades inside answer cards, [LocalBubble]). */
+    fun mineFill(c: BlazeColors): Color = alphas(c, true).let { tint(c, true).copy(alpha = it.first) }
+    fun blazeFill(c: BlazeColors): Color = alphas(c, false).let { tint(c, false).copy(alpha = it.first) }
+    /** Strips and chips in the thread (follow-ups): clear with a hairline instead of a grey slab. */
     fun stripFill(c: BlazeColors): Color = Color.Transparent
     fun stripEdge(c: BlazeColors): Color = c.ink.copy(alpha = if (c.dark) 0.22f else 0.16f)
-    // v0.29.9: nothing opaque inside a bubble either, and the words keep a soft halo for contrast.
-    /** The most opaque any bubble fill may be (GlassBubbleTest). */
-    const val MAX_FILL_ALPHA = 0.16f
     /** Code / table cards inside a bubble: a soft inset, still see-through. */
     fun cardFill(c: BlazeColors): Color = c.inset.copy(alpha = if (c.dark) 0.30f else 0.40f)
     /** A soft glow in the page colour behind every letter, so the words stay crisp with particles drifting across them. */
     fun halo(c: BlazeColors): Shadow = Shadow(color = c.paper.copy(alpha = if (c.dark) 0.85f else 0.95f), offset = Offset.Zero, blurRadius = 6f)
 }
 
-/** Your message: a see-through accent bubble on the right with a clear outline (ink text). */
+/** v0.30.5: a chat box's glass (bubble, work card): theme fill, then the hairline, in [shape]. */
+fun Modifier.chatGlass(c: BlazeColors, mine: Boolean, shape: androidx.compose.ui.graphics.Shape): Modifier =
+    clip(shape).background(GlassBubble.fill(c, mine), shape).border(1.dp, GlassBubble.edge(c), shape)
+
+/** Your message: a theme glass bubble on the right with a whisper of the accent (ink text). */
 @Composable
 fun UserBubble(text: String, quoted: String = "", pos: GroupPos = GroupPos.SINGLE, modifier: Modifier = Modifier) {
     val c = LocalBlaze.current
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         val shape = Bubbles.shape(Side.ME, pos)
-        Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(shape).background(GlassBubble.mineFill(c))
-            .border(1.2.dp, GlassBubble.mineEdge(c), shape)
+        Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).chatGlass(c, mine = true, shape = shape)
             .padding(horizontal = 14.dp, vertical = 9.dp)) {
             if (quoted.isNotEmpty()) {
                 Row(Modifier.padding(bottom = 6.dp).height(IntrinsicSize.Min)) {
@@ -205,8 +232,10 @@ fun BlazeBubble(pos: GroupPos = GroupPos.SINGLE, modifier: Modifier = Modifier, 
     val bg = fill ?: GlassBubble.blazeFill(c)
     val shape = Bubbles.shape(Side.BLAZE, pos)
     Row(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).clip(shape).background(bg)
-            .border(1.2.dp, if (fill != null) c.accent.copy(alpha = 0.45f) else GlassBubble.blazeEdge(c), shape)
+        // v0.30.5: theme glass; an error keeps its accent wash and edge.
+        val look = if (fill != null) Modifier.clip(shape).background(fill).border(1.2.dp, c.accent.copy(alpha = 0.45f), shape)
+            else Modifier.chatGlass(c, mine = false, shape = shape)
+        Column(Modifier.padding(end = 28.dp).widthIn(max = 340.dp).then(look)
             .padding(horizontal = 14.dp, vertical = 10.dp)) {
             CompositionLocalProvider(LocalBubble provides bg) { content() }
         }

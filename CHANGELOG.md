@@ -2,6 +2,20 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.5: Fixes batch (secure form, YouTube streams, Home glass, chat glass, taste, skill guard, send hitch)
+
+- **Secure sign-in form closes when the task stops.** A stopped or killed task used to leave its secure form on screen. The wait is now in try/finally: the card and its notification go away on stop, cancel or force-quit, an answered form disappears at once, and the task is told not to ask that site again.
+- **YouTube Music / Video play and download again** ("The stream link expired or was refused"). The YouTube plug-in (Blaze-mobile) probes each client's stream urls before handing them out, skips a refused client, sends a visitor id, and uses ANDROID 20.10.38 (19.44.38 now gets 400). The music and video players retry once on a refused stream with a fresh link and resume where they were; downloads refresh the link the same way.
+- **Store suggestions and taste.** YouTube and other search-only stores open on a scrollable row of ideas instead of a blank search. Ideas come from what you play and download (kept on the phone, `Taste`), and Blaze saves a short "music and video taste" memory.
+- **Jamendo.** The client id ships in the APK when the `JAMENDO_CLIENT_ID` secret is set in CI; otherwise the setup card offers "Get a free ID" and "Ask Blaze to set it up" (the `jamendo_setup` tool checks the id with Jamendo before saving).
+- Home web window is fixed again (no moving or resizing, like v0.29.3). The page only scrolls; slide on the glass or around it for a slight tilt that springs back. The page no longer goes black, and the title bar is opaque enough to read in light and dark.
+- New live browser preview on Home: while Blaze works in its browser, a fixed glass window shows the page and the current step. Preview only: tap or Watch opens the full browser, × hides it until the next task.
+- Chat bubbles and the "Worked · N steps" card use theme glass: white-tinted glass with a light hairline in dark, frosted white with a soft dark hairline in light. The blue outline is gone.
+- Sent pictures stand on their own (rounded, right-aligned, no bubble around them); your words get their own bubble underneath.
+- **No hitch when you send.** Every send turned the whole chat (all messages and the full model history) into JSON on the main thread, which grows with the one long main chat. Only a cheap snapshot is taken now; the JSON is built and written in the background, newest snapshot wins.
+- **Skill guard.** `use_skill` / `run_skill` only load a skill that shares real words with what you asked (your last few messages). One shared word is refused once and needs a stated reason; no overlap is always refused; naming the skill always works. The per-turn suggestions drop skills matched by a single stray word (`SkillGuard`, SkillGuardTest).
+- **Often-done tasks get skills first.** Every real task (2+ tool calls) is counted by its fingerprint. A task done 3 times with no skill covering it triggers the learning review with skill-writing first, and the prompt lists up to three such tasks so Blaze saves a workflow next time.
+
 ## v0.30.4: Fast phone actions, true storage figures
 
 The A12 trace of "stop GitHub opening links in the GitHub app" took 18 steps and 4 min 25 s before it was stopped (≈ 7 s a step, one model round trip per tap). Causes found in the code, and the fixes:

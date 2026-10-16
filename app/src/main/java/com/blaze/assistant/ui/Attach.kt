@@ -222,8 +222,9 @@ fun ImagePreview(path: String, onDismiss: () -> Unit) {
 }
 
 /**
- * Your sent message with pictures: the thumbnails sit inside your bubble (rounded, tap to preview), the words under
- * them, and non-picture files as icon chips below. Old messages without thumbnails show the file chips only.
+ * Your sent message with pictures. v0.30.5: the pictures stand on their own (rounded, right-aligned, no bubble around
+ * them; Luke: "images should not be in the blue bubble thingy"), tap to preview; the words get their own normal bubble
+ * underneath, and non-picture files sit as icon chips below. Old messages without thumbnails show the file chips only.
  */
 @Composable
 fun SentBubble(text: String, quoted: String, media: List<String>, files: List<String>, pos: GroupPos, bitmaps: List<ImageBitmap?>? = null) {
@@ -233,29 +234,25 @@ fun SentBubble(text: String, quoted: String, media: List<String>, files: List<St
     val words = AttachView.bubbleText(text, media)
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         if (media.isNotEmpty()) {
-            Column(Modifier.padding(start = 48.dp).widthIn(max = 300.dp).clip(Bubbles.shape(Side.ME, pos)).background(GlassBubble.mineFill(c))
-                .border(1.2.dp, GlassBubble.mineEdge(c), Bubbles.shape(Side.ME, pos)).padding(4.dp),
-                horizontalAlignment = Alignment.End) {
-                val single = media.size == 1
-                // v0.28.1: several pictures = a fanned card stack (swipe to flip, tap or ⤢ for the full-screen viewer).
-                if (!single) ImageStack(media.take(12), bitmaps, onOpen = { previewAt = it })
-                else Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    media.take(6).forEachIndexed { i, p ->
-                        val bmp = bitmaps?.getOrNull(i) ?: rememberBitmap(p, if (single) 720 else 300)
-                        val shape = RoundedCornerShape(16.dp)
-                        Box(Modifier.then(if (single) Modifier.widthIn(min = 120.dp, max = 260.dp).heightIn(min = 90.dp, max = 300.dp) else Modifier.size(96.dp))
-                            .clip(shape).background(c.paper.copy(alpha = 0.12f)).clickable(onClickLabel = "Preview picture") { preview = p }
-                            .semantics { contentDescription = "Sent picture ${i + 1}" }) {
-                            if (bmp != null) Image(bmp, contentDescription = null, contentScale = if (single) ContentScale.Fit else ContentScale.Crop,
-                                modifier = if (single) Modifier.widthIn(max = 260.dp).heightIn(max = 300.dp) else Modifier.fillMaxSize())
-                            else Box(Modifier.size(if (single) 160.dp else 96.dp, if (single) 120.dp else 96.dp))
-                        }
-                    }
+            val single = media.size == 1
+            // v0.28.1: several pictures = a fanned card stack (swipe to flip, tap or ⤢ for the full-screen viewer).
+            if (!single) Box(Modifier.padding(start = 48.dp)) { ImageStack(media.take(12), bitmaps, onOpen = { previewAt = it }) }
+            else {
+                val p = media[0]
+                val bmp = bitmaps?.getOrNull(0) ?: rememberBitmap(p, 720)
+                val shape = RoundedCornerShape(18.dp)
+                Box(Modifier.padding(start = 48.dp).widthIn(min = 120.dp, max = 260.dp).heightIn(min = 90.dp, max = 300.dp)
+                    .clip(shape).background(if (bmp == null) c.faint else Color.Transparent)
+                    .clickable(onClickLabel = "Preview picture") { preview = p }
+                    .semantics { contentDescription = "Sent picture 1" }) {
+                    if (bmp != null) Image(bmp, contentDescription = null, contentScale = ContentScale.Fit,
+                        modifier = Modifier.widthIn(max = 260.dp).heightIn(max = 300.dp).clip(shape))
+                    else Box(Modifier.size(160.dp, 120.dp))
                 }
-                if (words.isNotBlank() || quoted.isNotBlank()) {
-                    Text(remember(words, c.ink) { Md.render(words, c.ink, c.ink.copy(alpha = 0.10f)) }, modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 5.dp),
-                        style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, color = c.ink))
-                }
+            }
+            if (words.isNotBlank() || quoted.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                UserBubble(words, quoted, pos)
             }
         } else UserBubble(text, quoted, pos)
         val chips = AttachView.fileChips(files, media)

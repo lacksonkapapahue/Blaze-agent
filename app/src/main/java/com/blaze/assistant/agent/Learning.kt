@@ -134,7 +134,7 @@ object Learning {
                 .put("name", p("short-kebab-name")).put("description", p("One line: what it does"))
                 .put("when", p("When to use it")).put("steps", p("Numbered steps")), listOf("action", "name")),
         fn("run_skill", "Replay a learned skill's recorded phone steps quickly, without thinking through each tap.",
-            JSONObject().put("name", p("Skill name")), listOf("name")),
+            JSONObject().put("name", p("Skill name")).put("reason", p("Only after a refusal: how this skill applies to the request")), listOf("name")),
         fn("search_past_chats", "Search earlier conversations with the user (titles, summaries and messages) to recall what was said or decided.",
             JSONObject().put("query", p("Words to look for")), listOf("query")),
     )
