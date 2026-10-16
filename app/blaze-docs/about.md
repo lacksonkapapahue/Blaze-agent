@@ -72,6 +72,7 @@ Views reachable from /views also open their settings pages: Memory, Schedule, Ag
 ## Known limits
 - Free models vary in speed and quality and can hit rate limits; the gateway retries on another model.
 - Phone control needs the Accessibility permission and can't act inside apps that block it (some banking apps, secure screens).
+- Bank mode (/bank-mode, "bank mode on", Quick Settings tile, Settings → Phone control): banking apps that refuse to run while an accessibility service or overlay is on can open. Blaze removes its bubble, pointer and other overlays and switches phone control off; chat keeps working. It ends when the user switches Blaze phone control back on (the notification's "Turn Blaze back on"). Optional auto mode needs WRITE_SECURE_SETTINGS granted over ADB / Shizuku.
 - My voice is slow on low-end phones; Blaze falls back to the phone voice and says so.
 - Google Classroom needs the Classroom API enabled on Blaze's Google project before it works.
 - Blaze Free (WARP) sign-up can be refused by Cloudflare on some networks.

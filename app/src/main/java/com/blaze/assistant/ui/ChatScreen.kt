@@ -544,7 +544,13 @@ fun ChatScreen() {
                 LaunchedEffect(a11yOn) { if (a11yOn) Settings.setBool("a11y_seen", true) }
                 LaunchedEffect(control) { if (control == com.blaze.assistant.phone.PhoneControl.State.CONNECTED) Settings.setBool("a11y_seen", true) }
                 // v0.20.0: say which way it dropped and fix it in one tap (Blaze's own switch, not the whole list).
-                if (control != com.blaze.assistant.phone.PhoneControl.State.CONNECTED && Settings.phoneControl && Settings.bool("a11y_seen", false))
+                // v0.30.9: in bank mode the banner says so and "Turn Blaze back on" opens Blaze's switch (the drop is on purpose).
+                val bankOn by com.blaze.assistant.phone.BankMode.state.collectAsState()
+                if (bankOn) BankModeBanner {
+                    ComeBack.watch(ctx) { BlazeAccessibilityService.instance != null }
+                    Toast.makeText(ctx, com.blaze.assistant.phone.BankMode.turnOff(ctx), Toast.LENGTH_LONG).show()
+                }
+                else if (control != com.blaze.assistant.phone.PhoneControl.State.CONNECTED && Settings.phoneControl && Settings.bool("a11y_seen", false))
                     PhoneControlBanner(control) {
                         ComeBack.watch(ctx) { BlazeAccessibilityService.instance != null }
                         try { ctx.startActivity(com.blaze.assistant.phone.PhoneControl.fixIntent(ctx)) }
@@ -633,6 +639,7 @@ fun ChatScreen() {
                 add(MenuItem("settings", "Settings"))
                 add(MenuItem("views", "All views", "/VIEWS"))
                 add(MenuItem("control", "Phone control", if (Settings.phoneControl && a11yOn) "ON" else "OFF"))
+                add(MenuItem("bank", "Bank mode", if (com.blaze.assistant.phone.BankMode.isOn) "ON" else "OFF"))
                 add(MenuItem("theme", if (dark) "Light theme" else "Dark theme", themeSub))
                 add(MenuItem("update", "Check for updates", "v" + runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrDefault("")))
                 if (me != null) add(MenuItem("signout", "Sign out"))
@@ -646,6 +653,7 @@ fun ChatScreen() {
                         "router" -> settingsPage = "ai"
                         "views" -> showViews = true
                         "control" -> settingsPage = "control"
+                        "bank" -> Agent.send(if (com.blaze.assistant.phone.BankMode.isOn) "/bank-mode off" else "/bank-mode on")
                         "theme" -> ThemeMode.set(if (dark) "light" else "dark")
                         "update" -> com.blaze.assistant.update.Updater.start(ctx)
                         "signout" -> scope.launch { com.blaze.assistant.connect.BlazeAccount.signOut() }

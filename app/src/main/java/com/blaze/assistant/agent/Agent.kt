@@ -381,6 +381,15 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             else SelfControl.run(app, self)
             return
         }
+        // v0.30.9 Bank mode: "/bank-mode", "bank mode on/off", "/bank-mode open Zanaco" run on the phone, never through a model.
+        if (attachments.isEmpty() && untrusted == null) {
+            com.blaze.assistant.phone.BankModeLogic.parse(text)?.let { c ->
+                val r = try { com.blaze.assistant.phone.BankMode.run(app, c) } catch (e: Exception) { "Bank mode didn't change: ${e.message ?: "error"}." }
+                com.blaze.assistant.device.Haptics.tick(app)
+                cur.selfTurn(text.trim(), r, byVoice, "\uD83C\uDFE6 Bank mode")
+                return
+            }
+        }
         // Time, date, battery: answered on the phone instantly.
         if (attachments.isEmpty() && _question.value == null) {
             SelfControl.quick(app, text)?.let { r -> com.blaze.assistant.device.Haptics.tick(app); cur.selfTurn(text.trim(), r, byVoice, "⚡ Instant"); return }

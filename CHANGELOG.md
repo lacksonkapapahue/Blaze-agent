@@ -2,6 +2,15 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.9: Bank mode
+
+Banking apps refuse to run while an accessibility service like Blaze's is on. Bank mode lets Blaze live beside them.
+- **Switch, tile and command.** A Bank mode switch (Phone control settings), a Quick Settings tile, the avatar menu, and `/bank-mode` (`on`, `off`, `status`, `apps`, `open <app>`, `add <app>`, `remove <app>`; aliases `/bankmode`, `/bank`). Plain phrases work too ("bank mode on", "open Zanaco in bank mode"). Replies come straight from the phone, no model call.
+- **On:** removes every Blaze overlay (bubble, task card, pointer, Magic Hand), stops the wake word, then truly switches phone control off with `disableSelf()`. `/bank-mode open <app>` launches the bank app first. A quiet ongoing notification has "Turn Blaze back on", which opens Blaze's own accessibility page (Android 11+) or highlights its row.
+- **Off:** when phone control reconnects, bank mode clears and the bubble and wake word come back. Chat keeps working throughout; phone tools explain bank mode is on.
+- **Auto mode (optional, needs a one-time ADB/Shizuku grant of WRITE_SECURE_SETTINGS):** Blaze removes itself from the enabled services when a chosen bank app opens and, with Usage access, adds itself back when it leaves.
+- **One-time offer** the first time a bank or mobile-money app opens.
+
 ## v0.30.5: Fixes batch (secure form, YouTube streams, Home glass, chat glass, taste, skill guard, send hitch)
 
 - **Secure sign-in form closes when the task stops.** A stopped or killed task used to leave its secure form on screen. The wait is now in try/finally: the card and its notification go away on stop, cancel or force-quit, an answered form disappears at once, and the task is told not to ask that site again.

@@ -26,6 +26,8 @@ class BlazeApp : Application() {
         }
         com.blaze.assistant.agent.IntentCache.init(this)
         com.blaze.assistant.phone.Watchers.init(this)
+        // v0.30.9 Bank mode: state flow + auto-mode poller after a restart.
+        try { com.blaze.assistant.phone.BankMode.boot(this) } catch (_: Throwable) { }
         com.blaze.assistant.agent.Autonomy.init(this)
         com.blaze.assistant.agent.Processes.init(this)
         // One mind (v0.18.0): blaze.db first (mind.db until it is copied); Memory is now a view of its memories table.

@@ -15,6 +15,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.blaze.assistant.phone.PhoneControl
 
+/** v0.30.9: "Bank mode on, Blaze's phone control is paused · Turn Blaze back on". */
+@Composable
+fun BankModeBanner(onBack: () -> Unit) {
+    val c = LocalBlaze.current
+    Column(Modifier.fillMaxWidth().background(c.paper).hairlineTop(c.accent).padding(horizontal = 14.dp, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Label(com.blaze.assistant.phone.BankModeLogic.NOTE_TITLE, size = 10.sp, modifier = Modifier.weight(1f))
+            ActionText(com.blaze.assistant.phone.BankModeLogic.NOTE_ACTION, color = c.accent, size = 10.sp, modifier = Modifier.clickable(onClick = onBack).padding(8.dp))
+        }
+    }
+}
+
 /** "Android switched off Blaze phone control · Turn on" (v0.20.0): which way it dropped, one-tap fix, and why. */
 @Composable
 fun PhoneControlBanner(state: PhoneControl.State, onFix: () -> Unit) {

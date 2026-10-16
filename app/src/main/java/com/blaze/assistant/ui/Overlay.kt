@@ -150,6 +150,8 @@ object Overlay {
 
     fun showOrb(ctx: Context): Boolean {
         if (orbView != null) return true
+        // v0.30.9: no Blaze window over other apps while bank mode is on (banking apps check for overlays).
+        if (com.blaze.assistant.phone.BankMode.isOn) return false
         val (hc, type) = host(ctx) ?: return false
         val wm = hc.getSystemService(WindowManager::class.java)
         val d = hc.resources.displayMetrics.density
@@ -228,6 +230,14 @@ object Overlay {
         }, 260)
     }
 
+    /** v0.30.9 Bank mode: every Blaze window over other apps goes (panel, orb, bin, task card); the orb stays pinned for later. */
+    fun hideForBankMode(ctx: Context) {
+        runCatching { closePanel() }
+        runCatching { hideBin() }
+        runCatching { hideOrb(ctx, unpin = false) }
+        runCatching { hideCard() }
+    }
+
     fun hideOrb(ctx: Context, unpin: Boolean = true) {
         orbView?.let { v -> runCatching { (v.context.getSystemService(WindowManager::class.java)).removeView(v) } }
         orbOwner?.destroy()
@@ -265,7 +275,7 @@ object Overlay {
                 }
                 if (!busy && wasBusy) cardUntil = 0L
                 wasBusy = busy; wasFg = Agent.inForeground
-                val want = busy && Settings.taskCard && !Agent.inForeground && panelView == null && canDrawOverApps(app) && now < cardUntil
+                val want = busy && Settings.taskCard && !com.blaze.assistant.phone.BankMode.isOn && !Agent.inForeground && panelView == null && canDrawOverApps(app) && now < cardUntil
                 if (want && cardView == null) showCard(app) else if (!want && cardView != null) hideCard()
                 kotlinx.coroutines.delay(400)
             }

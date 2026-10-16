@@ -53,6 +53,9 @@
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <!-- v0.30.9 Bank mode auto mode only: never asked for in the app; granted once over ADB / Shizuku with
+         `pm grant com.blaze.assistant android.permission.WRITE_SECURE_SETTINGS`. Without it, bank mode is the manual switch. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -271,6 +274,17 @@
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
         </service>
+
+        <!-- v0.30.9 Bank mode: Quick Settings tile and notification actions. -->
+        <service
+            android:name=".phone.BankModeTile"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_blaze"
+            android:label="Bank mode"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
+        </service>
+        <receiver android:name=".phone.BankModeReceiver" android:exported="false" />
 
         <receiver android:name=".notify.ActionReceiver" android:exported="false" />
         <receiver android:name=".update.InstallReceiver" android:exported="false" />

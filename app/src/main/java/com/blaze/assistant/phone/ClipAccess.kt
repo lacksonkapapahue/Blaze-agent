@@ -36,7 +36,7 @@ object ClipAccess {
 
     /** Run [block] while Blaze holds input focus, so Android allows clipboard reads. */
     private suspend fun <T> withFocus(ctx: Context, block: () -> T): T = withContext(Dispatchers.Main) {
-        if (Agent.inForeground) return@withContext block()
+        if (Agent.inForeground || BankMode.isOn) return@withContext block()   // v0.30.9: no overlay window in bank mode
         val (host, type) = BlazeAccessibilityService.instance?.let { it to WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY }
             ?: if (android.provider.Settings.canDrawOverlays(ctx)) ctx.applicationContext to WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else return@withContext block() // no way to take focus; try anyway (works on older Android)

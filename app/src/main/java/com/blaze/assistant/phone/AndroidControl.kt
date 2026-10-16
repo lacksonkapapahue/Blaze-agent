@@ -177,7 +177,7 @@ object AndroidControl {
     }
 
     private fun system(action: String): String {
-        val svc = BlazeAccessibilityService.instance ?: return "Turn on Blaze phone control first."
+        val svc = BlazeAccessibilityService.instance ?: return if (BankMode.isOn) BankModeLogic.TOOL_REPLY else "Turn on Blaze phone control first."
         val g = when (action) {
             "power_dialog" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_POWER_DIALOG
             "split_screen" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN

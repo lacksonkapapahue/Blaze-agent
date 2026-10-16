@@ -39,6 +39,8 @@ class BlazeAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         com.blaze.assistant.device.CrashLog.write("Phone control connected")
+        // v0.30.9: switching phone control back on ends bank mode (notification gone; the orb and wake word come back below).
+        try { BankMode.onServiceConnected(this) } catch (_: Throwable) { }
         com.blaze.assistant.voice.WakeWordService.start(this)
         if (com.blaze.assistant.agent.Settings.orbPinned) com.blaze.assistant.ui.Overlay.showOrb(this)
     }
@@ -64,6 +66,9 @@ class BlazeAccessibilityService : AccessibilityService() {
             val pkg = event.packageName?.toString().orEmpty()
             if (pkg.isNotEmpty() && pkg != lastWindowPkg && pkg != packageName) {
                 lastWindowPkg = pkg
+                // v0.30.9 Bank mode: a chosen bank app in front pauses Blaze (auto mode), or a bank app gets the one-time offer.
+                try { BankMode.onForeground(this, pkg, appLabel(pkg)) } catch (_: Throwable) { }
+                if (BankMode.isOn) return
                 com.blaze.assistant.agent.ScreenMemory.onWindow(this, pkg)
                 try { com.blaze.assistant.proactive.Triggers.onApp(pkg, appLabel(pkg)) } catch (_: Exception) { }
             }

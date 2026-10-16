@@ -51,6 +51,7 @@ object Commands {
         Command("browser", "", "Blaze's browser"),
         Command("logs", "[on|off|pause|status]", "Life logs: transcribe what the mic hears into memory"),
         Command("brainstorm", "", "Think out loud; get ideas, decisions and next steps when you stop"),
+        Command("bank-mode", "[on|off|open <app>|add <app>]", "Bank mode: pause phone control and overlays so banking apps open"),
         Command("help", "", "List all commands")
     )
 

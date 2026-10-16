@@ -81,7 +81,8 @@ object CommandRunner {
             }
             "think", "reasoning" -> { Settings.showReasoning = !Settings.showReasoning; toast("Thinking line " + if (Settings.showReasoning) "shown" else "hidden") }
             "voice", "listen" -> listen()
-            "orb" -> if (!Overlay.showOrb(ctx)) Overlay.requestOverlayPermission(ctx)
+            "orb" -> if (com.blaze.assistant.phone.BankMode.isOn) Agent.note("Bank mode is on, so the bubble stays hidden. /bank-mode off brings it back.")
+                else if (!Overlay.showOrb(ctx)) Overlay.requestOverlayPermission(ctx)
             "logs", "livelogs", "lifelogs" -> com.blaze.assistant.life.LifeLogs.toggleFromCommand(ctx, arg)
             "brainstorm" -> com.blaze.assistant.life.LifeLogs.toggleFromCommand(ctx, if (com.blaze.assistant.life.LifeLogs.active && arg.isBlank()) "stop" else "brainstorm")
             "copy" -> {

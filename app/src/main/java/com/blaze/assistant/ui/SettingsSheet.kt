@@ -261,6 +261,7 @@ private fun ControlPage(a11yOn: Boolean, onOpenAccessibility: () -> Unit) {
     }
     if (!a11yOn) Text("If Android calls it a restricted setting: App info → Blaze → ⋮ → Allow restricted settings, then try again.",
         style = TextStyle(fontFamily = Type.Sans, fontSize = 12.sp, lineHeight = 18.sp, color = c.sub), modifier = Modifier.padding(top = 8.dp))
+    BankModeSection()   // v0.30.9
     SkillsSection()
     NotificationAccessRow()
 }
