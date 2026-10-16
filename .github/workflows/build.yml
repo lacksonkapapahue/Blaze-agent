@@ -26,10 +26,44 @@ jobs:
       contents: write
       issues: write
     timeout-minutes: 45
+    env:
+      # The YouTube plug-in lives in the private repo lacksonkapapahue/Blaze-mobile and is checked out into youtube/.
+      # BLAZE_MOBILE_TOKEN = fine-grained PAT, Contents: read on Blaze-mobile. Missing (forks, or not set) = no YouTube.
+      HAS_BLAZE_MOBILE_TOKEN: ${{ secrets.BLAZE_MOBILE_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # YouTube Store plug-in (Gradle :youtube, only built when youtube/build.gradle.kts exists). Never fails the build:
+      # without the secret, or if the checkout fails, Blaze builds WITHOUT YouTube and the next step says so.
+      - name: Check out the YouTube plug-in (Blaze-mobile → youtube/)
+        id: yt_checkout
+        if: env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: lacksonkapapahue/Blaze-mobile
+          ref: main
+          token: ${{ secrets.BLAZE_MOBILE_TOKEN }}
+          path: youtube
+          persist-credentials: false
+
+      - name: YouTube plug-in status
+        id: yt
+        run: |
+          if [ -f youtube/build.gradle.kts ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            MSG="YouTube plug-in: INCLUDED (Blaze-mobile main @ $(git -C youtube rev-parse --short HEAD))"
+            echo "$MSG"; echo "### $MSG" >> "$GITHUB_STEP_SUMMARY"
+          else
+            rm -rf youtube
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            if [ "$HAS_BLAZE_MOBILE_TOKEN" != "true" ]; then WHY="the BLAZE_MOBILE_TOKEN secret is not available (not set, or a pull request from a fork)"
+            else WHY="checking out lacksonkapapahue/Blaze-mobile failed (token expired, revoked or without access?)"; fi
+            echo "::warning title=Building WITHOUT YouTube::$WHY. This APK has no YouTube Store."
+            echo "### YouTube plug-in: NOT included — $WHY. This APK has no YouTube Store." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -84,7 +118,9 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
           set -o pipefail
-          ./gradlew testReleaseUnitTest :storeapi:test :youtube:test assembleRelease --stacktrace 2>&1 | tee build.log
+          YT_TEST=""; if [ "${{ steps.yt.outputs.present }}" = "true" ]; then YT_TEST=":youtube:test"; fi
+          ./gradlew testReleaseUnitTest :storeapi:test $YT_TEST assembleRelease --stacktrace 2>&1 | tee build.log
+          echo "YouTube plug-in in this build: ${{ steps.yt.outputs.present }}" | tee -a build.log
 
       # Preview screenshots (Robolectric, ui/ShotsTest). Never blocks a release; the PNGs and the log go to the `shots` branch.
       - name: Screenshots
@@ -196,8 +232,9 @@ jobs:
           { echo "Steps: ${{ join(steps.*.outcome, ', ') }}"; echo "Build failed on ${{ github.sha }} (run ${{ github.run_id }})"; echo; echo '```'; grep -E "^e: |error:|FAILURE|What went wrong| FAILED$" -A6 build.log 2>/dev/null | head -160; echo '----- tail -----'; tail -80 build.log 2>/dev/null || echo "no build.log (failed before Gradle ran)"; echo '```'; } > comment.md
           gh issue edit 1 --repo ${{ github.repository }} --body-file comment.md
 
-  # v0.30.1: the YouTube Store is an optional plug-in module (youtube/ → :youtube). Blaze must build, pass its tests and
-  # run without it (a public build drops the folder), and that APK must not contain any YouTube code.
+  # v0.30.1: the YouTube Store is an optional plug-in module (youtube/ → :youtube), kept in the private repo
+  # lacksonkapapahue/Blaze-mobile since v0.30.1. Blaze must build, pass its tests and run without it (this job never
+  # checks the plug-in out; the rm is a guard), and that APK must not contain any YouTube code.
   build-without-youtube:
     runs-on: ubuntu-latest
     timeout-minutes: 45

@@ -10,6 +10,7 @@
 - **Tests (JVM):** `app/src/test/.../mediaapps/MediaAppsTest.kt` (queue/shuffle/repeat, playlists, recents, resume, download state/resume/retry/JSON, artwork colour, LRC), `StoreSourcesTest.kt` (licences, Archive parsing on real fixtures, Jamendo, plug-in discovery), `youtube/src/test/.../YtTest.kt` (search/player parsing, quality selection).
 
 ## YouTube plug-in: how it's wired, how to drop it
+- **Since the move to a private repo:** the plug-in's code lives in **lacksonkapapahue/Blaze-mobile** (private) and is checked out into `youtube/` (gitignored here) at build time. CI: `build.yml` step "Check out the YouTube plug-in" with secret `BLAZE_MOBILE_TOKEN` (fine-grained PAT, Contents: read on Blaze-mobile); no secret / failed checkout → builds without YouTube, with a warning + run summary line. Local: `git clone https://github.com/lacksonkapapahue/Blaze-mobile.git youtube`. Daily drift checks: `youtube-daily.yml` here (04:47 UTC, full APK with the plug-in, opens issue "YouTube plug-in daily check failing") and Blaze-mobile's `sync.yml` (04:17 UTC tests, weekly APK; needs Actions billing on the private repo).
 - Everything YouTube is in **`youtube/`** (Gradle module `:youtube`): `YtClient.kt`, `YtParse.kt`, `YtQuality.kt`, `YouTubeSource.kt`, `src/test/**`, `src/main/resources/META-INF/proguard/blaze-youtube.pro`.
 - `settings.gradle.kts` includes `:youtube` only if `youtube/build.gradle.kts` exists; `app/build.gradle.kts` adds `implementation(project(":youtube"))` only if that project exists; `StoreSources.plugin(YOUTUBE_CLASS)` loads it by class name at runtime.
 - **To ship without YouTube: delete the `youtube/` folder.** No other file changes. CI job `build-without-youtube` proves it on every push (tests + assembleRelease + "no YouTube classes in the APK").
@@ -28,5 +29,5 @@ NewPipeExtractor (GPL-3.0) not used: incompatible with Blaze's PolyForm Noncomme
 7. Jamendo needs a client_id: set `JAMENDO_CLIENT_ID` as a repo Actions secret/env for CI builds, or paste one in the Music Store.
 
 ## How to proceed
-- Build: `./gradlew testReleaseUnitTest :storeapi:test :youtube:test assembleRelease`.
+- Build: `./gradlew testReleaseUnitTest :storeapi:test :youtube:test assembleRelease` (`:youtube:test` only with Blaze-mobile cloned into `youtube/`).
 - Code map: STATUS.md section "media-apps".

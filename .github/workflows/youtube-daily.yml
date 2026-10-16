@@ -1,0 +1,107 @@
+name: YouTube plug-in daily
+
+# Daily: rebuild Blaze main with the latest YouTube plug-in (private lacksonkapapahue/Blaze-mobile main, checked out
+# into youtube/ with the same BLAZE_MOBILE_TOKEN secret build.yml uses) so drift between the plug-in and :storeapi / the
+# app shows up within a day. Runs on this public repo's free Actions minutes. Publishes nothing (no APK, no release).
+# No secret = the run is skipped with a notice, never red.
+on:
+  schedule:
+    - cron: '47 4 * * *'   # daily 04:47 UTC (06:47 Zambia)
+  workflow_dispatch:
+
+concurrency:
+  group: youtube-daily
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ISSUE_TITLE: YouTube plug-in daily check failing
+
+jobs:
+  check:
+    if: github.repository == 'lacksonkapapahue/Blaze-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    env:
+      HAS_BLAZE_MOBILE_TOKEN: ${{ secrets.BLAZE_MOBILE_TOKEN != '' }}
+    steps:
+      - name: No secret, nothing to check
+        if: env.HAS_BLAZE_MOBILE_TOKEN != 'true'
+        run: |
+          echo "::notice::BLAZE_MOBILE_TOKEN is not set; skipping the YouTube plug-in check."
+          echo "### Skipped: BLAZE_MOBILE_TOKEN is not set" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+        if: env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Check out the YouTube plug-in (Blaze-mobile → youtube/)
+        id: yt
+        if: env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: lacksonkapapahue/Blaze-mobile
+          ref: main
+          token: ${{ secrets.BLAZE_MOBILE_TOKEN }}
+          path: youtube
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        if: env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Gradle
+        if: env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-ytdaily-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-ytdaily-
+
+      - name: Plug-in tests + Blaze release APK with the plug-in
+        if: env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          echo "### Blaze-agent main @ $(git rev-parse --short HEAD), Blaze-mobile main @ $(git -C youtube rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew :storeapi:test :youtube:test :app:testReleaseUnitTest --tests 'com.blaze.assistant.mediaapps.*' :app:assembleRelease --stacktrace 2>&1 | tee build.log
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          mkdir -p /tmp/dex && unzip -o -q "$APK" 'classes*.dex' -d /tmp/dex
+          if ! grep -a -q "Lcom/blaze/assistant/mediaapps/youtube/YouTubeSource;" /tmp/dex/*.dex; then
+            echo "::error::YouTubeSource is missing from the APK (R8 keep rule or wiring broken)"; exit 1
+          fi
+          echo "### OK: plug-in tests pass and YouTubeSource is in the release APK" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open, update or close the issue
+        if: always() && env.HAS_BLAZE_MOBILE_TOKEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUTCOME: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          NUM=$(gh issue list --repo "$REPO" --state open --search "\"$ISSUE_TITLE\" in:title" --json number,title \
+                --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ "$OUTCOME" != success ]; then
+            BODY="The daily build of Blaze \`main\` with the YouTube plug-in (Blaze-mobile \`main\`) failed on $(date -u +%F): $RUN_URL
+          Either the plug-in no longer matches \`:storeapi\` / the app, or the checkout failed (BLAZE_MOBILE_TOKEN expired or lost access).
+          Until fixed, releases from \`main\` fail (plug-in present) or ship without YouTube (checkout failing)."
+            if [ -n "$NUM" ]; then gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
+            else gh issue create --repo "$REPO" --title "$ISSUE_TITLE" --body "$BODY"; fi
+          elif [ -n "$NUM" ]; then
+            gh issue close "$NUM" --repo "$REPO" --comment "Green again: $RUN_URL"
+          fi
