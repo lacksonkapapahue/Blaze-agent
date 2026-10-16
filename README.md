@@ -37,6 +37,9 @@ update normally. Because the name went down, CI also publishes the same APK as `
 ## Browser VPN that just works (v0.25.3)
 The browser's VPN (⋯ › VPN & privacy, or the `browser_vpn` tool) works with one tap and nothing to import: **Blaze Free (Cloudflare WARP)**. The first time, the phone makes its own WireGuard keys and registers a free WARP device with Cloudflare (the way wgcf does), saves it privately and reuses it. Only the browser goes through it (wgproxy), it exits near you (hides your IP; can't pick a country), reconnects by itself when the tunnel drops, checks its health every 45 s, and tries WARP's other ports (2408, 500, 1701, 4500) when a network blocks one. The kill switch is unchanged. Imported per-country WireGuard configs work exactly as before. Logic and tests: `browser/WarpFree.kt`, `WarpFreeTest`.
 
+## Terminal that always starts (v0.30.2)
+The phone tab checks BusyBox once per build and starts on Android's own shell when BusyBox can't run, and a BusyBox tab that dies at once is swapped for one on Android's shell with a note, so it never opens as "[Process completed (signal 31)]". Linux tabs run Termux's PRoot 5.1.107.96, so `cd ~/phone`, `cd /sdcard` and every other cd work under Android's sandbox; `blaze-doctor` inside any Linux checks cd, getcwd, stat, the file tools and fork. Details: `tools/busybox/README.md`, `tools/proot/README.md`.
+
 ## Linux desktop (v0.25.1)
 Settings › Advanced › Desktop (Linux) installs and runs a real XFCE desktop inside Blaze's Alpine Linux, shown full screen with touch-mouse and keyboard. Blaze can use it too (`desktop` tool). See CHANGELOG.md.
 

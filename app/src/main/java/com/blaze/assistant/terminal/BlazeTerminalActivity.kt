@@ -149,6 +149,12 @@ class BlazeTerminalActivity : ComponentActivity(), TermSessions.Listener {
         if (tab == null || tab === TermSessions.active()) term.onScreenUpdated()
     }
 
+    /** v0.30.2: a phone tab whose BusyBox couldn't start was swapped for one on Android's sh: show the new one. */
+    override fun replaced(old: TermSessions.Tab, new: TermSessions.Tab) {
+        if (TermSessions.active() === new) attach(new)
+        structure()
+    }
+
     override fun structure() {
         tabRow.removeAllViews()
         val tabs = synchronized(TermSessions.tabs) { TermSessions.tabs.toList() }
@@ -407,7 +413,7 @@ class BlazeTerminalActivity : ComponentActivity(), TermSessions.Listener {
             val t = TermSessions.active() ?: return
             if (!t.welcomed) {
                 t.welcomed = true
-                val b = TermLogic.welcome(t.env, t.busybox).toByteArray()
+                val b = (TermLogic.welcome(t.env, t.busybox) + t.note.orEmpty()).toByteArray()
                 t.session.emulator?.append(b, b.size)
                 term.onScreenUpdated()
             }

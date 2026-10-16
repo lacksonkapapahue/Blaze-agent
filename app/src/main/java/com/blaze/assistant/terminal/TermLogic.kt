@@ -118,6 +118,81 @@ object TermLogic {
         }
     }
 
+    // ---- v0.30.2: the phone tab never opens dead ----
+
+    /**
+     * v0.30.2: the per-build key of the BusyBox verdict in usr/.bb. The probe runs again whenever the APK changes
+     * (versionCode, or a reinstall of the same version: lastUpdateTime), never on every start.
+     */
+    fun bbKey(versionCode: Long, lastUpdate: Long): String = "v$versionCode:$lastUpdate"
+
+    /** What the start-up probe decided: [ok] = ash runs at all; [legacyOk] = the file tools (chmod, ln, rmdir…) do too. */
+    data class BbVerdict(val ok: Boolean, val legacyOk: Boolean = true)
+
+    fun bbStamp(key: String, v: BbVerdict): String =
+        "$key " + (if (!v.ok) "broken" else if (v.legacyOk) "ok" else "ok nolegacy")
+
+    /** The verdict saved for this build, or null when there is none (first start, or the app was updated). */
+    fun bbParse(key: String, stamp: String?): BbVerdict? {
+        val parts = stamp?.trim()?.split(' ') ?: return null
+        if (parts.size < 2 || parts[0] != key) return null
+        return when (parts[1]) {
+            "ok" -> BbVerdict(true, parts.getOrNull(2) != "nolegacy")
+            "broken" -> BbVerdict(false, false)
+            else -> null
+        }
+    }
+
+    /** The quick `busybox true` probe: any exit but 0 (127 applet not found, 159 = killed by SIGSYS, 139 SIGSEGV…) fails it. */
+    fun trueProbeOk(exitCode: Int?): Boolean = exitCode == 0
+
+    /**
+     * Applets that call the old path syscalls (chmod, chown32, link, symlink, rmdir, mknod). The 32-bit BusyBox
+     * (1.31.0, musl) uses them, and Android's 32-bit app seccomp filter only allows the *at() forms, so on a phone that
+     * runs Blaze as armeabi-v7a they die with SIGSYS. When the start-up file-tools probe fails, these stay Android's
+     * (toybox in /system/bin) instead. Found with qemu-arm -strace against bionic's SECCOMP lists (tools/busybox/README.md).
+     */
+    val LEGACY_SYSCALL_APPLETS = setOf("chmod", "chown", "chgrp", "ln", "rmdir", "rm", "cp", "mv", "mkfifo", "mknod",
+        "tar", "cpio", "unzip", "install", "patch", "rpm", "rpm2cpio", "dpkg", "dpkg-deb", "ar", "lzop", "unlzop")
+
+    /** sh -c script, $0 = busybox, $1 = an empty scratch dir: prints "sigsys" for each tool the sandbox kills, then "done". */
+    const val FILE_TOOLS_PROBE = "cd \"\$1\" || exit 1; : > f; " +
+        "for c in 'chmod 600 f' 'ln -s f s' 'mkdir d' 'rmdir d' 'rm -f f s'; do \"\$0\" \$c; [ \$? -eq 159 ] && echo sigsys; done; echo done"
+
+    /** The file-tools probe ran to the end and no tool was killed by the sandbox. */
+    fun fileToolsOk(output: String?): Boolean = output != null && output.lines().any { it.trim() == "done" } && output.lines().none { it.trim() == "sigsys" }
+
+    /** Which BusyBox applets get a usr/bin link: never Android's must-keeps, and the file tools only when they work. */
+    fun appletsToLink(applets: List<String>, legacyOk: Boolean): List<String> = applets.map { it.trim() }
+        .filter { it.isNotEmpty() && !it.contains('/') && it != "busybox" && it !in KEEP_ANDROIDS }
+        .filter { legacyOk || it !in LEGACY_SYSCALL_APPLETS }
+        .distinct()
+
+    /** A BusyBox phone tab that ends this soon after it started, with an error, is BusyBox failing to start. */
+    const val QUICK_DEATH_MS = 5_000L
+
+    /**
+     * v0.30.2: should this finished tab be replaced, at once and with nothing for the user to do, by a tab running
+     * Android's own /system/bin/sh? Yes for a BusyBox phone tab killed by the sandbox (signal 31, whenever it happens),
+     * and for one that died with any error or signal within [QUICK_DEATH_MS]. A normal `exit` (status 0) never is.
+     */
+    fun autoFallback(envId: String, usedBusybox: Boolean, exitStatus: Int, aliveMs: Long): Boolean {
+        if (envId != "phone" || !usedBusybox || exitStatus == 0) return false
+        return signalOf(exitStatus) == SIGSYS || aliveMs in 0 until QUICK_DEATH_MS
+    }
+
+    /** The line printed (under the welcome) in the tab that replaced a BusyBox tab that couldn't start. */
+    fun fallbackNote(exitStatus: Int): String {
+        val why = when (val sig = signalOf(exitStatus)) {
+            SIGSYS -> listOf(" (signal 31: Android's app sandbox", " blocked a system call).")
+            null -> listOf(" (exit code $exitStatus).")
+            else -> listOf(" (signal $sig).")
+        }
+        return (listOf(" BusyBox couldn't start on this phone") + why +
+            listOf(" This tab runs Android's own shell", " instead. Nothing to do: type away.", "", ""))
+            .joinToString("\r\n")
+    }
+
     /** BusyBox applets not linked onto PATH: Android's own versions work for apps (ping uses Android's ICMP sockets) or need root anyway. */
     val KEEP_ANDROIDS = setOf("sh", "su", "reboot", "init", "mount", "umount", "ping", "ping6", "login", "passwd")
 
@@ -155,6 +230,7 @@ object TermLogic {
             append(" ${env.label}, running on this phone.\r\n\r\n Working with packages:\r\n\r\n")
             for (h in env.hint) append("  - $h\r\n")
             append("\r\n Your Blaze files are in ~/phone, storage in /sdcard.\r\n")
+            append(" Something odd? Run blaze-doctor.\r\n")
             append(" Pinch to zoom · long-press to copy · ⋮ to paste.\r\n\r\n")
         } else {
             append(" This is the PHONE SHELL: a command line\r\n")

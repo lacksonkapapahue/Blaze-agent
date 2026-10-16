@@ -156,22 +156,38 @@ object Linux {
         // apt drops to the _apt user to download, which PRoot can't do: keep it root.
         if (File(r, "etc/apt").isDirectory) File(r, "etc/apt/apt.conf.d").apply { mkdirs() }.resolve("99blaze").writeText("APT::Sandbox::User \"root\";\n")
         File(r, "root").mkdirs(); File(r, "tmp").mkdirs()
+        // v0.30.2: real mount points for the binds (like proot-distro's), so PRoot doesn't have to fake ("glue") them.
+        File(r, "root/phone").mkdirs(); File(r, "sdcard").mkdirs()
+        // v0.30.2: `blaze-doctor` checks cd, getcwd, stat, the file tools and fork from inside the Linux.
+        runCatching {
+            val doc = File(r, LinuxDoctor.PATH_IN_ROOTFS).apply { parentFile?.mkdirs() }
+            val text = LinuxDoctor.script()
+            if (!doc.exists() || doc.readText() != text) doc.writeText(text)
+            Os.chmod(doc.path, 493)   // 0755
+        }
         val fake = File(base(), "fake").apply { mkdirs() }
         File(fake, "stat").writeText("cpu  1000 0 1000 100000 0 0 0 0 0 0\n" + (0 until Runtime.getRuntime().availableProcessors()).joinToString("") { "cpu$it 250 0 250 25000 0 0 0 0 0 0\n" } +
             "intr 0\nctxt 0\nbtime 0\nprocesses 1\nprocs_running 1\nprocs_blocked 0\n")
         File(fake, "uptime").writeText("1000.00 900.00\n")
         File(fake, "version").writeText("Linux version 5.10.0 (blaze@android) #1 SMP\n")
         val lib = File(base(), "lib").apply { mkdirs() }
-        val talloc = File(lib, "libtalloc.so.2")
-        // An app update moves nativeLibraryDir (/data/app/~~random/...), leaving this link dangling: exists() is false
-        // but the link itself is still there, so a plain symlink() failed with EEXIST and proot couldn't start.
-        // Always point it at the current install.
-        val target = nat("libtalloc.so").absolutePath
-        val current = try { Os.readlink(talloc.absolutePath) } catch (_: Exception) { null }
-        if (current != target || !talloc.exists()) {
-            try { Os.remove(talloc.absolutePath) } catch (_: Exception) { talloc.delete() }
-            try { Os.symlink(target, talloc.absolutePath) } catch (_: Exception) {
-                try { File(target).copyTo(talloc, overwrite = true) } catch (_: Exception) { }
+        // v0.30.2: Termux's proot also needs libandroid-shmem.so (found by file name through LD_LIBRARY_PATH).
+        linkLib(File(lib, "libtalloc.so.2"), "libtalloc.so")
+        if (nat("libandroid-shmem.so").exists()) linkLib(File(lib, "libandroid-shmem.so"), "libandroid-shmem.so")
+    }
+
+    /**
+     * An app update moves nativeLibraryDir (/data/app/~~random/...), leaving this link dangling: exists() is false
+     * but the link itself is still there, so a plain symlink() failed with EEXIST and proot couldn't start.
+     * Always point it at the current install.
+     */
+    private fun linkLib(link: File, name: String) {
+        val target = nat(name).absolutePath
+        val current = try { Os.readlink(link.absolutePath) } catch (_: Exception) { null }
+        if (current != target || !link.exists()) {
+            try { Os.remove(link.absolutePath) } catch (_: Exception) { link.delete() }
+            try { Os.symlink(target, link.absolutePath) } catch (_: Exception) {
+                try { File(target).copyTo(link, overwrite = true) } catch (_: Exception) { }
             }
         }
     }
@@ -208,9 +224,52 @@ object Linux {
             put("PROOT_LOADER", nat("libproot_loader.so").absolutePath)
             if (nat("libproot_loader32.so").exists()) put("PROOT_LOADER_32", nat("libproot_loader32.so").absolutePath)
             put("LD_LIBRARY_PATH", File(base(), "lib").absolutePath)
-            put("PROOT_NO_SECCOMP", "0")
+            // v0.30.2: "1" only when this build's self-test found PRoot's seccomp acceleration broken on this phone.
+            if (noSeccomp == null) noSeccomp = LinuxDoctor.parseMode(Terminal.buildKey(), runCatching { modeFile().readText() }.getOrNull())
+            put("PROOT_NO_SECCOMP", if (noSeccomp == true) "1" else "0")
         }
     }
+
+    /** This build's verdict on PRoot's seccomp acceleration (null = not tested yet: keep it on). */
+    @Volatile private var noSeccomp: Boolean? = null
+    private val selfTesting = java.util.concurrent.atomic.AtomicBoolean(false)
+    private fun modeFile() = File(base(), ".proot_mode")
+
+    /**
+     * v0.30.2: once per build, in the background, runs blaze-doctor in [distro] with PRoot's seccomp acceleration on
+     * and, only if that fails, off; the faster mode that works is used from then on (LinuxDoctor.noSeccomp). The
+     * result is kept in filesDir/linux/doctor.txt. Never blocks a tab from opening.
+     */
+    fun selfTest(distro: String = "alpine") {
+        if (!::app.isInitialized || !supported() || !Distros.installed(distro)) return
+        val key = Terminal.buildKey()
+        if (noSeccomp == null) noSeccomp = LinuxDoctor.parseMode(key, runCatching { modeFile().readText() }.getOrNull())
+        if (noSeccomp != null || !selfTesting.compareAndSet(false, true)) return
+        Thread {
+            try {
+                val on = doctor(distro, false)
+                val off = if (on?.passed == true) null else doctor(distro, true)
+                val decision = LinuxDoctor.noSeccomp(on, off)
+                noSeccomp = decision
+                runCatching { modeFile().writeText(LinuxDoctor.modeStamp(key, decision)) }
+                runCatching {
+                    File(base(), "doctor.txt").writeText("build $key, $distro\nseccomp on: ${on ?: "didn't run"}\n" +
+                        (off?.let { "seccomp off: $it\n" } ?: "") + "using PROOT_NO_SECCOMP=${if (decision) 1 else 0}\n")
+                }
+            } catch (_: Throwable) { } finally { selfTesting.set(false) }
+        }.apply { isDaemon = true; name = "blaze-doctor" }.start()
+    }
+
+    private fun doctor(distro: String, noSec: Boolean): LinuxDoctor.Report? = try {
+        val pb = ProcessBuilder(command("/bin/sh /${LinuxDoctor.PATH_IN_ROOTFS}", distro = distro)).redirectErrorStream(true)
+        pb.environment().putAll(Terminal.env()); pb.environment().putAll(env())
+        pb.environment()["PROOT_NO_SECCOMP"] = if (noSec) "1" else "0"
+        val p = pb.start()
+        val out = StringBuilder()
+        val t = Thread { runCatching { out.append(p.inputStream.bufferedReader().readText()) } }.apply { isDaemon = true; start() }
+        if (!p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); null }
+        else { t.join(2000); LinuxDoctor.parse(out.toString()) }
+    } catch (_: Exception) { null }
 
     fun uninstall() { rootfs().deleteRecursively(); status.value = "Removed." }
     fun sizeMb(): Long = try { rootfs().walkTopDown().filter { it.isFile }.sumOf { it.length() } / 1_000_000 } catch (_: Exception) { 0 }

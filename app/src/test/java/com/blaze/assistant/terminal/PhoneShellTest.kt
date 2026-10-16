@@ -72,6 +72,80 @@ class PhoneShellTest {
         assertTrue(TermLogic.phoneRc(false).contains("PS1='phone:\${PWD##*/} \$ '"))
     }
 
+    // ---- v0.30.2: probe per build, auto-fallback on the first death, 32-bit file tools ----
+
+    @Test fun verdictIsPerBuild() {
+        val k = TermLogic.bbKey(118, 1_760_000_000_000)
+        assertEquals("v118:1760000000000", k)
+        assertEquals(TermLogic.BbVerdict(true, true), TermLogic.bbParse(k, TermLogic.bbStamp(k, TermLogic.BbVerdict(true, true))))
+        assertEquals(TermLogic.BbVerdict(true, false), TermLogic.bbParse(k, TermLogic.bbStamp(k, TermLogic.BbVerdict(true, false))))
+        assertEquals(false, TermLogic.bbParse(k, TermLogic.bbStamp(k, TermLogic.BbVerdict(false, true)))!!.ok)
+        // Another build (update, reinstall) or the v0.29.8 format ("<lastUpdateTime> ok"): probe again.
+        assertNull(TermLogic.bbParse(TermLogic.bbKey(119, 1_760_000_000_000), TermLogic.bbStamp(k, TermLogic.BbVerdict(true))))
+        assertNull(TermLogic.bbParse(TermLogic.bbKey(118, 1), TermLogic.bbStamp(k, TermLogic.BbVerdict(true))))
+        assertNull(TermLogic.bbParse(k, "1760000000000 ok"))
+        assertNull(TermLogic.bbParse(k, null)); assertNull(TermLogic.bbParse(k, "")); assertNull(TermLogic.bbParse(k, "$k maybe"))
+    }
+
+    @Test fun trueProbe() {
+        assertTrue(TermLogic.trueProbeOk(0))
+        for (c in listOf(1, 127, 159, 139, 132, null)) assertFalse("$c", TermLogic.trueProbeOk(c))
+    }
+
+    @Test fun firstDeathFallsBackAtOnce() {
+        // Killed by the sandbox: always, even long after it started.
+        assertTrue(TermLogic.autoFallback("phone", true, -31, 100))
+        assertTrue(TermLogic.autoFallback("phone", true, -31, 3_600_000))
+        // Any error or signal within seconds: BusyBox didn't start.
+        assertTrue(TermLogic.autoFallback("phone", true, 127, 200))
+        assertTrue(TermLogic.autoFallback("phone", true, -11, 1_000))
+        assertTrue(TermLogic.autoFallback("phone", true, -4, 4_999))
+        // Not for a normal exit, a later crash, Android's own sh, or a Linux tab.
+        assertFalse(TermLogic.autoFallback("phone", true, 0, 100))
+        assertFalse(TermLogic.autoFallback("phone", true, 1, 60_000))
+        assertFalse(TermLogic.autoFallback("phone", true, -9, 60_000))
+        assertFalse(TermLogic.autoFallback("phone", false, -31, 100))
+        assertFalse(TermLogic.autoFallback("alpine", true, -31, 100))
+    }
+
+    @Test fun fallbackNoteSaysWhyAndFitsTheA12() {
+        val n = TermLogic.fallbackNote(-31)
+        assertTrue(n.contains("signal 31")); assertTrue(n.contains("Android's own shell")); assertTrue(n.contains("Nothing to do"))
+        assertTrue(TermLogic.fallbackNote(127).contains("exit code 127"))
+        assertTrue(TermLogic.fallbackNote(-11).contains("signal 11"))
+        assertTrue(n.endsWith("\r\n\r\n"))
+        for (x in listOf(-31, 127, -11)) TermLogic.fallbackNote(x).split("\r\n").forEach { assertTrue("too wide: $it", it.length <= 44) }
+    }
+
+    @Test fun fileToolsProbe() {
+        assertTrue(TermLogic.fileToolsOk("done\n"))
+        assertTrue(TermLogic.fileToolsOk("ln: f: Permission denied\ndone"))     // an ordinary error isn't the sandbox
+        assertFalse(TermLogic.fileToolsOk("sigsys\ndone\n"))
+        assertFalse(TermLogic.fileToolsOk(""))                                   // didn't finish
+        assertFalse(TermLogic.fileToolsOk(null))                                 // hung, killed
+        // Runs for real where there's a POSIX sh; a fake "busybox" that kills itself with SIGSYS on chmod.
+        val sh = listOf("/bin/sh", "/system/bin/sh").firstOrNull { File(it).canExecute() } ?: return
+        val dir = createTempDir(); val fake = File(dir, "bb").apply {
+            writeText("#!/bin/sh\ncase \"\$1\" in chmod) kill -SYS \$\$;; esac\nexit 0\n"); setExecutable(true) }
+        val work = File(dir, "w").apply { mkdirs() }
+        val out = ProcessBuilder(sh, "-c", TermLogic.FILE_TOOLS_PROBE, fake.absolutePath, work.absolutePath).redirectErrorStream(true).start()
+            .let { p -> p.inputStream.bufferedReader().readText().also { p.waitFor() } }
+        assertFalse(out, TermLogic.fileToolsOk(out)); assertTrue(out, out.contains("sigsys"))
+        fake.writeText("#!/bin/sh\nexit 0\n")
+        val out2 = ProcessBuilder(sh, "-c", TermLogic.FILE_TOOLS_PROBE, fake.absolutePath, work.absolutePath).redirectErrorStream(true).start()
+            .let { p -> p.inputStream.bufferedReader().readText().also { p.waitFor() } }
+        assertTrue(out2, TermLogic.fileToolsOk(out2))
+        dir.deleteRecursively()
+    }
+
+    @Test fun fileToolsStayAndroidsWhenTheyDontWork() {
+        val all = listOf("ls", "chmod", "ln", "rmdir", "rm", "cp", "mv", "tar", "vi", "ping", "sh", "busybox", " top ", "", "a/b")
+        assertEquals(listOf("ls", "chmod", "ln", "rmdir", "rm", "cp", "mv", "tar", "vi", "top"), TermLogic.appletsToLink(all, true))
+        assertEquals(listOf("ls", "vi", "top"), TermLogic.appletsToLink(all, false))
+        // The ones qemu-arm -strace showed calling chmod/chown32/link/symlink/rmdir/mknod in the 32-bit build.
+        for (a in listOf("chmod", "chown", "ln", "rmdir", "rm", "cp", "mkfifo", "tar")) assertTrue(a, a in TermLogic.LEGACY_SYSCALL_APPLETS)
+    }
+
     // ---- the BusyBox binaries: check_suid's privilege drop is skipped (tools/busybox/README.md) ----
 
     private fun word(f: File, off: Int): Int {

@@ -41,53 +41,79 @@ object Terminal {
     @Volatile var busyboxOk = false
         private set
 
-    /** The phone tab saw BusyBox killed by Android: stop using it until the app is updated. */
+    /** The phone tab saw BusyBox fail (killed by Android, or dead at once): stop using it until the app is updated. */
     fun markBusyboxBroken() {
         busyboxOk = false
-        try { bin().deleteRecursively(); bin().mkdirs(); File(app.filesDir, "usr/.bb").writeText("${appVer()} broken"); writeRc() } catch (_: Exception) { }
+        try {
+            bin().deleteRecursively(); bin().mkdirs()
+            File(app.filesDir, "usr/.bb").apply { parentFile?.mkdirs() }.writeText(TermLogic.bbStamp(buildKey(), TermLogic.BbVerdict(false, false)))
+            writeRc()
+        } catch (_: Exception) { }
     }
 
     /** The phone shell's start-up file (help command, prompt), sourced through \$ENV. */
     fun phoneRc(): File = File(app.filesDir, "usr/etc/phonerc")
 
     /**
-     * Links every BusyBox applet into usr/bin once per app version (cheap, no root). v0.29.8: BusyBox is first run
+     * Links every BusyBox applet into usr/bin once per build (cheap, no root). v0.29.8: BusyBox is first run
      * through a "busybox" link (argv[0] must be busybox: run as libbusybox.so it answered "applet not found", so
-     * `--list` came back empty and no tool was ever linked), and probed (`busybox sh -c 'echo ok'`) before anything is linked.
+     * `--list` came back empty and no tool was ever linked), and probed before anything is linked.
+     * v0.30.2: the probe is `busybox true` and then `busybox sh -c 'echo ok'` (each with a timeout, and killed if it hangs);
+     * any failure means the phone tab starts straight on Android's /system/bin/sh. A second probe runs the file tools
+     * (chmod, ln, rmdir) that the 32-bit BusyBox reaches through syscalls Android's 32-bit filter kills; if it fails those
+     * applets are left to Android's toybox. The verdict is saved per build ([TermLogic.bbKey]: versionCode + install time).
      */
     @Synchronized fun setup() {
         if (!hasBusybox()) { busyboxOk = false; writeRc(); return }
         val stamp = File(app.filesDir, "usr/.bb")
-        val ver = appVer()
-        val prev = try { stamp.readText() } catch (_: Exception) { "" }
-        if (prev == "$ver ok" && File(bin(), "busybox").exists()) { busyboxOk = true; if (!phoneRc().exists()) writeRc(); return }
-        if (prev == "$ver broken") { busyboxOk = false; writeRc(); return }
+        val key = buildKey()
+        val prev = TermLogic.bbParse(key, try { stamp.readText() } catch (_: Exception) { null })
+        if (prev != null && !prev.ok) { busyboxOk = false; if (!phoneRc().exists()) writeRc(); return }
+        if (prev != null && File(bin(), "busybox").exists()) { busyboxOk = true; if (!phoneRc().exists()) writeRc(); return }
         bin().deleteRecursively(); bin().mkdirs()
         val link = File(bin(), "busybox")
         try { Os.symlink(busybox().absolutePath, link.absolutePath) } catch (_: Exception) { }
         val via = if (link.exists()) link.absolutePath else busybox().absolutePath
-        busyboxOk = try {
-            val p = ProcessBuilder(via, "sh", "-c", "echo ok").redirectErrorStream(true).start()
-            val out = p.inputStream.bufferedReader().readText()
-            val done = p.waitFor(10, TimeUnit.SECONDS)
-            done && TermLogic.probeOk(p.exitValue(), out)
-        } catch (_: Exception) { false }
+        busyboxOk = TermLogic.trueProbeOk(run(listOf(via, "true"))?.first) &&
+            run(listOf(via, "sh", "-c", "echo ok"))?.let { (code, out) -> TermLogic.probeOk(code, out) } == true
+        var legacyOk = true
         if (busyboxOk) {
-            val applets = try {
-                ProcessBuilder(via, "--list").redirectErrorStream(true).start().inputStream.bufferedReader().readLines()
-            } catch (_: Exception) { emptyList() }
-            for (a in applets) {
-                val name = a.trim(); if (name.isEmpty() || name.contains('/') || name == "busybox") continue
-                // Keep Android's own versions of a few that apps rely on (ping works for apps only as Android's).
-                if (name in TermLogic.KEEP_ANDROIDS) continue
+            legacyOk = probeFileTools(via)
+            val applets = run(listOf(via, "--list"))?.second?.lines() ?: emptyList()
+            for (name in TermLogic.appletsToLink(applets, legacyOk)) {
                 try { Os.symlink(busybox().absolutePath, File(bin(), name).absolutePath) } catch (_: Exception) { }
             }
         } else { bin().deleteRecursively(); bin().mkdirs() }
-        stamp.parentFile?.mkdirs(); stamp.writeText("$ver ${if (busyboxOk) "ok" else "broken"}")
+        stamp.parentFile?.mkdirs(); stamp.writeText(TermLogic.bbStamp(key, TermLogic.BbVerdict(busyboxOk, legacyOk)))
         writeRc()
     }
 
-    private fun appVer(): String = try { app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime.toString() } catch (_: Exception) { "1" }
+    /** Runs [cmd] with no stdin, returning (exit code, output), or null when it couldn't start or hung (it is killed). */
+    private fun run(cmd: List<String>, seconds: Long = 5): Pair<Int, String>? = try {
+        val p = ProcessBuilder(cmd).redirectErrorStream(true).redirectInput(ProcessBuilder.Redirect.from(File("/dev/null"))).start()
+        val out = StringBuilder()
+        val reader = Thread { try { out.append(p.inputStream.bufferedReader().readText()) } catch (_: Exception) { } }.apply { isDaemon = true; start() }
+        if (!p.waitFor(seconds, TimeUnit.SECONDS)) { p.destroyForcibly(); null }
+        else { reader.join(1000); p.exitValue() to synchronized(out) { out.toString() } }
+    } catch (_: Exception) { null }
+
+    /**
+     * The file tools the 32-bit BusyBox runs through old syscalls (chmod, symlink, mkdir + rmdir, rm). Only a kill by
+     * the sandbox counts (exit 159 = 128 + SIGSYS): a plain error, like SELinux refusing something, isn't this problem.
+     */
+    private fun probeFileTools(via: String): Boolean {
+        val dir = File(app.cacheDir, "bbprobe").apply { deleteRecursively(); mkdirs() }
+        val r = run(listOf("/system/bin/sh", "-c", TermLogic.FILE_TOOLS_PROBE, via, dir.absolutePath))
+        dir.deleteRecursively()
+        return TermLogic.fileToolsOk(r?.second)
+    }
+
+    /** v0.30.2: the build the BusyBox verdict belongs to (versionCode + install time, so a reinstall probes again). */
+    fun buildKey(): String = try {
+        val pi = app.packageManager.getPackageInfo(app.packageName, 0)
+        @Suppress("DEPRECATION") val code = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+        TermLogic.bbKey(code, pi.lastUpdateTime)
+    } catch (_: Exception) { TermLogic.bbKey(com.blaze.assistant.BuildConfig.VERSION_CODE.toLong(), 0) }
 
     private fun writeRc() {
         try { phoneRc().parentFile?.mkdirs(); phoneRc().writeText(TermLogic.phoneRc(busyboxOk)) } catch (_: Exception) { }
