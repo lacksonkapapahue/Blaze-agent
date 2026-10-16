@@ -80,7 +80,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 /** The brain: keeps the conversation and runs the think → act → look loop. */object Agent {
     private const val MAX_STEPS = 30
     private const val SHOT_NOTE = "[Screenshot of the phone screen]"
-    private const val SCREEN_MARK = "Foreground app:"
+    // v0.30.4: screen readouts are found by FastActions.isScreen (the old "Foreground app:" mark hadn't matched any
+    // readout since v1.9.7, so old screens were never dropped from the prompt).
     /** Read-only tools that are safe to run side by side. */
     private val parallelSafe = setOf("web_search", "fetch_page", "recall_memory", "memory_search", "search_past_chats", "gmail_search", "gmail_read",
         "gcal_events", "calendar_events", "drive_search", "gcontacts_search", "find_contact", "recent_notifications", "read_messages",
@@ -739,12 +740,13 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
 BACKGROUND FIRST: never take over the user's screen when a background tool can do it. Web questions → web_search/fetch_page; sites you must click, fill or log in to → browser_open/browser_click/browser_type (Blaze's own background browser; browser_show only when the user must see or take over). When a page needs the user's email, phone, username + password, API key or a one-time code, call browser_secure_input (a secure form in the chat; you get {{secret:name}} placeholders, never the values) instead of asking in chat or showing the browser. If a page says the account can't sign in with a password, don't loop on the password: offer Continue with Google, a passkey or the live browser with ask_user. Browser tools never need phone control. Messaging someone → message_contact (never open WhatsApp on screen yourself); a picture Blaze makes → generate_image, then message_contact with image="last"; several contacts match → ask_user with the exact names; only a result starting "Sent to" means it was sent. Email → gmail_search/gmail_read. Calendar → gcal_events or calendar tools. Texts, calls, contacts → the SMS/call/contact tools. Notifications → recent_notifications. Music → spotify tools. Files/code → run_shell. Only if no background tool exists or it isn't connected, use the screen; when a background tool isn't connected, offer to connect it (blaze_self open "settings connections") instead of silently driving the app.
 You can control the phone. SPEED MATTERS: the user is watching.
 ${Orient.RULE}
-- For anything in an app, call run_plan ONCE with the whole script, using the visible words on buttons and fields as targets (e.g. open_app YouTube → tap "Search" → type "lofi hip hop" submit → tap the first result's title). You know how common apps look; you don't need to read the screen first. Add optional:true for popups you might need to dismiss, and expect:"..." when a step must lead somewhere.
+- For anything in an app (not Settings: use open_settings), call run_plan ONCE with the whole script, using the visible words on buttons and fields as targets (e.g. open_app YouTube → tap "Search" → type "lofi hip hop" submit → tap the first result's title). You know how common apps look; you don't need to read the screen first. Add optional:true for popups you might need to dismiss, and expect:"..." when a step must lead somewhere.
 - Element numbers stay the same while the screen stays the same; after an action you often get only the changes ("Same screen… Changed or new"), so keep using the numbers you have.
 - For flows with predictable pop-ups (sign-in, cookie banners, "Not now"), set watchers with watch (or a preset) so the phone reacts instantly instead of spending your steps.
 - run_plan only comes back when it's done or stuck. If stuck, it returns the screen with element numbers: fix it with a short new run_plan, or tap/type_text by number.
 - Use single tap/type_text/scroll only for one-off fixes. If read_screen shows little (games, maps, video, custom apps), call look_at_screen.
 - Prefer direct tools when they fit: search_in_app for "play/search X on YouTube/Spotify/Play Store/Maps", set_alarm, set_timer, dial, compose_sms. open_url only for real web addresses; web_search to look something up yourself.
+${FastActions.RULE.trimStart('\n')}
 - Before anything irreversible or that spends money or contacts someone (sending, posting, paying, deleting, calling), confirm first unless the user clearly told you to do exactly that.
 When you finish, say what you did in one short sentence.
 """.trimIndent())
@@ -802,7 +804,9 @@ When you finish, say what you did in one short sentence.
             append("\nCALLS: \"let's get on a call\", \"call me\" or \"let's talk\" with no person named means a voice call with YOU: call_control start_blaze_call. Never phone a contact unless they name who. " +
                 "Loudspeaker, mute, hang up, answer, hold, call volume and keypad presses during any call go through call_control, never the Settings app.")
             if (com.blaze.assistant.voice.Voice.inCall) append(" You are on a voice call with the user right now (Blaze's call screen): \"I can't hear you\" means call_control speaker on or louder.")
-            append(Autonomy.promptBlock()); append(Autonomy.promptLine()); append(SkillMatch.lookupBlock(userText, skipSkills))
+            append(Autonomy.promptBlock()); append(Autonomy.promptLine())
+            // v0.30.4: no skills lookup for a plain device / settings action (it only ever pulled in unrelated skills).
+            if (!FastActions.plainDevice(userText)) append(SkillMatch.lookupBlock(userText, skipSkills))
         }
     }
 
@@ -887,6 +891,8 @@ When you finish, say what you did in one short sentence.
         com.blaze.assistant.routine.Routines.tools().forEach { t.put(it) }
         com.blaze.assistant.phone.Skills.definitions().forEach { t.put(it) }
         if (Settings.phoneControl) { val p = PhoneTools.definitions(); for (i in 0 until p.length()) t.put(p.get(i)) }
+        // v0.30.4: straight to a settings page by intent (in no tool group, so it's always on hand).
+        if (Settings.phoneControl) t.put(com.blaze.assistant.phone.SettingsJump.tool())
         return ToolGuide.apply(t).also { try { BlazeDocs.noteTools(it) } catch (_: Throwable) { } }
     }
 
@@ -1334,15 +1340,15 @@ When you finish, say what you did in one short sentence.
             if (windowed && from > base) msgs.put(JSONObject().put("role", "user").put("content",
                 "[Earlier in this chat (older messages not shown): ${summary.ifBlank { "use search_chat if you need them" }}]"))
                 .also { msgs.put(JSONObject().put("role", "assistant").put("content", "Got it.")) }
-            var lastScreen = -1
-            for (i in 0 until history.length()) if (history.getJSONObject(i).let { it.optString("role") == "tool" && it.optString("content").contains(SCREEN_MARK) }) lastScreen = i
+            // Only the newest screen (plus the full readout a diff refers to) is sent; older ones are stale.
+            val keepScreens = FastActions.screensToKeep((0 until history.length()).map { i -> history.getJSONObject(i).takeIf { it.optString("role") == "tool" }?.optString("content") })
             for (i in from until history.length()) {
                 val m = history.getJSONObject(i)
                 msgs.put(when {
                     isShot(m) && i != lastShot -> JSONObject().put("role", "user").put("content", "$SHOT_NOTE (older, removed)")
                     // Only the newest screen readout is sent in full; older ones are stale anyway.
-                    i != lastScreen && m.optString("role") == "tool" && m.optString("content").contains(SCREEN_MARK) ->
-                        JSONObject(m.toString()).put("content", m.optString("content").substringBefore(SCREEN_MARK) + "[older screen omitted]")
+                    i !in keepScreens && m.optString("role") == "tool" && FastActions.isScreen(m.optString("content")) ->
+                        JSONObject(m.toString()).put("content", FastActions.stripScreen(m.optString("content")))
                     else -> m
                 })
             }
@@ -1486,8 +1492,17 @@ When you finish, say what you did in one short sentence.
                 // (≈ 6,000 chars of them were pulled in by "repo" / "github") and no Coder specialist.
                 val selfQ = !routine && BlazeDocs.isAboutBlaze(userNow)
                 if (stateQ || selfQ) turnSkills = SkillMatch.Result.NONE
+                // v0.30.4 fast actions: a plain device / settings action ("stop GitHub opening links") gets no skill packs
+                // (only a learned, replayable skill of the user's own on a strong match), no specialists, none of the heavy
+                // tool groups its words happen to hit ("github" → terminal, apps), and the screen tools up front.
+                val plainDev = !routine && !bulk && FastActions.plainDevice(userNow)
+                if (plainDev) {
+                    turnSkills = SkillMatch.learnedOnly(userNow)
+                    groupsOn.removeAll(FastActions.heavyGroups - ToolRouter.usedIn(history) - (turnView?.groups ?: emptyList()).toSet())
+                    groupsOn += "screen"; groupsOn += "device"
+                }
                 // v0.24.3 specialists: the matching specialist(s) bring their skill packs and the delegate tool.
-                turnSpecs = if (routine || stateQ || selfQ || agentId != null || !Settings.bool("specialists_on", true)) emptyList()
+                turnSpecs = if (routine || stateQ || selfQ || plainDev || agentId != null || !Settings.bool("specialists_on", true)) emptyList()
                     else try { SpecialistMatch.match(userNow, Specialists.all()) } catch (_: Exception) { emptyList() }
                 if (turnSpecs.isNotEmpty()) {
                     turnSkills = SpecialistMatch.attach(turnSkills, turnSpecs, SkillMatch.cached())
@@ -1497,7 +1512,7 @@ When you finish, say what you did in one short sentence.
                 SkillMatch.cardLine(turnSkills).takeIf { it.isNotBlank() }?.let { add(Role.STEP, it) }
                 var learnNudged = false
                 var tools = ToolRouter.select(allTools, groupsOn)
-                orient.reset()
+                orient.reset(); lastPlan = null
                 val orientNote = if (!routine && "screen" in groupsOn) orientContext() else ""
                 var orientSent = false
                 // Chat lane: small talk and plain questions = one light call with no tools.
@@ -1814,6 +1829,7 @@ When you finish, say what you did in one short sentence.
                         (0 until calls.length()).map { i -> scope.async { i to runTool(callName(i), callArgs(i), shots) } }
                             .map { it.await() }.toMap()
                     else emptyMap()
+                    val readAt = FastActions.screenReadAt((0 until calls.length()).map { callName(it) }, screenActions + "do_actions")
                     for (i in 0 until calls.length()) {
                         val call = calls.getJSONObject(i)
                         val fn = call.getJSONObject("function")
@@ -1850,15 +1866,22 @@ When you finish, say what you did in one short sentence.
                         if (name !in setOf("find_tool", "load_tools")) lookedThisTurn = true
                         lastResults += result
                         if (ClaimGuard.succeeded(result)) { turnOk += ClaimGuard.Call(name, args); lastOkStep = msgs.lastOrNull { it.role == Role.STEP }?.text.orEmpty() }
-                        if (name == "run_plan" || name == "read_screen") groupsOn += "screen"
+                        if (name == "run_plan" || name == "read_screen" || name == com.blaze.assistant.phone.SettingsJump.TOOL) groupsOn += "screen"
                         if (name in screenActions && !result.startsWith("Error") && !result.startsWith("Couldn't")) com.blaze.assistant.device.Haptics.tick(app)
-                        if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
+                        // v0.30.4 batching: several screen actions in one reply run back to back with a short settle; the
+                        // screen is read once, after the last of them.
+                        if (name == "do_actions" || (name in screenActions && !FastActions.isScreen(result))) {
+                            if (i in readAt || name == "do_actions") result += screenAfter(result)
+                            else com.blaze.assistant.phone.BlazeAccessibilityService.instance?.settle(700, 150)
+                        }
                         history.put(
                             JSONObject().put("role", "tool")
                                 .put("tool_call_id", call.optString("id", "call_$step$i"))
                                 .put("name", name)
-                                .put("content", if (!Settings.longChat || name in LongChat.keepWhole || result.contains(SCREEN_MARK)) result else LongChat.aside(result))
+                                .put("content", if (!Settings.longChat || name in LongChat.keepWhole || FastActions.isScreen(result)) result else LongChat.aside(result))
                         )
+                        // v0.30.4: only the newest screen stays in the history; older readouts are dropped in place.
+                        if (FastActions.isScreen(result)) FastActions.pruneScreens(history)
                     }
                     if (Settings.lowData) shots.clear()
                     shots.lastOrNull()?.let { url ->
@@ -1984,7 +2007,7 @@ When you finish, say what you did in one short sentence.
                     val name = fn.getString("name")
                     val args = try { JSONObject(fn.optString("arguments", "{}").ifBlank { "{}" }) } catch (_: Exception) { JSONObject() }
                     var result = if (name in unknown) "Error: there is no tool called \"$name\". Use one of the tools you were given (exact name)." else runTool(name, args, shots)
-                    if (name == "do_actions" || (name in screenActions && !result.contains(SCREEN_MARK))) result += screenAfter(result)
+                    if (name == "do_actions" || (name in screenActions && !FastActions.isScreen(result))) result += screenAfter(result)
                     msgs.put(JSONObject().put("role", "tool").put("tool_call_id", call.optString("id", "s$step$i")).put("name", name).put("content", result.take(12000)))
                 }
                 shots.lastOrNull()?.let { url -> shots.clear()
@@ -2017,7 +2040,7 @@ When you finish, say what you did in one short sentence.
         suspend fun screenAfter(result: String): String {
             val svc = com.blaze.assistant.phone.BlazeAccessibilityService.instance ?: return ""
             if (!Settings.phoneControl || result.startsWith("Error") || result.startsWith("No app") || result.startsWith("Phone control is off") || result.startsWith("Not done yet")) return ""
-            svc.settle(1500, 250)
+            svc.settle(1200, 200)
             val s = svc.readScreen(diff = true)
             orient.saw(svc.currentPkg())
             return "\n\nScreen now:\n" + s + com.blaze.assistant.phone.Watchers.drain()
@@ -2025,6 +2048,8 @@ When you finish, say what you did in one short sentence.
 
         /** Orient loop state for this turn (v0.20.0). */
         val orient = Orient.State()
+        /** v0.30.4: the last run_plan this turn (for resuming a failed script instead of restarting it). */
+        @Volatile var lastPlan: FastActions.PlanRun? = null
         /** Secure-form asks per site this session, so a refusing site can't loop on the form. */
         private val formAsks = HashMap<String, Int>()
 
@@ -2084,7 +2109,9 @@ When you finish, say what you did in one short sentence.
                 catch (e: Throwable) { com.blaze.assistant.device.CrashLog.error("tool $name", e); ToolGuide.crash(name, e) }
             // v0.28.2: outside content is now in the context: later sends / deletes this turn always ask (ConfirmGate).
             ConfirmGate.sourceOf(name)?.let { taint.mark(it) }
-            if (name in Orient.looking && !r.startsWith("Phone control")) com.blaze.assistant.phone.BlazeAccessibilityService.instance?.let { orient.saw(it.currentPkg()) }
+            // v0.30.4: any result that carries the screen (open_settings, a stopped run_plan) counts as a look, so the next
+            // numbered tap isn't bounced with "Looking at the screen first" (a whole extra model round trip).
+            if ((name in Orient.looking || FastActions.isScreen(r)) && !r.startsWith("Phone control")) com.blaze.assistant.phone.BlazeAccessibilityService.instance?.let { orient.saw(it.currentPkg()) }
             return if (r.isBlank()) ToolGuide.empty(name) else glance + r
         }
 
@@ -2457,6 +2484,7 @@ When you finish, say what you did in one short sentence.
                 }
                 "reply_to_notification" -> { add(Role.STEP, "Replying"); com.blaze.assistant.notify.NotificationBrain.reply(app, args.optInt("number"), args.optString("text")) }
                 "run_plan" -> runPlan(args)
+                com.blaze.assistant.phone.SettingsJump.TOOL -> com.blaze.assistant.phone.SettingsJump.run(app, args)
                 "do_actions" -> {
                     val steps = args.optJSONArray("steps") ?: JSONArray()
                     val log = StringBuilder()
@@ -2520,12 +2548,16 @@ When you finish, say what you did in one short sentence.
                 "search_in_app" -> "Search ${st.optString("app")} for \u201c${st.optString("query").take(30)}\u201d"
                 else -> st.optString("do")
             }
-            val labels = (0 until n).map { desc(steps.getJSONObject(it)) }
-            val state = MutableList(n) { 0 }   // 0 todo, 1 running, 2 done, 3 failed, 4 skipped
+            val keys = (0 until n).map { FastActions.key(steps.getJSONObject(it)) }
+            // v0.30.4: the same script sent again after it failed at step k skips the steps already done (the phone is
+            // still on step k's screen), instead of reopening the app and starting over.
+            val skip = FastActions.skipDone(keys, lastPlan, svc.currentPkg())
+            val labels = (0 until n).map { desc(steps.getJSONObject(it)) + if (it < skip) " (already done)" else "" }
+            val state = MutableList(n) { if (it < skip) 2 else 0 }   // 0 todo, 1 running, 2 done, 3 failed, 4 skipped
             fun board() = labels.mapIndexed { i, l -> (when (state[i]) { 2 -> "\u2713 "; 1 -> "\u2192 "; 3 -> "\u2715 "; 4 -> "\u2013 "; else -> "\u00b7 " }) + l }.joinToString("\n")
             val boardId = add(Role.STEP, board())
             val started = System.currentTimeMillis()
-            for (i in 0 until n) {
+            for (i in skip until n) {
                 val st = steps.getJSONObject(i)
                 state[i] = 1; replace(boardId, Role.STEP, board())
                 val t0 = System.currentTimeMillis()
@@ -2544,9 +2576,10 @@ When you finish, say what you did in one short sentence.
                             }
                         }
                         "tap", "long_press" -> {
-                            var id = svc.waitFor(target, 3000)
-                            if (id == null) { svc.scroll("down", null); svc.settle(600, 150); id = svc.waitFor(target, 1200) }
-                            if (id == null) fail = "couldn't find \u201c$target\u201d on screen"
+                            // v0.30.4: a short wait for a lazy screen, then synonyms / fuzzy / off-screen rows scrolled into view
+                            // (LabelMatch + reveal) instead of 3 s of polling and a single blind scroll.
+                            val id = svc.waitFor(target, 1200) ?: svc.reveal(target)
+                            if (id == null) fail = "couldn't find \u201c$target\u201d on screen, even after scrolling through it"
                             else {
                                 val label = svc.labelOf(id)
                                 if (Settings.confirmRisky && risky.containsMatchIn(label) &&
@@ -2559,7 +2592,7 @@ When you finish, say what you did in one short sentence.
                             }
                         }
                         "type" -> {
-                            val id = if (target.isNotBlank()) svc.waitFor(target, 3000, wantField = true) ?: svc.anyField() else svc.anyField()
+                            val id = if (target.isNotBlank()) svc.waitFor(target, 1500, wantField = true) ?: svc.reveal(target, wantField = true, maxScrolls = 3) ?: svc.anyField() else svc.anyField()
                             if (id == null) fail = "no text field to type into"
                             else {
                                 svc.flash(id)
@@ -2581,17 +2614,19 @@ When you finish, say what you did in one short sentence.
                     }
                     if (fail == null && st.optString("do") !in setOf("wait", "open_app")) svc.settle(1200, 180)
                     val expect = st.optString("expect")
-                    if (fail == null && expect.isNotBlank() && svc.waitFor(expect, 3500) == null) fail = "expected \u201c$expect\u201d to appear but it didn't"
+                    if (fail == null && expect.isNotBlank() && svc.waitFor(expect, 2500) == null) fail = "expected \u201c$expect\u201d to appear but it didn't"
                 } catch (e: CancellationException) { throw e } catch (e: Exception) { fail = "error: ${e.message}" }
                 if (!isPrivate) Traces.log(svc.currentPkg(), st, fail == null, System.currentTimeMillis() - t0, fail ?: "")
                 if (fail != null && st.optBoolean("optional")) { state[i] = 4; replace(boardId, Role.STEP, board()); continue }
                 if (fail != null) {
                     state[i] = 3; replace(boardId, Role.STEP, board())
-                    return "Stopped at step ${i + 1} (${labels[i]}): $fail. Steps 1-$i worked.\nUse the element numbers below to continue, or send a new run_plan from here.\n\n" + svc.readScreen()
+                    lastPlan = FastActions.PlanRun(keys, i, true, svc.currentPkg())
+                    return "Stopped at step ${i + 1} (${labels[i]}): $fail. " + FastActions.resumeHint(i + 1, n) + "\n\n" + svc.readScreen()
                 }
                 state[i] = 2; replace(boardId, Role.STEP, board())
                 com.blaze.assistant.device.Haptics.tick(app)
             }
+            lastPlan = FastActions.PlanRun(keys, n, false, svc.currentPkg())
             val words = svc.visibleWords().filter { it.length in 2..60 }.take(25)
             return "All $n steps done in ${"%.1f".format((System.currentTimeMillis() - started) / 1000.0)} s. Now in ${svc.currentApp() ?: "?"}. On screen: ${words.joinToString(" · ")}\n(Call read_screen only if you need to act further on this screen.)"
         }

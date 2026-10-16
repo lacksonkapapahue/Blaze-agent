@@ -20,7 +20,8 @@ import org.json.JSONObject
 object DeviceStatus {
     data class Snap(val battery: Int, val charging: Boolean, val tempC: Float, val freeStorageGb: Float, val totalStorageGb: Float,
                     val freeRamMb: Long, val totalRamMb: Long, val lowRam: Boolean, val network: String, val powerSave: Boolean,
-                    val ringer: String, val uptimeH: Float, val health: String)
+                    val ringer: String, val uptimeH: Float, val health: String,
+                    val internal: StorageMath.Vol? = null, val sdCards: List<StorageMath.Vol> = emptyList())
 
     fun snap(ctx: Context): Snap {
         val b = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -31,9 +32,11 @@ object DeviceStatus {
         val health = when (b?.getIntExtra(BatteryManager.EXTRA_HEALTH, 0)) {
             BatteryManager.BATTERY_HEALTH_GOOD -> "good"; BatteryManager.BATTERY_HEALTH_OVERHEAT -> "overheating"
             BatteryManager.BATTERY_HEALTH_DEAD -> "dead"; BatteryManager.BATTERY_HEALTH_COLD -> "cold"; else -> "unknown" }
-        val st = try { StatFs(Environment.getDataDirectory().path) } catch (_: Exception) { null }
-        val free = st?.let { it.availableBytes / 1e9f } ?: -1f
-        val total = st?.let { it.totalBytes / 1e9f } ?: -1f
+        // v0.30.4: the same numbers as Settings › Storage (StorageStatsManager), not StatFs(/data) (see StorageMath).
+        val internal = internalStorage(ctx)
+        val sd = sdCards(ctx)
+        val free = internal?.let { it.free / 1e9f } ?: -1f
+        val total = internal?.let { it.total / 1e9f } ?: -1f
         val am = ctx.getSystemService(ActivityManager::class.java)
         val mi = ActivityManager.MemoryInfo().also { am?.getMemoryInfo(it) }
         val cm = ctx.getSystemService(ConnectivityManager::class.java)
@@ -48,8 +51,37 @@ object DeviceStatus {
         val audio = ctx.getSystemService(AudioManager::class.java)
         val ringer = when (audio?.ringerMode) { AudioManager.RINGER_MODE_SILENT -> "silent"; AudioManager.RINGER_MODE_VIBRATE -> "vibrate"; else -> "normal" }
         return Snap(level, charging, temp, free, total, mi.availMem / 1_048_576, mi.totalMem / 1_048_576, mi.lowMemory, net,
-            pm?.isPowerSaveMode == true, ringer, SystemClock.elapsedRealtime() / 3_600_000f, health)
+            pm?.isPowerSaveMode == true, ringer, SystemClock.elapsedRealtime() / 3_600_000f, health, internal, sd)
     }
+
+    /**
+     * Internal storage as Settings shows it: StorageStatsManager for the default volume (total rounded to the advertised
+     * size, free including what Android can clear on demand). Fallback: StatFs on /data, total rounded the same way.
+     */
+    fun internalStorage(ctx: Context): StorageMath.Vol? {
+        try {
+            val ssm = ctx.getSystemService(android.app.usage.StorageStatsManager::class.java)
+            if (ssm != null) {
+                val uuid = android.os.storage.StorageManager.UUID_DEFAULT
+                val total = ssm.getTotalBytes(uuid); val free = ssm.getFreeBytes(uuid)
+                if (total > 0 && free in 0..total) return StorageMath.Vol("Internal storage", total, free)
+            }
+        } catch (_: Exception) { }
+        return try {
+            val st = StatFs(Environment.getDataDirectory().path)
+            val total = StorageMath.advertised(st.totalBytes)
+            StorageMath.Vol("Internal storage", total, st.availableBytes.coerceAtMost(total))
+        } catch (_: Exception) { null }
+    }
+
+    /** Removable SD cards that are mounted (their app-specific dir sits on the card; StatFs reads the whole volume). */
+    fun sdCards(ctx: Context): List<StorageMath.Vol> = try {
+        ctx.getExternalFilesDirs(null).drop(1).filterNotNull().filter {
+            try { Environment.isExternalStorageRemovable(it) && Environment.getExternalStorageState(it) == Environment.MEDIA_MOUNTED } catch (_: Exception) { false }
+        }.mapIndexedNotNull { i, d ->
+            try { val st = StatFs(d.path); StorageMath.Vol(if (i == 0) "SD card" else "SD card ${i + 1}", st.totalBytes, st.availableBytes) } catch (_: Exception) { null }
+        }
+    } catch (_: Exception) { emptyList() }
 
     /** Things worth a heads-up, empty when all is fine. */
     fun warnings(s: Snap): List<String> = buildList {
@@ -66,7 +98,7 @@ object DeviceStatus {
             append("Time: ${java.text.SimpleDateFormat("EEEE d MMMM yyyy, HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}.\n")
             append("Battery ${s.battery}%${if (s.charging) " (charging)" else ""}, ${"%.0f".format(s.tempC)} °C, health ${s.health}")
             if (s.powerSave) append(", battery saver on")
-            append(".\nStorage: ${"%.1f".format(s.freeStorageGb)} GB free of ${"%.0f".format(s.totalStorageGb)} GB.")
+            append(".\nStorage (decimal GB, as in Settings): ").append(StorageMath.describe(s.internal, s.sdCards))
             append("\nMemory: ${s.freeRamMb} MB free of ${s.totalRamMb} MB${if (s.lowRam) " (LOW)" else ""}.")
             append("\nNetwork: ${s.network}. Ringer: ${s.ringer}. Up ${"%.1f".format(s.uptimeH)} h. ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE}.")
             val w = warnings(s); if (w.isNotEmpty()) append("\nAttention: ").append(w.joinToString("; ")).append('.')
