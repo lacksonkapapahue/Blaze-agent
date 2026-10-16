@@ -121,7 +121,7 @@ class CameraProActions(
 internal val CamAccent = Color(0xFF6B8CFF)
 /** The part of the dial past the lens's hardware max (digital zoom). */
 private val CamDigital = Color(0xFFFFB45C)
-private val Glass = Color(0xFF0E0F13)
+private val CamGlass = Color(0xFF0E0F13)
 
 private val CountStyle = TextStyle(fontFamily = Type.Display, fontWeight = FontWeight.Medium, fontSize = 112.sp, color = Color.White,
     shadow = Shadow(Color.Black.copy(alpha = 0.55f), Offset(0f, 4f), 18f))
@@ -227,7 +227,7 @@ fun CamTool(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String,
 @Composable
 fun ZoomPresets(s: CameraProState, a: CameraProActions) {
     val active = CameraZoom.activePreset(s.zoom, s.presets)
-    Row(Modifier.clip(RoundedCornerShape(50)).background(Glass.copy(alpha = 0.55f)).border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(50))
+    Row(Modifier.clip(RoundedCornerShape(50)).background(CamGlass.copy(alpha = 0.55f)).border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(50))
         .padding(horizontal = 5.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
         s.presets.forEach { p ->
@@ -302,7 +302,7 @@ fun ZoomDial(s: CameraProState, a: CameraProActions, modifier: Modifier = Modifi
             val rimOut = minOf(size.width / 2f - 6.dp.toPx(), c.y - 6.dp.toPx())
             val r = rimOut - 12.dp.toPx()                 // the track
             // Dark glass half disc with a soft inner glow and a hairline rim.
-            drawArc(Brush.radialGradient(listOf(Glass.copy(alpha = 0.52f), Glass.copy(alpha = 0.78f)), c, rimOut),
+            drawArc(Brush.radialGradient(listOf(CamGlass.copy(alpha = 0.52f), CamGlass.copy(alpha = 0.78f)), c, rimOut),
                 180f, 180f, true, Offset(c.x - rimOut, c.y - rimOut), Size(rimOut * 2, rimOut * 2))
             drawArc(Color.White.copy(alpha = 0.13f), 180f, 180f, false, Offset(c.x - rimOut, c.y - rimOut), Size(rimOut * 2, rimOut * 2), style = Stroke(1.dp.toPx()))
             drawLine(Color.White.copy(alpha = 0.13f), Offset(c.x - rimOut, c.y), Offset(c.x + rimOut, c.y), 1.dp.toPx())
