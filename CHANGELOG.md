@@ -2,6 +2,16 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.6: Rapid messages (send while Blaze works; replies say which message they answer)
+
+Luke: "Let's make blaze like hark where I can send messages after messages with no pause and blaze highlights the one it's responding to and such (or replies to rapid succession questions that are related with one message)".
+
+- **The composer never blocks.** Before, a message sent while Blaze worked was silently dropped (`Session.send` returned when a turn was running, and the chat screen ignored Send while busy). Now it shows at once as your bubble and joins the running turn at its next step, between tool calls ("sent while you were working"); if the turn already gave its answer, it starts the next turn right after (never two at once). With text in the box the round button is Send even while Blaze works; Stop shows when the box is empty. Stop keeps what you sent in the conversation but starts nothing.
+- **Bursts are one turn.** Typed messages a moment apart while Blaze is idle are batched: the turn starts 0.6 s after the last send, or, if you're typing again, once you pause for 1.5 s (never more than 6 s after the last send). Your bubble, the tick and the working card show at once. Voice, Magic Hand, routines, notification replies and background agents start immediately, as before. Several messages in one turn are routed (skills, tools, the chat lane) as one request.
+- **The model knows which message is which.** Every message reaches it as `[m7] …`; the prompt says to read them all, that a later correction wins, to answer related ones together and unrelated ones separately, and to start each reply with `[re:m7]` / `[re:m7,m8]`. The marker is never shown or spoken (held back while streaming); separate answers become separate bubbles.
+- **Quote chips and highlights.** A reply that answers a message that isn't right above it, or several, gets a small quote chip (a thin accent bar + the first 60 characters); tap it to scroll to that message, which glows for 1.2 s. The messages Blaze is working on get a faint accent wash until it's done. Saved chats keep the link (`reply_to`, optional; older chats load as before).
+- ask_user questions are still answered by what you type; on-device answers (time, battery, "hide the orb") still come instantly, and while a turn runs they reach the model as a note at its next step instead of landing in the middle of a tool call. Code: `agent/RapidMessages.kt` (pure; RapidMessagesTest), `Agent.Session` inbox / burst / `startTurn`, `ui/ReplyQuote.kt`.
+
 ## v0.30.5: Fixes batch (secure form, YouTube streams, Home glass, chat glass, taste, skill guard, send hitch)
 
 - **Secure sign-in form closes when the task stops.** A stopped or killed task used to leave its secure form on screen. The wait is now in try/finally: the card and its notification go away on stop, cancel or force-quit, an answered form disappears at once, and the task is told not to ask that site again.
