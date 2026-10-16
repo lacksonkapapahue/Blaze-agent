@@ -34,7 +34,9 @@ data class ChatMessage(val id: Long, val role: Role, val text: String, val files
                        /** v0.26.1: how long the model's reasoning streamed (ms), for "Thought it through · 4 s"; 0 = not measured. */
                        val thinkMs: Long = 0L,
                        /** v0.28.4: on the first step of a turn, when that turn really started (ms; a retry or a wake starts a new one); 0 = unknown. */
-                       val startAt: Long = 0L)
+                       val startAt: Long = 0L,
+                       /** v0.30.6 rapid messages: the user messages this reply answers (from its [re:m7] marker); empty = not said. */
+                       val replyTo: List<Long> = emptyList())
 
 /** Splits a raw reply into what's shown, hidden reasoning (<think> tags) and follow-up suggestions. */
 object ReplyParts {
@@ -119,6 +121,14 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
     }
     private val _meter = MutableStateFlow<Meter?>(null)
     val meter: StateFlow<Meter?> = _meter
+
+    /** v0.30.6 rapid messages: ids of the user messages the visible chat is working on (their bubbles get a soft highlight). */
+    private val _focus = MutableStateFlow<Set<Long>>(emptySet())
+    val focus: StateFlow<Set<Long>> = _focus
+    /** v0.30.6: the chat composer's last keystroke and whether it holds text (an open burst waits while you type). */
+    @Volatile private var typingAt = 0L
+    @Volatile private var typingText = false
+    fun typing(hasText: Boolean) { typingAt = System.currentTimeMillis(); typingText = hasText }
 
     /** Ids of chats that are working right now (shown as a live dot in the chat list). */
     private val _busy = MutableStateFlow<Set<String>>(emptySet())
@@ -264,11 +274,12 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         _thinking.value = s.thinking
         _status.value = s.status
         _meter.value = s.meter
+        _focus.value = s.focus
         // v0.28.3: only the main thread is remembered as the chat to reopen (project chats live in Projects).
         if (!s.isPrivate) Settings.lastChatId = Mind.MAIN
         _private.value = s.isPrivate
         // Forget idle chats in the background; working ones stay until they finish.
-        sessions.values.removeAll { it !== s && !it.busy }
+        sessions.values.removeAll { it !== s && !it.busy && !it.waiting }
     }
 
     fun init(ctx: Context) {
@@ -389,7 +400,7 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
         if (_question.value != null && text.isNotBlank()) { answerQuestion(text.trim()); return }
         // v0.28.x Blaze Camera: "scan this document", "read this sign", "look at this", "escanea este documento"… open the
         // camera in that mode at once (no model guess); the capture comes back into this chat as the answer (fromCamera).
-        if (attachments.isEmpty() && untrusted == null && cur.job?.isActive != true) {
+        if (attachments.isEmpty() && untrusted == null && cur.job?.isActive != true && !cur.waiting) {
             CameraIntent.match(text)?.let { mode ->
                 val s = cur
                 if (com.blaze.assistant.device.BlazeCamera.open(app, mode, com.blaze.assistant.device.CameraModes.Origin.REQUEST, s.id, text.trim())) {
@@ -399,7 +410,11 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
                 }
             }
         }
-        cur.send(text, byVoice, attachments, untrusted = untrusted)
+        // v0.30.6 rapid messages: the composer never blocks. Typed messages may open a short burst (one turn for messages
+        // sent a moment apart); while a turn runs they join it at its next step. Voice and Magic Hand start at once.
+        typingText = false   // the composer was just emptied by this send
+        val s = cur
+        s.send(text, byVoice, attachments, untrusted = untrusted, burst = !byVoice && untrusted == null && s.agentId == null)
     }
 
     /**
@@ -486,7 +501,9 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             val fu = m.optJSONArray("followups")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList()
             val media = m.optJSONArray("media")?.let { a -> (0 until a.length()).map { a.getString(it) } }
                 ?.let { l -> com.blaze.assistant.media.ImageSlot.onLoad(l, com.blaze.assistant.media.ImageJobs::isLive) { java.io.File(it).exists() } } ?: emptyList()
-            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"), thinkMs = m.optLong("think_ms"), startAt = m.optLong("start_at"))
+            // v0.30.6: "reply_to" is optional (chats saved before it load with none).
+            val replyTo = m.optJSONArray("reply_to")?.let { a -> (0 until a.length()).map { a.optLong(it) } }?.filter { it > 0 } ?: emptyList()
+            list += ChatMessage(mid, Role.valueOf(m.getString("role")), m.getString("text"), files, m.optString("thinking"), fu, m.optString("meta"), media, at = m.optLong("at"), thinkMs = m.optLong("think_ms"), startAt = m.optLong("start_at"), replyTo = replyTo)
             if (m.has("mark")) s.historyMark[mid] = m.getInt("mark")
         }
         ids.set(maxOf(ids.get(), maxId + 1))
@@ -755,6 +772,8 @@ data class Attachment(val name: String, val parts: List<JSONObject>, val thumb: 
             append("\nYou are Blaze and you can control yourself with blaze_self (close/go quiet, stop, orb, wake word, read-aloud, model, personality, settings, your setup and crash log). When the user wants help setting you up, or asks what you can do or what's installed, call blaze_self setup_check and guide them one step at a time. If the user asks you to shut down, close, go away or stop, do that with blaze_self, never a phone setting. ")
             append("\nWhen the user tells you something lasting about themselves, save it quietly with the remember tool. ")
             append("\nIf the user says \"again\", \"do it again\" or \"same for X\", repeat your last actions from this chat (adapted to X) without asking. ")
+            // v0.30.6 rapid messages: [m7] ids on user messages, [re:m7] markers on replies (static, so it stays in the cached prefix).
+            append(RapidMessages.PROMPT_RULE)
             append("\nIf you're unsure what the user wants, or there are several options (accounts, contacts, items, times), don't guess and don't end your turn: call ask_user with short options, then carry on with the answer. ")
             if (control) {
                 append("""
@@ -953,6 +972,26 @@ When you finish, say what you did in one short sentence.
         val taint = ConfirmGate.Taint()
         /** Agent results waiting for the turn in progress to end. */
         val wakes = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        /**
+         * v0.30.6 rapid messages: a message the model hasn't seen yet, sent while this chat worked or inside an open burst
+         * (its bubble is already in the chat). [raw] = an on-device answer made meanwhile, kept as one user-side history line.
+         */
+        private class Inbound(val id: Long, val text: String, val attachments: List<Attachment>, val byVoice: Boolean,
+                              val untrusted: String?, val raw: JSONObject? = null)
+        /** v0.30.6: what arrived for this chat, in order. Read at the running turn's next step, or it starts the next turn. */
+        private val inbox = java.util.concurrent.ConcurrentLinkedQueue<Inbound>()
+        /** v0.30.6: the open burst (messages a moment apart become one turn); null when none. */
+        private var burstJob: Job? = null
+        @Volatile private var burstAt = 0L
+        /** v0.30.6: messages are waiting for a turn (an open burst, or sent just as a turn ended). */
+        val waiting: Boolean get() = burstJob?.isActive == true || inbox.isNotEmpty()
+        /** v0.30.6: the first user message of the turn in progress (or the last one); 0 = unknown (a chat just loaded). */
+        @Volatile var turnFrom = 0L
+        private var _focusV: Set<Long> = emptySet()
+        /** v0.30.6: the user messages this chat is working on right now (see [Agent.focus]). */
+        var focus: Set<Long>
+            get() = _focusV
+            set(v) { _focusV = v; if (this === cur) _focus.value = v }
         /** Speed plan step 11: text of the current step already handed to TTS while it streamed. */
         var spokenPrefix = ""
         var streamedVoice = false
@@ -1010,7 +1049,7 @@ When you finish, say what you did in one short sentence.
             get() = _mood
             set(v) {
                 _mood = v; if (this === cur) Agent._mood.value = v; refreshBusy()
-                if (v == Mood.IDLE) status = "" else if (status.isBlank()) status = Friendly.between(null)
+                if (v == Mood.IDLE) { status = ""; focus = emptySet() } else if (status.isBlank()) status = Friendly.between(null)
             }
         private var _status = ""
         /** The plain-words status line for this chat (see [Agent.status]). */
@@ -1028,14 +1067,67 @@ When you finish, say what you did in one short sentence.
 
         fun note(text: String, asReply: Boolean) { add(if (asReply) Role.BLAZE else Role.STEP, text) }
 
-        fun lastUserText(): String = msgs.lastOrNull { it.role == Role.USER }?.text.orEmpty()
+        /**
+         * The request this turn is about. v0.30.6: when several messages make up the turn (a burst, or ones sent while it
+         * worked) they're all of it, joined in order, so routing (skills, tools, the chat lane) sees the whole ask.
+         */
+        fun lastUserText(): String {
+            val from = turnFrom
+            if (from > 0) {
+                val t = msgs.filter { it.role == Role.USER && it.id >= from }
+                if (t.size > 1) return t.joinToString("\n") { it.text }
+            }
+            return msgs.lastOrNull { it.role == Role.USER }?.text.orEmpty()
+        }
 
         fun stop() {
             if (this === cur) _confirm.value?.answer?.complete(false)
+            // v0.30.6: Stop also closes an open burst. What was sent meanwhile stays in the conversation, but starts nothing.
+            burstJob?.cancel(); burstJob = null
+            settleInbox()
             dropFormOf(this)
             job?.cancel()
             job = null
             mood = Mood.IDLE
+        }
+
+        /** v0.30.6: a waiting message as the model sees it ([midTurn] = it arrived while a turn ran). */
+        private fun putInbound(m: Inbound, midTurn: Boolean, prefix: String = "") {
+            m.raw?.let { history.put(it); return }
+            historyMark[m.id] = history.length()
+            taint.mark(m.untrusted ?: if (m.attachments.isNotEmpty()) ConfirmGate.SHARED_FILE else null)
+            val said = prefix + (if (RapidMessages.shouldTag(agentId == null, m.text)) RapidMessages.label(m.id, m.text, midTurn) else m.text)
+            val content: Any = if (m.attachments.isEmpty()) said else JSONArray().apply {
+                put(JSONObject().put("type", "text").put("text", said))
+                m.attachments.forEach { a -> a.parts.forEach { put(it) } }
+            }
+            history.put(JSONObject().put("role", "user").put("content", content))
+        }
+
+        /** v0.30.6: Stop with messages waiting: they go into the history as plain user turns (nothing runs). */
+        private fun settleInbox() {
+            val left = generateSequence { inbox.poll() }.toList()
+            if (left.isEmpty()) return
+            left.forEach { putInbound(it, midTurn = false) }
+            persist()
+        }
+
+        /** v0.30.6: at a step of the running turn, what arrived meanwhile joins before the next model call. */
+        private fun takeInbox(midTurn: Boolean) {
+            val got = generateSequence { inbox.poll() }.toList()
+            if (got.isEmpty()) return
+            got.forEach { putInbound(it, midTurn) }
+            got.filter { it.raw == null }.map { it.id }.takeIf { it.isNotEmpty() }?.let { n -> focus = focus + n }
+            persist()
+        }
+
+        /** v0.30.6: starts the next turn with everything waiting, unless a turn runs (it reads them at its next step) or a burst is open. */
+        fun drain() {
+            if (job?.isActive == true || burstJob?.isActive == true) return
+            val items = generateSequence { inbox.poll() }.toList()
+            if (items.isEmpty()) return
+            if (items.all { it.raw != null }) { items.forEach { putInbound(it, midTurn = false) }; persist(); return }
+            startTurn(items, null, ack = false)
         }
         /** The generic step just added for the running tool; a tool's own step line replaces its text. */
         var autoStepId = -1L
@@ -1086,14 +1178,28 @@ When you finish, say what you did in one short sentence.
             val media = pendingMedia.toList().also { pendingMedia.clear() }
             val p = ReplyParts.split(raw, final = true).let { if (it.followups.isEmpty() && fu.isNotEmpty()) it.copy(followups = fu) else it }
             val think = listOf(thinking, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
-            // v0.26.2: never a bare "Done." (the loop stops empty answers before this; a canned turn always has text).
-            val text = p.text.ifEmpty { "I didn't get an answer that time. Tap Retry." }
             val tms = if (think.isNotBlank()) thinkClock.ms() else 0L
-            if (liveId >= 0) msgs = msgs.map {
-                if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = think, followups = p.followups, meta = meta, media = media, thinkMs = tms) else it }
-            else {
-                val id = ids.getAndIncrement()
-                msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = think, followups = p.followups, meta = meta, media = media, thinkMs = tms)
+            // v0.30.6 rapid messages: "[re:m7] …" / "[re:m7,m8] …" say which message(s) each reply answers; separate answers
+            // to unrelated messages become separate bubbles. The reasoning line goes on the first, chips, media and
+            // follow-ups on the last. A reply with no marker is one bubble, as before.
+            val known = msgs.filter { it.role == Role.USER }.map { it.id }.toSet()
+            val parts = RapidMessages.split(p.text, known)
+            parts.forEachIndexed { i, part ->
+                // v0.26.2: never a bare "Done." (the loop stops empty answers before this; a canned turn always has text).
+                val text = part.text.ifEmpty { "I didn't get an answer that time. Tap Retry." }
+                val isFirst = i == 0
+                val isLast = i == parts.size - 1
+                val th = if (isFirst) think else ""
+                val ms = if (isFirst) tms else 0L
+                val fu2 = if (isLast) p.followups else emptyList()
+                val meta2 = if (isLast) meta else ""
+                val media2 = if (isLast) media else emptyList()
+                if (isFirst && liveId >= 0) msgs = msgs.map {
+                    if (it.id == liveId) it.copy(role = Role.BLAZE, text = text, thinking = th, followups = fu2, meta = meta2, media = media2, thinkMs = ms, replyTo = part.refs) else it }
+                else {
+                    val id = ids.getAndIncrement()
+                    msgs = msgs + ChatMessage(id, Role.BLAZE, text, thinking = th, followups = fu2, meta = meta2, media = media2, thinkMs = ms, replyTo = part.refs)
+                }
             }
         } }
 
@@ -1205,6 +1311,7 @@ When you finish, say what you did in one short sentence.
                                 if (m.media.isNotEmpty()) put("media", JSONArray(m.media))
                                 if (m.thinkMs > 0) put("think_ms", m.thinkMs)
                                 if (m.startAt > 0) put("start_at", m.startAt)
+                                if (m.replyTo.isNotEmpty()) put("reply_to", JSONArray(m.replyTo))
                             })
                     }
                     val hist = JSONArray()
@@ -1237,52 +1344,120 @@ When you finish, say what you did in one short sentence.
 
         /** A self-command handled on-device: shown and remembered like a normal exchange. */
         fun selfTurn(text: String, reply: String, byVoice: Boolean, chip: String = "⚡ Blaze itself") {
-            add(Role.USER, text)
-            history.put(JSONObject().put("role", "user").put("content", text))
+            // v0.30.6: while a turn runs (or a burst is open) the history mustn't get lines in the middle of a tool call:
+            // the exchange waits in the inbox, in order, as one user-side note ("Blaze already answered this one").
+            val defer = busy || waiting
+            val uid = add(Role.USER, text)
+            if (defer) inbox.add(Inbound(uid, text, emptyList(), false, null, raw = JSONObject().put("role", "user")
+                .put("content", RapidMessages.answeredNote(if (RapidMessages.shouldTag(agentId == null, text)) RapidMessages.label(uid, text, midTurn = busy) else text, reply))))
+            else history.put(JSONObject().put("role", "user").put("content", text))
             if (reply.isNotBlank()) {
                 val id = add(Role.BLAZE, reply)
                 addMeta(id, chip)
-                history.put(JSONObject().put("role", "assistant").put("content", reply))
+                if (!defer) history.put(JSONObject().put("role", "assistant").put("content", reply))
                 if (byVoice && Voice.shouldSpeak() && !reply.startsWith("Going quiet")) Voice.speak(reply)
             }
+            // A turn that ends without another step (an on-device answer, a fast-lane reply) still hands it over.
+            if (defer && busy) scope.launch { job?.join(); drain() }
             persist()
         }
 
+        /**
+         * v0.30.6 rapid messages: never drops a message. While a turn runs, the message shows at once and joins that turn
+         * at its next step; with [burst] (typed in the chat) it waits a moment for more ([RapidMessages.burstWait]) so a burst
+         * is one turn; otherwise it starts a turn now. Never two turns at once in one chat.
+         */
         fun send(text: String, byVoice: Boolean = false, attachments: List<Attachment> = emptyList(), notificationContext: String? = null,
-                 untrusted: String? = null) {
-            if ((text.isBlank() && attachments.isEmpty()) || job?.isActive == true) return
+                 untrusted: String? = null, burst: Boolean = false) {
+            if (text.isBlank() && attachments.isEmpty()) return
+            val shown = text.trim().ifEmpty { "Take a look at this." }
+            val busyNow = job?.isActive == true
+            when (RapidMessages.route(busyNow, !busyNow && waiting, burst && notificationContext.isNullOrBlank())) {
+                RapidMessages.Route.NOW -> startTurn(listOf(Inbound(post(shown, attachments), shown, attachments, byVoice, untrusted)), notificationContext, ack = true)
+                RapidMessages.Route.MID_TURN -> {
+                    queue(shown, attachments, byVoice, untrusted)
+                    // If the turn ends before its next step, this starts the next one (after it, never beside it).
+                    scope.launch { job?.join(); drain() }
+                }
+                RapidMessages.Route.JOIN_BURST_NOW -> {
+                    queue(shown, attachments, byVoice, untrusted)
+                    burstJob?.cancel(); burstJob = null
+                    drain()
+                }
+                RapidMessages.Route.BURST -> {
+                    queue(shown, attachments, byVoice, untrusted)
+                    burstAt = System.currentTimeMillis()
+                    // Instant acknowledgment while the burst is open: the orb, the working card and the highlight.
+                    // (the work card times from now, not from the last turn)
+                    if (mood == Mood.IDLE) { beginTurn(); mood = Mood.THINKING }
+                    LlmClient.prewarm()
+                    if (burstJob?.isActive != true) burstJob = scope.launch {
+                        while (true) {
+                            val w = RapidMessages.burstWait(System.currentTimeMillis(), burstAt, typingAt, typingText)
+                            if (w <= 0L) break
+                            kotlinx.coroutines.delay(w)
+                        }
+                        burstJob = null
+                        drain()
+                    }
+                }
+            }
+        }
+
+        /** v0.30.6: the user's bubble, shown at once. Files with a thumbnail first, so the bubble pairs thumbnails with their names (v0.24.6). */
+        private fun post(shown: String, attachments: List<Attachment>): Long {
+            val id = add(Role.USER, shown, attachments.sortedBy { if (it.thumb != null) 0 else 1 }.map { it.name })
+            attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
+            return id
+        }
+
+        /** v0.30.6: a message that waits for the running turn's next step or for the burst to close. */
+        private fun queue(shown: String, attachments: List<Attachment>, byVoice: Boolean, untrusted: String?) {
+            val id = post(shown, attachments)
+            inbox.add(Inbound(id, shown, attachments, byVoice, untrusted))
+            focus = focus + id
+            com.blaze.assistant.device.Haptics.tick(app)
+            persist()   // so it shows in the chat list right away, even if you leave
+        }
+
+        /**
+         * Starts a turn with [items] (their bubbles are already in the chat), in order; v0.30.6: one or several messages.
+         * [ack] = tick now (a queued message already ticked when it was sent).
+         */
+        private fun startTurn(items: List<Inbound>, notificationContext: String?, ack: Boolean) {
+            val users = items.filter { it.raw == null }
+            if (users.isEmpty()) return
+            val single = users.size == 1
+            val attachments = users.flatMap { it.attachments }
+            val byVoice = users.any { it.byVoice }
             // v0.28.2: a new turn starts clean; what came with the message (a shared file, Magic Hand's screen text) counts as read.
             taint.clear()
-            taint.mark(untrusted ?: if (attachments.isNotEmpty()) ConfirmGate.SHARED_FILE else null)
             Voice.lastTurnByVoice = byVoice
-            val shown = text.trim().ifEmpty { "Take a look at this." }
+            val shown = if (single) users[0].text else users.joinToString("\n") { it.text }
             LlmClient.quickTurn = attachments.isEmpty() && shown.length < 80
-            // Files with a thumbnail first, so the bubble pairs thumbnails with their names (v0.24.6).
-            val id = add(Role.USER, shown, attachments.sortedBy { if (it.thumb != null) 0 else 1 }.map { it.name })
-            beginTurn(msgs.lastOrNull { it.id == id }?.at ?: System.currentTimeMillis())
-            attachments.mapNotNull { it.thumb }.takeIf { it.isNotEmpty() }?.let { th -> msgs = msgs.map { if (it.id == id) it.copy(media = th) else it } }
-            historyMark[id] = history.length()
+            turnFrom = users[0].id
+            beginTurn(msgs.lastOrNull { it.id == users[0].id }?.at ?: System.currentTimeMillis())
             // Heads-ups Blaze posted into this chat as notifications, and the one being replied to: the model
             // sees what Blaze had said, so "yes", "remind me later" or "who's that?" make sense (v0.8.0).
             val tips = synchronized(unseenTips) { unseenTips.toList().also { unseenTips.clear() } }
-            val said = buildString {
+            val prefix = buildString {
                 if (tips.isNotEmpty()) append("[Heads-ups you sent the user as phone notifications since their last message here (they also show in this chat):\n" +
                     tips.takeLast(12).joinToString("\n") { "- ${it.take(600)}" } + "]\n")
                 if (!notificationContext.isNullOrBlank()) append("[The user is replying from the notification of this message you sent them: \"${notificationContext.take(1500)}\"]\n")
                 if (isNotEmpty()) append("\n")
-                append(shown)
             }
-            val content: Any = if (attachments.isEmpty()) said else JSONArray().apply {
-                put(JSONObject().put("type", "text").put("text", said))
-                attachments.forEach { a -> a.parts.forEach { put(it) } }
+            var first = true
+            for (m in items) {
+                if (m.raw == null) { putInbound(m, midTurn = false, prefix = if (first) prefix else ""); first = false }
+                else putInbound(m, midTurn = false)
             }
-            history.put(JSONObject().put("role", "user").put("content", content))
+            focus = users.map { it.id }.toSet()
             persist()   // so it shows in the chat list right away, even if you leave
             val routine = shown.startsWith("[Scheduled routine")
             // Instant acknowledgment: the orb and a tick react before any thinking happens.
             mood = Mood.THINKING
             LlmClient.prewarm()   // speed plan step 10: open the connection while the fast lane checks
-            if (!routine) com.blaze.assistant.device.Haptics.tick(app)
+            if (!routine && ack) com.blaze.assistant.device.Haptics.tick(app)
             if (byVoice && !routine) scope.launch {
                 // No-hang voice: say something within about a second, then narrate long work.
                 kotlinx.coroutines.delay(1100)
@@ -1300,7 +1475,7 @@ When you finish, say what you did in one short sentence.
             job = scope.launch(ctxTag + taint) {
                 // v0.27.x: "show me your memories" / "what do you know about me" is answered straight from the memory table:
                 // grouped, with how to change or delete a line. No model call, no tool loop, no Design.
-                if (attachments.isEmpty() && !routine && agentId == null && notificationContext.isNullOrBlank() && MemoryIntent.isListRequest(shown)) {
+                if (single && attachments.isEmpty() && !routine && agentId == null && notificationContext.isNullOrBlank() && MemoryIntent.isListRequest(shown)) {
                     mood = Mood.ACTING
                     add(Role.STEP, "Looking through what I remember")
                     val reply = kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -1316,7 +1491,7 @@ When you finish, say what you did in one short sentence.
                 // Fast lane: direct commands run on-device in well under a second.
                 val offline = !FastLane.online(app)
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
-                if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
+                if (single && attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
                     mood = Mood.THINKING
                     // v0.30.8: "use pollinations for images" / "use qwen for images" switches the picture service.
                     val imgRoute = com.blaze.assistant.media.QwenImageApi.routePhrase(shown)
@@ -1382,6 +1557,7 @@ When you finish, say what you did in one short sentence.
             list.drop(userIdx + 1).forEach { historyMark.remove(it.id) }
             msgs = list.take(userIdx + 1)
             Voice.lastTurnByVoice = false
+            turnFrom = user.id
             beginTurn()
             job = scope.launch(ctxTag + taint) { runLoop() }
         }
@@ -1644,6 +1820,8 @@ When you finish, say what you did in one short sentence.
                 var autoReplies = 0
                 for (step in 0 until maxSteps) {
                     currentStep = step + 1
+                    // v0.30.6 rapid messages: what you sent while Blaze worked (already in the chat) joins here, before the next model call.
+                    takeInbox(midTurn = step > 0)
                     // Steering: what the user added while this chat worked joins before the next model call.
                     generateSequence { steer.poll() }.toList().takeIf { it.isNotEmpty() }?.let { notes ->
                         notes.forEach { n -> add(Role.USER, n) }
@@ -1665,9 +1843,11 @@ When you finish, say what you did in one short sentence.
                             val p = ReplyParts.split(partial)
                             if (p.thinking.isNotEmpty()) thinking = listOf(before, p.thinking).filter { it.isNotBlank() }.joinToString("\n\n")
                             // A tool call the model is writing as text never flashes up as a reply.
-                            if (p.text.isNotEmpty() && !(liveId < 0 && FakeCall.callish(p.text))) {
-                                if (liveId < 0) { liveId = add(Role.BLAZE, p.text); status = "Writing the reply" } else replace(liveId, Role.BLAZE, p.text)
-                                speakAsItStreams(p.text)
+                            // v0.30.6: the [re:m7] marker is never shown or spoken (an unfinished one waits until it's whole).
+                            val seen = RapidMessages.display(p.text, final = false)
+                            if (seen.isNotEmpty() && !(liveId < 0 && FakeCall.callish(seen))) {
+                                if (liveId < 0) { liveId = add(Role.BLAZE, seen); status = "Writing the reply" } else replace(liveId, Role.BLAZE, seen)
+                                speakAsItStreams(seen)
                             }
                         }
                     } else null
@@ -1781,7 +1961,7 @@ When you finish, say what you did in one short sentence.
                     // Autopilot: a reply that just asks the user something gets "decide yourself" (at most 8 times).
                     if ((calls == null || calls.length() == 0) && autopilot && autoReplies < 8 && step < maxSteps - 2 && Modes.asksUser(textOut)) {
                         autoReplies++
-                        if (liveId < 0 && textOut.isNotBlank()) add(Role.BLAZE, ReplyParts.split(textOut, final = true).text)
+                        if (liveId < 0 && textOut.isNotBlank()) add(Role.BLAZE, RapidMessages.display(ReplyParts.split(textOut, final = true).text))
                         add(Role.STEP, "Autopilot: deciding myself")
                         history.put(JSONObject().put("role", "user").put("content", Modes.AUTO_PREFIX + Modes.AUTO_REPLY))
                         continue
@@ -1880,7 +2060,7 @@ When you finish, say what you did in one short sentence.
                     }
                     // v0.26.2: an empty final answer (reasoning only, or only tags) is never shown as "Done.": a specific line
                     // when the user asked for an action and a tool succeeded; else ask the model once more, then fail plainly.
-                    if ((calls == null || calls.length() == 0) && ReplyParts.split(textOut, final = true).text.isBlank()) {
+                    if ((calls == null || calls.length() == 0) && RapidMessages.display(ReplyParts.split(textOut, final = true).text).isBlank()) {
                         val done = EmptyReply.finalText(lastUserText(), lastOkStep)
                         if (done != null) { textOut = done; reply.put("content", done) }
                         else {
@@ -1915,7 +2095,7 @@ When you finish, say what you did in one short sentence.
                         break
                     }
                     // Text that came with tool calls is narration, shown as a step; its reasoning joins the turn's.
-                    val narr = ReplyParts.split(textOut).let { it.copy(text = Friendly.plain(it.text)) }
+                    val narr = ReplyParts.split(textOut).let { it.copy(text = Friendly.plain(RapidMessages.display(it.text))) }
                     if (narr.thinking.isNotEmpty()) { if (turnThink.isNotEmpty()) turnThink.append("\n\n"); turnThink.append(narr.thinking) }
                     thinking = turnThink.toString()
                     if (liveId >= 0) {
@@ -2019,6 +2199,8 @@ When you finish, say what you did in one short sentence.
                 announce()
                 learnAfterTurn()
                 if (wakes.isNotEmpty()) scope.launch { job?.join(); wakes.poll()?.let { wake(it) } }
+                // v0.30.6: messages that came in after this turn's last step start the next turn (after this one ends).
+                if (inbox.isNotEmpty()) scope.launch { job?.join(); drain() }
             }
         }
 

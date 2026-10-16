@@ -366,7 +366,7 @@ fun ChatScreen() {
         val body = cmd ?: text
         val full = if (quote.isNotBlank()) quote.lines().joinToString("\n") { "> $it" } + "\n\n" + body else body
         if (full.isBlank() && pending.isEmpty()) return
-        if (mood != Mood.IDLE) return
+        // v0.30.6 rapid messages: no "busy" check; a message sent while Blaze works joins the turn (Agent.send).
         clearedAt = 0L
         // v0.28.3: a new project chat joins its project with its first message (only from its own screen in Projects).
         val n = navNow()
@@ -384,7 +384,7 @@ fun ChatScreen() {
     // v0.27.2: what each selection-pill action does in the chat. Every action but Select all ends the selection.
     fun askNow(prompt: String) {
         input = TextFieldValue(prompt, TextRange(prompt.length))
-        if (mood == Mood.IDLE) send(prompt) else Toast.makeText(ctx, "Blaze is busy. It's in the box; tap send when it's done.", Toast.LENGTH_SHORT).show()
+        send(prompt)   // v0.30.6: joins the turn when Blaze is working
     }
     fun onSelection(a: SelectionActions.Action) {
         val copy = tbCopy
@@ -605,7 +605,7 @@ fun ChatScreen() {
                 }
                 // v0.24.6: pictures straight from the keyboard (Samsung clipboard, GIFs, stickers) attach like picked photos.
                 AcceptImages(onImage = { uri, mime -> addUris(listOf(uri), mime) }) {
-                Composer(input, { input = it }, busy = mood != Mood.IDLE, canSend = input.text.isNotBlank() || pending.isNotEmpty(),
+                Composer(input, { input = it; Agent.typing(it.text.isNotEmpty()) }, busy = mood != Mood.IDLE, canSend = input.text.isNotBlank() || pending.isNotEmpty(),
                     plusOpen = plusOpen, chip = modeChip(work, approval), agents = bgAgents.count { it.live },
                     listening = voiceState == Voice.State.LISTENING, speaking = voiceState == Voice.State.SPEAKING,
                     onPlus = { plusOpen = !plusOpen; showViews = false }, onMic = { onMic() }, onSend = { send(input.text) }, onStop = { Agent.stop() },
@@ -732,6 +732,9 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
     LaunchedEffect(lastUser) { if (lastUser != null) { follow = true; toEnd(true) } }
 
     val lastBlazeId = messages.lastOrNull()?.takeIf { it.role == Role.BLAZE }?.id
+    // v0.30.6 rapid messages: quote chips on replies, the glow on what Blaze is working on, tap a chip to jump (ReplyQuote.kt).
+    val replyRefs = rememberReplyRefs(messages)
+    val jumpTo: (Long) -> Unit = { id -> items.indexOfFirst { it.key == "m$id" }.takeIf { it >= 0 }?.let { i -> scope.launch { state.animateScrollToItem(i); follow = false; ReplyFocus.flash(id) } } }
     val meter by Agent.meter.collectAsState()
     val lastStepsKey = items.lastOrNull { it is Item.Steps }?.key
     // v0.27.0: messages that arrive while the chat is open fade in with a slight rise, once (not the history).
@@ -753,9 +756,9 @@ private fun MessageList(mood: Mood, onQuote: (String) -> Unit, onFollowup: (Stri
                             WorkCard(item.steps, item.live, item.startAt, item.endAt, status = if (item.live) st else "", exact = Settings.showSteps,
                                 meter = m?.text.orEmpty(), meterHigh = m?.high == true)
                         }
-                        is Item.Msg -> Entry(item.m, item.pos, canAct = mood == Mood.IDLE, onQuote = onQuote,
+                        is Item.Msg -> ReplyThread(item.m, replyRefs, jumpTo) { Entry(item.m, item.pos, canAct = mood == Mood.IDLE, onQuote = onQuote,
                             followups = if (item.m.id == lastBlazeId && mood == Mood.IDLE && Settings.followups) item.m.followups else emptyList(),
-                            onFollowup = onFollowup)
+                            onFollowup = onFollowup) }
                     }
                 }
             }
