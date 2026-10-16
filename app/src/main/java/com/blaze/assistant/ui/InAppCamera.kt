@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Size
 import android.widget.Toast
@@ -24,6 +25,7 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -32,9 +34,12 @@ import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -63,12 +68,20 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FlashAuto
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
+import androidx.compose.material.icons.rounded.GridOff
+import androidx.compose.material.icons.rounded.GridOn
+import androidx.compose.material.icons.rounded.Timer10
+import androidx.compose.material.icons.rounded.Timer3
+import androidx.compose.material.icons.rounded.TimerOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -77,6 +90,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -100,11 +117,17 @@ import com.blaze.assistant.device.CameraModes.Mode
 import com.blaze.assistant.device.CameraModes.Origin
 import com.blaze.assistant.device.CameraModes.Route
 import com.blaze.assistant.device.CameraSupport
+import com.blaze.assistant.device.CameraTimer
+import com.blaze.assistant.device.CameraZoom
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 /**
  * v0.28.x Blaze Camera (CameraX). Two jobs:
@@ -116,6 +139,9 @@ import java.util.concurrent.Executors
  *     [CameraModes.route]; [BlazeCamera.deliver] hands it over.
  * Preview, shutter, front/back flip only when both lenses exist, flash only when the lens has one, pinch-zoom and
  * tap-to-focus, its own permission handling, ~1600 px upright JPEGs (1280 px on low-RAM phones), insets-aware.
+ * v0.30.x Camera Pro (ui/CameraPro.kt, device/CameraZoom.kt): zoom presets, the half-circle zoom dial, digital zoom
+ * past the lens's max (preview scaled, photo cropped + sharpened off the main thread), tap-to-focus ring with an
+ * exposure slider, rule-of-thirds grid and a 3 s / 10 s timer (grid and timer remembered).
  */
 class CameraActivity : ComponentActivity() {
     companion object {
@@ -254,6 +280,27 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
     var textCard by remember { mutableStateOf<Pair<File, String>?>(null) }
     val analysisExec = remember { Executors.newSingleThreadExecutor() }
 
+    // v0.30.x Camera Pro. One total zoom (hardware × digital, see CameraZoom), focus + exposure, grid, timer.
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var camMin by remember { mutableFloatStateOf(1f) }
+    var hwMax by remember { mutableFloatStateOf(1f) }
+    var dialOpen by remember { mutableStateOf(false) }
+    var dialTouch by remember { mutableLongStateOf(0L) }
+    var grid by remember { mutableStateOf(CameraSupport.grid) }
+    var timer by remember { mutableIntStateOf(CameraSupport.timer) }
+    var countdown by remember { mutableIntStateOf(0) }
+    val countJob = remember { arrayOfNulls<Job>(1) }
+    var focus by remember { mutableStateOf<Offset?>(null) }
+    var focusOk by remember { mutableStateOf<Boolean?>(null) }
+    var focusTouch by remember { mutableLongStateOf(0L) }
+    var ev by remember { mutableIntStateOf(0) }
+    var evLower by remember { mutableIntStateOf(0) }
+    var evUpper by remember { mutableIntStateOf(0) }
+    var evStep by remember { mutableFloatStateOf(0f) }
+    val lastHw = remember { floatArrayOf(-1f) }
+    val previewRef = remember { arrayOfNulls<PreviewView>(1) }
+    val zoomAnim = remember { Animatable(1f) }
+
     val controller = remember {
         LifecycleCameraController(ctx).apply {
             // ~1600 px (1280 on low-RAM phones) is plenty for the model and OCR, and quick on cheap phones.
@@ -263,8 +310,10 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
                 imageCaptureTargetSize = CameraController.OutputSize(if (landscape) Size(long, short) else Size(short, long))
             }
             imageCaptureMode = ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY
-            isPinchToZoomEnabled = true
-            isTapToFocusEnabled = true
+            // Blaze handles pinch and tap itself (CameraPro): pinch has to run on past the lens's max into digital zoom,
+            // and a tap shows the focus ring and exposure slider.
+            isPinchToZoomEnabled = false
+            isTapToFocusEnabled = false
             setEnabledUseCases(if (CameraModes.live(m)) CameraController.IMAGE_ANALYSIS else CameraController.IMAGE_CAPTURE)
         }
     }
@@ -273,9 +322,54 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
         hasFront = try { controller.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) } catch (_: Exception) { false }
         hasFlash = try { controller.cameraInfo?.hasFlashUnit() == true } catch (_: Exception) { false }
         if (!hasFlash) flash = "off"
+        try {
+            val es = controller.cameraInfo?.exposureState
+            if (es != null && es.isExposureCompensationSupported) {
+                evLower = es.exposureCompensationRange.lower; evUpper = es.exposureCompensationRange.upper; evStep = es.exposureCompensationStep.toFloat()
+            } else { evLower = 0; evUpper = 0 }
+        } catch (_: Exception) { evLower = 0; evUpper = 0 }
+    }
+    fun zoomRange(): Pair<Float, Float> = CameraZoom.minTotal(camMin) to CameraZoom.maxTotal(hwMax, lens == "front")
+    /** Sets the total zoom: the lens takes up to its max (only when that part changed), the preview scale does the rest. */
+    fun setZoom(r: Float) {
+        val (lo, hi) = zoomRange()
+        val z = CameraZoom.clamp(r, lo, hi)
+        zoom = z
+        val hw = CameraZoom.split(z, hwMax).hw
+        if (abs(hw - lastHw[0]) > 0.0005f) {
+            lastHw[0] = hw
+            try { controller.setZoomRatio(hw) } catch (e: Exception) { CameraSupport.log("zoom failed", e) }
+        }
+    }
+    /** Preset taps and dial snaps glide there (~220 ms, instant with Remove animations). */
+    fun glideTo(target: Float) {
+        scope.launch {
+            try { zoomAnim.snapTo(zoom); zoomAnim.animateTo(target, animationSpec = MotionTokens.medium()) { setZoom(value) } } catch (_: Exception) { }
+        }
+    }
+    fun setEv(i: Int) {
+        if (i == ev) return
+        ev = i
+        try { controller.cameraControl?.setExposureCompensationIndex(i) } catch (e: Exception) { CameraSupport.log("exposure failed", e) }
+    }
+    fun tapFocus(o: Offset) {
+        val v = previewRef[0] ?: return
+        if (!ready) return
+        // The preview may be scaled up for digital zoom: map the tap back into the PreviewView's own coordinates.
+        val (x, y) = CameraZoom.unscale(o.x, o.y, v.width / 2f, v.height / 2f, CameraZoom.split(zoom, hwMax).digital)
+        focus = o; focusOk = null; focusTouch = SystemClock.uptimeMillis()
+        if (ev != 0) setEv(0)
+        try {
+            val action = FocusMeteringAction.Builder(v.meteringPointFactory.createPoint(x, y)).setAutoCancelDuration(5, TimeUnit.SECONDS).build()
+            val f = controller.cameraControl?.startFocusAndMetering(action)
+            if (f == null) { focusOk = false; return }
+            f.addListener({ focusOk = try { f.get().isFocusSuccessful } catch (_: Exception) { false } }, ContextCompat.getMainExecutor(ctx))
+        } catch (e: Exception) { CameraSupport.log("tap to focus failed", e); focusOk = false }
     }
     fun applyLens(want: String): Boolean {
         val l = CameraFlow.startLens(hasBack, hasFront, want) ?: return false
+        if (l != lens) { zoom = 1f; focus = null; ev = 0; dialOpen = false }
+        lastHw[0] = -1f
         lens = l
         controller.cameraSelector = if (l == "front") CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
         return true
@@ -299,7 +393,14 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
             }
         }, ContextCompat.getMainExecutor(ctx))
         // Flash support is only known once a lens is bound: re-read it as the camera state settles.
-        val obs = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { refreshLensInfo() }
+        // v0.30.x: also the lens's zoom range (min < 1 = an ultrawide; max = where digital zoom takes over).
+        val obs = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zs ->
+            refreshLensInfo()
+            if (zs != null && (zs.minZoomRatio != camMin || zs.maxZoomRatio != hwMax)) {
+                camMin = zs.minZoomRatio; hwMax = zs.maxZoomRatio
+                lastHw[0] = -1f; setZoom(zoom)
+            }
+        }
         controller.zoomState.observe(owner, obs)
         onDispose {
             try { controller.zoomState.removeObserver(obs) } catch (_: Exception) { }
@@ -360,9 +461,14 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
         } catch (e: Throwable) { CameraSupport.log("document scanner failed, using the framed photo", e) }
     }
 
-    fun handlePhoto(out: File) {
+    fun handlePhoto(out: File, digital: Float) {
         scope.launch {
             val route = CameraModes.route(m, origin)
+            // Digital zoom: the same centred crop the preview showed, upscaled and sharpened off the main thread.
+            if (digital > 1.01f) {
+                val maxLong = if (origin != Origin.STANDALONE || attachTo != null) (if (lowRam) 1280 else CameraFlow.TARGET_LONG_EDGE) else (if (lowRam) 1600 else 2400)
+                withContext(Dispatchers.Default) { CameraSupport.digitalZoom(out, digital, maxLong) }
+            }
             when {
                 route == Route.RETURN_FILE -> { withContext(Dispatchers.IO) { CameraSupport.normalize(out) }; busy = false; onDone(true, null) }
                 route == Route.GALLERY -> {
@@ -388,10 +494,11 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
     fun shoot() {
         if (busy || !ready || CameraModes.live(m)) return
         busy = true; note = ""
+        val digital = CameraZoom.split(zoom, hwMax).digital
         val out = attachTo ?: CameraSupport.newPhoto(ctx).first
         out.parentFile?.mkdirs()
         controller.takePicture(ImageCapture.OutputFileOptions.Builder(out).build(), ContextCompat.getMainExecutor(ctx), object : ImageCapture.OnImageSavedCallback {
-            override fun onImageSaved(r: ImageCapture.OutputFileResults) { handlePhoto(out) }
+            override fun onImageSaved(r: ImageCapture.OutputFileResults) { handlePhoto(out, digital) }
             override fun onError(e: ImageCaptureException) {
                 CameraSupport.log("Blaze Camera capture failed (code ${e.imageCaptureError})", e)
                 busy = false
@@ -400,18 +507,81 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
         })
     }
 
+    /** The shutter: straight away, or after the 3 s / 10 s countdown (a second press cancels it). */
+    fun shutter() {
+        countJob[0]?.let { if (it.isActive) { it.cancel(); countJob[0] = null; countdown = 0; return } }
+        if (timer <= 0 || busy || !ready || CameraModes.live(m)) { shoot(); return }
+        countJob[0] = scope.launch {
+            val start = SystemClock.elapsedRealtime(); var shown = -1
+            while (true) {
+                val left = CameraTimer.remaining(start, SystemClock.elapsedRealtime(), timer)
+                if (left != shown) { shown = left; countdown = left; if (left > 0) com.blaze.assistant.device.Haptics.tick(ctx) }
+                if (left <= 0) break
+                delay(40)
+            }
+            countdown = 0; countJob[0] = null
+            shoot()
+        }
+    }
+
+    LaunchedEffect(focus, focusTouch) { if (focus != null) { delay(3000); focus = null } }
+    LaunchedEffect(dialOpen, dialTouch) { if (dialOpen) { delay(3500); dialOpen = false } }
+
+    val proActions = remember {
+        CameraProActions(
+            onZoom = { setZoom(it) },
+            onPreset = { p -> com.blaze.assistant.device.Haptics.tick(ctx); glideTo(p) },
+            onDial = { open -> dialOpen = open; dialTouch = SystemClock.uptimeMillis() },
+            onDialTouch = { dialTouch = SystemClock.uptimeMillis() },
+            onDialRelease = {
+                val (lo, hi) = zoomRange()
+                val snapped = CameraZoom.snap(zoom, lo, hi, CameraZoom.stops(lo, hi))
+                if (snapped != zoom) glideTo(snapped)
+                dialTouch = SystemClock.uptimeMillis()
+            },
+            onGrid = { grid = !grid; CameraSupport.grid = grid },
+            onTimer = { timer = CameraTimer.next(timer); CameraSupport.timer = timer },
+            onEv = { setEv(it) },
+            onFocusTouch = { focusTouch = SystemClock.uptimeMillis() },
+        )
+    }
+    val (zLo, zHi) = zoomRange()
+    val pro = CameraProState(zoom = zoom, minZoom = zLo, maxZoom = zHi, hwMax = hwMax, presets = CameraZoom.presets(camMin, zHi),
+        dialOpen = dialOpen, grid = grid && m != Mode.SCAN, timer = timer, countdown = countdown, focus = focus, focusOk = focusOk,
+        evIndex = ev, evLower = evLower, evUpper = evUpper, evStep = evStep, tools = !CameraModes.live(m))
+
     val cam: CameraController = controller
     CameraChrome(
         preview = {
-            AndroidView(factory = { c ->
-                PreviewView(c).apply {
-                    // TextureView: the most compatible path on old / low-end GPUs and through rotations.
-                    implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-                    scaleType = PreviewView.ScaleType.FILL_CENTER
-                    this.controller = cam
-                }
-            }, modifier = Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().clipToBounds()) {
+                AndroidView(factory = { c ->
+                    PreviewView(c).apply {
+                        // TextureView: the most compatible path on old / low-end GPUs and through rotations.
+                        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                        this.controller = cam
+                        previewRef[0] = this
+                    }
+                }, modifier = Modifier.fillMaxSize().graphicsLayer {
+                    // Digital zoom past the lens's max: scale the preview about its centre (read here, so only this layer redraws).
+                    val d = CameraZoom.split(zoom, hwMax).digital
+                    scaleX = d; scaleY = d
+                })
+                // Pinch (across the hardware / digital boundary) and tap-to-focus.
+                Box(Modifier.fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, z, _ ->
+                            if (z != 1f) {
+                                val (lo, hi) = zoomRange()
+                                setZoom(CameraZoom.pinch(zoom, z, lo, hi))
+                                if (dialOpen) dialTouch = SystemClock.uptimeMillis()
+                            }
+                        }
+                    }
+                    .pointerInput(Unit) { detectTapGestures(onTap = { o -> tapFocus(o) }) })
+            }
         },
+        pro = pro, proActions = proActions,
         modes = modes, mode = m,
         flash = if (hasFlash && !CameraModes.live(m)) flash else null,
         canFlip = CameraFlow.canFlip(hasBack, hasFront),
@@ -420,13 +590,14 @@ private fun LiveCamera(start: Mode, origin: Origin, attachTo: File?, chat: Strin
         onMode = { nm ->
             if (nm != m) {
                 mode = nm.id; note = ""; scanned = null
+                countJob[0]?.cancel(); countJob[0] = null; countdown = 0
                 if (CameraModes.remembers(origin)) BlazeCamera.lastMode = nm.id
             }
         },
         onClose = { onDone(false, null) },
         onFlash = { flash = CameraFlow.nextFlash(flash, hasFlash); controller.imageCaptureFlashMode = flashMode(flash) },
         onFlip = { if (applyLens(if (lens == "back") "front" else "back")) { flash = "off"; controller.imageCaptureFlashMode = flashMode("off") } },
-        onShutter = { shoot() },
+        onShutter = { shutter() },
     )
     scanned?.takeIf { CameraModes.route(Mode.SCAN, origin) == Route.CARD }?.let { s ->
         ScanCard(s, onAsk = { BlazeCamera.deliver(ctx, Mode.SCAN, origin, chat, null, code = s.raw, routeOverride = Route.DRAFT); onDone(true, null) },
@@ -637,16 +808,30 @@ fun CameraChrome(
     onFlash: () -> Unit,
     onFlip: () -> Unit,
     onShutter: () -> Unit,
+    pro: CameraProState? = null,
+    proActions: CameraProActions = CameraProActions(),
 ) {
     val live = CameraModes.live(mode)
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         preview()
+        if (pro != null) {
+            if (pro.grid) CameraGrid()
+            FocusRing(pro, proActions)
+            CameraCountdown(pro.countdown)
+        }
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             Row(Modifier.fillMaxWidth().padding(10.dp).align(Alignment.TopCenter), verticalAlignment = Alignment.CenterVertically) {
                 CamButton(Icons.Rounded.Close, "Close camera", onClose)
                 Spacer(Modifier.weight(1f))
                 if (modes.isNotEmpty()) Text("Blaze Camera", style = TextStyle(fontFamily = Type.Sans, fontWeight = FontWeight.Medium, fontSize = 14.sp, color = Color.White))
                 Spacer(Modifier.weight(1f))
+                if (pro != null && pro.tools) {
+                    CamTool(if (pro.grid) Icons.Rounded.GridOn else Icons.Rounded.GridOff, if (pro.grid) "Grid on" else "Grid off", pro.grid, proActions.onGrid)
+                    Spacer(Modifier.width(6.dp))
+                    CamTool(when (pro.timer) { 3 -> Icons.Rounded.Timer3; 10 -> Icons.Rounded.Timer10; else -> Icons.Rounded.TimerOff },
+                        CameraTimer.label(pro.timer), pro.timer > 0, proActions.onTimer)
+                    Spacer(Modifier.width(6.dp))
+                }
                 if (flash != null) CamButton(when (flash) { "on" -> Icons.Rounded.FlashOn; "auto" -> Icons.Rounded.FlashAuto; else -> Icons.Rounded.FlashOff },
                     "Flash $flash. Double-tap to change.", onFlash)
                 else Spacer(Modifier.size(52.dp))
@@ -662,13 +847,19 @@ fun CameraChrome(
                 if (hint.isNotBlank()) Text(hint, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
                     .clip(RoundedCornerShape(50)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 14.dp, vertical = 7.dp),
                     style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, color = Color.White))
+                if (pro != null) {
+                    ZoomControls(pro, proActions)
+                    Spacer(Modifier.height(14.dp))
+                }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 28.dp), verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.width(52.dp))
                     Spacer(Modifier.weight(1f))
+                    val counting = (pro?.countdown ?: 0) > 0
+                    val shutterDesc = if (counting) "Cancel the timer" else if ((pro?.timer ?: 0) > 0) shutterLabel(mode) + " in ${pro?.timer} seconds" else shutterLabel(mode)
                     if (!live) Box(Modifier.size(76.dp).clip(CircleShape).border(4.dp, Color.White, CircleShape)
-                        .clickable(enabled = !busy, onClickLabel = shutterLabel(mode), onClick = onShutter).padding(8.dp)
-                        .semantics { contentDescription = shutterLabel(mode); role = Role.Button }) {
-                        Box(Modifier.fillMaxSize().clip(CircleShape).background(if (busy) Color.White.copy(alpha = 0.4f) else Color.White))
+                        .clickable(enabled = !busy, onClickLabel = shutterDesc, onClick = onShutter).padding(8.dp)
+                        .semantics { contentDescription = shutterDesc; role = Role.Button }) {
+                        Box(Modifier.fillMaxSize().clip(CircleShape).background(when { busy -> Color.White.copy(alpha = 0.4f); counting -> CamAccent; else -> Color.White }))
                     } else Spacer(Modifier.size(76.dp))
                     Spacer(Modifier.weight(1f))
                     if (canFlip) CamButton(Icons.Rounded.Cameraswitch, "Switch between front and back camera", onFlip) else Spacer(Modifier.width(52.dp))

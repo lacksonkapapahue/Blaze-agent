@@ -1015,6 +1015,25 @@ class ShotsTest {
             onClose = {}, onFlash = {}, onFlip = {}, onShutter = {})
     }
 
+    // v0.30.x Camera Pro: the half-circle zoom dial open at 3.4x past a 4x lens (digital stretch tinted), grid on,
+    // 3 s timer, and the focus ring with its exposure slider at +0.7 EV.
+    @Test fun blazeCameraProDial() = shot("84-blaze-camera-pro-dial", dark = true) {
+        CameraChrome(preview = { FakePreview() }, modes = com.blaze.assistant.device.CameraModes.bar,
+            mode = com.blaze.assistant.device.CameraModes.Mode.PHOTO, flash = "auto", canFlip = true, busy = false,
+            onClose = {}, onFlash = {}, onFlip = {}, onShutter = {},
+            pro = CameraProState(zoom = 6.3f, minZoom = 1f, maxZoom = 10f, hwMax = 4f, presets = listOf(1f, 2f, 5f, 10f), dialOpen = true,
+                grid = true, timer = 3, focus = androidx.compose.ui.geometry.Offset(250f, 560f), focusOk = true,
+                evIndex = 4, evLower = -12, evUpper = 12, evStep = 1f / 6f))
+    }
+    // Zoom presets with an ultrawide (0.5 · 1x · 2 · 5 · 10), the 2 pill lit showing the live 3.4x, timer countdown.
+    @Test fun blazeCameraProPresets() = shot("85-blaze-camera-pro-presets") {
+        CameraChrome(preview = { FakePreview() }, modes = emptyList(),
+            mode = com.blaze.assistant.device.CameraModes.Mode.PHOTO, flash = "off", canFlip = true, busy = false,
+            onClose = {}, onFlash = {}, onFlip = {}, onShutter = {},
+            pro = CameraProState(zoom = 3.4f, minZoom = 0.5f, maxZoom = 10f, hwMax = 8f, presets = listOf(0.5f, 1f, 2f, 5f, 10f),
+                timer = 10, countdown = 7))
+    }
+
     // v0.29.3: Home's default sky with glass cards, in the app's dark theme (the board keeps light ink on the sky).
     @Test fun homeGlassSky() = shot("83-home-glass-sky", dark = true) {
         val now = System.currentTimeMillis()

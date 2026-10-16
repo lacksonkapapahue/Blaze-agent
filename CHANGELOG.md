@@ -2,6 +2,15 @@
 
 Newest first. Builds before v0.8.0 were numbered 1.0–1.17.0; `versionCode` has always counted up.
 
+## v0.30.3: Blaze Camera Pro (zoom dial, digital zoom, focus, exposure, grid, timer)
+
+- **Zoom presets** above the shutter: **1x · 2 · 5 · 10**, plus **0.5** when the phone exposes an ultrawide lens (CameraX reports a zoom below 1). Only presets the camera can reach are shown (the front camera gets 1x and 2). The lit pill is the largest preset at or below the live zoom and shows the live value between presets ("3.4x"). Tapping a preset glides there.
+- **Half-circle zoom dial** (a protractor): tap the lit preset or long-press any to open it. Dark glass, minor ticks every 5°, labelled stops (1x, 2x, 5x, 10x), an accent arc up to the thumb and the live value in the middle. Drag along the arc to turn it (relative, so touching never jumps), tap a spot to go there; a light haptic tick at each labelled stop; it settles on a stop within 3° when let go and hides after 3.5 s idle. Log scale, so 1x→2x gets as much arc as 5x→10x.
+- **Digital zoom past the lens's maximum**, up to 10x on the back camera (the lens's own max when it goes further; 4x on the front): beyond `maxZoomRatio` the preview is scaled about its centre and the saved photo gets the same centred crop, decoded straight from the JPEG (BitmapRegionDecoder, never the full frame), upscaled and lightly sharpened (unsharp mask, stronger the further you zoom), off the main thread, EXIF orientation kept. Pinch and the dial run straight across the hardware / digital boundary; the dial tints the digital stretch and shows "DIGITAL".
+- **Tap to focus and meter** (FocusMeteringAction, AF + AE + AWB, back to continuous after 5 s) with a focus ring that turns blue when focus locks, and an **exposure slider** beside it (sun on a short track, the camera's own exposure-compensation range and step, shown in EV). Works on the zoomed preview (the tap is mapped back through the digital scale).
+- **Grid** (rule of thirds) and **timer** (off / 3 s / 10 s with a big countdown, a tick each second; pressing the shutter again cancels) in the top bar. Both are remembered.
+- Scan, Text, Ask, Photo, Translate, Document and the + → Camera fallback work as before. Code: `device/CameraZoom.kt` (zoom maths, digital crop, exposure, `CameraTimer`, `Sharpen`; CameraZoomTest), `ui/CameraPro.kt` (dial, presets, focus ring, grid, countdown), `ui/InAppCamera.kt`, `CameraSupport.digitalZoom`. Screenshots 84 and 85 in ShotsTest.
+
 ## v0.30.2: Terminal that starts, and cd that works in Linux
 
 - **The phone tab never opens dead.** Before opening, Blaze checks BusyBox once per build (`busybox true`, then `busybox sh -c 'echo ok'`, each with a timeout); if either fails for any reason the tab starts straight on Android's own shell. If a BusyBox tab still dies (signal 31 at any time, or any error in its first 5 seconds) it is swapped at once, in place, for one on Android's shell with a short line saying why: no "[Process completed (signal 31) - press Enter]", nothing to do. The decision is remembered per build (versionCode + install time) and checked again after an update.

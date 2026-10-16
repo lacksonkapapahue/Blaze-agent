@@ -61,6 +61,9 @@ One continuous conversation instead of separate chats (projects keep their own t
 ## Messaging-style chat (v0.24.0)
 The chat reads like a messaging app in Blaze's classic theme: your messages are ink bubbles on the right, Blaze's are soft bubbles on the left, runs from one side group tightly with asymmetric corners and one quiet timestamp, and the composer is a rounded pill (+, mic that turns into Send) whose placeholder rotates through on-device suggestions (your accounts, apps, birthdays, what's coming up). The top **Chat | Projects** toggle only switches tabs. `/clear` (or + › Clear screen) empties the screen, with Undo for a few seconds.
 
+## Blaze Camera Pro (v0.30.3)
+Blaze Camera has zoom presets (0.5 with an ultrawide, 1x, 2, 5, 10), a half-circle zoom dial you turn along the arc (log scale, haptic ticks at 1x / 2x / 5x / 10x), digital zoom past the lens's maximum up to 10x (preview scaled, photo cropped and sharpened), tap to focus with an exposure slider, a rule-of-thirds grid and a 3 s / 10 s timer (grid and timer remembered). Code: `device/CameraZoom.kt`, `ui/CameraPro.kt`, `ui/InAppCamera.kt`.
+
 ## Browser that remembers (v0.29.7)
 Blaze Browser offers to save the passwords you sign in with (Keystore-encrypted, matched by site, never from private tabs) and offers them back on the next sign-in form; manage them under ⋯ › Saved passwords (fingerprint / PIN to show or edit). Normal tabs (with their back/forward history) come back after closing the browser or a restart, cookies persist, and ⋯ › Save page for offline keeps a page (web archive + text) under ⋯ › Saved pages. Code: `browser/BrowserLogins.kt`, `TabStore.kt`, `SavedPages.kt`, `SiteDomain.kt`.
 
