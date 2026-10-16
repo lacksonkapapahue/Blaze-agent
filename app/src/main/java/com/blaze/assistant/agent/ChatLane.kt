@@ -55,7 +55,8 @@ object ChatLane {
         val flat = ToolCalls.flatten(full)
         val turns = (0 until flat.length()).map { flat.getJSONObject(it) }
             .filter { it.optString("role") != "system" && it.opt("content") is String }
-            .map { m -> JSONObject().put("role", m.optString("role")).put("content", m.optString("content").let { c -> if (c.length > 1500) c.take(1500) + "…" else c }) }
+            // v0.30.6: no [m7] message ids here (this short prompt has no rule about them).
+            .map { m -> JSONObject().put("role", m.optString("role")).put("content", m.optString("content").let { c -> if (m.optString("role") == "user") RapidMessages.untag(c) else c }.let { c -> if (c.length > 1500) c.take(1500) + "…" else c }) }
             .takeLast(8).dropWhile { it.optString("role") != "user" }
         turns.forEach { out.put(it) }
         return out

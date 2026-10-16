@@ -611,11 +611,12 @@ fun Composer(value: TextFieldValue, onValue: (TextFieldValue) -> Unit, busy: Boo
                     modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
                         .semantics { contentDescription = "Message Blaze" })
             }
+            // v0.30.6 rapid messages: with text in the box, Send wins even while Blaze works (the message joins the turn); Stop otherwise.
             when {
-                busy -> Box(Modifier.size(44.dp).clip(CircleShape).background(c.accent).clickable(onClick = onStop)
-                    .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) { SendMark(c.onAccent, stop = true) }
                 canSend -> Box(Modifier.size(44.dp).clip(CircleShape).background(BlazeBrush.primary).clickable(onClick = onSend)
                     .semantics { contentDescription = "Send" }, contentAlignment = Alignment.Center) { SendMark(Color.White, stop = false) }
+                busy -> Box(Modifier.size(44.dp).clip(CircleShape).background(c.accent).clickable(onClick = onStop)
+                    .semantics { contentDescription = "Stop" }, contentAlignment = Alignment.Center) { SendMark(c.onAccent, stop = true) }
                 else -> {
                     val micOn = listening || speaking
                     Box(Modifier.size(44.dp).clip(CircleShape).background(if (micOn) c.accent else Color.Transparent).clickable(onClick = onMic)
