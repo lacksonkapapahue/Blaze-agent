@@ -42,8 +42,13 @@ class TableCardTest {
 
     @Test fun columnsFillWhenTheyFitAndScrollWhenNot() {
         assertEquals(listOf(100, 200), TableCardStyle.widths(listOf(50, 100), 50, 400, 300))
+        // v0.30.5: wider than the card shrinks to fit (no sideways scroll, nothing cut off)
         val w = TableCardStyle.widths(listOf(300, 300, 300), 80, 200, 400)
-        assertEquals(listOf(200, 200, 200), w)     // wider than the card: it scrolls
+        assertEquals(400, w.sum()); assertTrue(w.all { it >= 80 })
+        val m = TableCardStyle.widths(listOf(90, 400, 400), 84, 200, 300)
+        assertEquals(300, m.sum()); assertTrue(m[0] >= 84 && m[1] > m[0])
+        // Too many columns for the phone: stacked rows instead of a cut-off grid.
+        assertTrue(TableCardStyle.stacked(5, 320f)); assertFalse(TableCardStyle.stacked(3, 320f)); assertFalse(TableCardStyle.stacked(2, 100f))
         assertTrue(TableCardStyle.sticky(true, 4, scrolls = true))
         assertFalse(TableCardStyle.sticky(true, 2, scrolls = true))
         assertFalse(TableCardStyle.sticky(true, 4, scrolls = false))

@@ -287,6 +287,7 @@ private fun playStream(ctl: MediaController?, item: StoreItem, d: StoreDetail, s
     val p = ctl ?: return
     val f = src.streamPick("audio", d).firstOrNull() ?: return
     MusicService.current?.streamUa(src.userAgent)
+    Taste.note(MusicService.current, "audio", d.title.ifBlank { item.title }, d.author.ifBlank { item.author }, Taste.PLAY)
     val t = Track("stream:${item.source}:${item.id}", f.url, d.title.ifBlank { item.title }, d.author.ifBlank { item.author }, item.extra["album"].orEmpty(),
         d.lengthSec * 1000L, item.thumb, "stream", 0, item.id, "audio", d.licence.ifBlank { item.licence }, item.source)
     p.setMediaItem(MusicService.streamItem(t, f.url)); p.prepare(); p.play()

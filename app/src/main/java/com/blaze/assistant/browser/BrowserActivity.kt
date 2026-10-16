@@ -422,6 +422,8 @@ private fun WebHost(tab: BrowserEngine.Tab) {
     AndroidView(factory = { FrameLayout(it) }, update = { f ->
         val w = tab.web
         if (w.parent !== f) { (w.parent as? ViewGroup)?.removeView(w); f.removeAllViews(); f.addView(w, FrameLayout.LayoutParams(-1, -1)) }
+        // v0.30.5: Home's live preview shows this page scaled down; full size here.
+        if (w.scaleX != 1f || w.scaleY != 1f) { w.scaleX = 1f; w.scaleY = 1f }
     }, modifier = Modifier.fillMaxSize())
 }
 

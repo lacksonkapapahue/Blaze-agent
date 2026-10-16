@@ -114,6 +114,8 @@ jobs:
       - name: Build release APK
         env:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+          # v0.30.5: the Jamendo Store's client_id ships inside the APK (BuildConfig.JAMENDO_CLIENT_ID) when this secret is set.
+          JAMENDO_CLIENT_ID: ${{ secrets.JAMENDO_CLIENT_ID }}
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew

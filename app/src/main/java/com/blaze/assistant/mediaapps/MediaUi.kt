@@ -238,6 +238,8 @@ class StoreState(kind: String) {
     var preview by mutableStateOf<StoreItem?>(null)
     var searched by mutableStateOf(false)
     var gen by mutableStateOf(0)
+    /** v0.30.5: the idea the results came from when the box is empty ("For you" picks), "" for a typed search. */
+    var feed by mutableStateOf("")
 }
 
 /**
@@ -257,9 +259,14 @@ fun StoreView(kind: String, state: StoreState, onPlay: (StoreItem, StoreDetail, 
     var setupTick by remember { mutableStateOf(0) }
     val setup = remember(src?.id, setupTick) { src?.setupNeeded() }
 
-    fun search(more: Boolean = false) {
+    // v0.30.5 (Luke: "already scrollable ideas rather than a blank search in case the user isn't feeling inspired"):
+    // ideas from what they play and download (Taste), then starters; an empty box shows the first one's results.
+    val ideas = remember(kind, state.source) { Taste.ideas(ctx, kind) }
+    fun search(more: Boolean = false, idea: String? = null) {
         val s = src ?: return
-        val q = state.query.trim()
+        if (idea != null) state.feed = idea else if (!more) state.feed = ""
+        val typed = state.query.trim()
+        val q = typed.ifEmpty { if (s.browsable) "" else state.feed.ifEmpty { ideas.firstOrNull().orEmpty().also { state.feed = it } } }
         if ((q.isEmpty() && !s.browsable) || state.loading || setup != null) return
         state.loading = true; state.error = ""; state.searched = true
         val gen = state.gen
@@ -276,7 +283,9 @@ fun StoreView(kind: String, state: StoreState, onPlay: (StoreItem, StoreDetail, 
         }
     }
     // Free sources list something before the first search (popular / the whole catalogue).
-    LaunchedEffect(src?.id, setup) { if (!state.searched && src?.browsable == true && setup == null) search() }
+    LaunchedEffect(src?.id, setup) {
+        if (!state.searched && src != null && setup == null) { if (src.browsable) search() else search(idea = ideas.firstOrNull()) }
+    }
 
     val square = src?.id != null && state.results.firstOrNull()?.square == true
     LazyVerticalGrid(GridCells.Fixed(if (square) 3 else 2), Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 96.dp),
@@ -300,6 +309,21 @@ fun StoreView(kind: String, state: StoreState, onPlay: (StoreItem, StoreDetail, 
                     keyboardActions = KeyboardActions(onSearch = { search() }))
                 Spacer(Modifier.width(8.dp))
                 RoundIcon(Icons.Rounded.Search, "Search", fill = c.faint) { search() }
+            }
+        }
+        if (setup == null && src != null && !src.browsable && ideas.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ideas.forEach { idea ->
+                    val on = state.query.isBlank() && state.feed == idea
+                    Box(Modifier.clip(BlazeShapes.pill).background(if (on) c.accent.copy(alpha = 0.22f) else c.faint)
+                        .border(1.dp, if (on) c.accent.copy(alpha = 0.7f) else Color.Transparent, BlazeShapes.pill)
+                        .clickable {
+                            state.query = ""; state.results = emptyList(); state.next = ""; state.error = ""; state.loading = false; state.gen++
+                            search(idea = idea)
+                        }.semantics { selected = on }.padding(horizontal = 12.dp, vertical = 7.dp)) {
+                        MText(idea, 12.5.sp, if (on) c.ink else c.sub, FontWeight.Medium)
+                    }
+                }
             }
         }
         if (setup != null && src is JamendoSource) item(span = { GridItemSpan(maxLineSpan) }) { JamendoSetup(setup) { setupTick++ } }
@@ -347,17 +371,46 @@ fun StoreView(kind: String, state: StoreState, onPlay: (StoreItem, StoreDetail, 
 @Composable
 fun JamendoSetup(text: String, onSaved: () -> Unit) {
     val c = LocalBlaze.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var id by remember { mutableStateOf("") }
+    var checking by remember { mutableStateOf(false) }
+    var bad by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().clip(BlazeShapes.medium).background(c.faint).padding(14.dp)) {
-        MText("Jamendo isn't configured", 14.sp, c.ink, FontWeight.Medium)
+        MText("Set up Jamendo", 14.sp, c.ink, FontWeight.Medium)
         Spacer(Modifier.height(4.dp))
         MText(text, 12.5.sp, c.sub, maxLines = 5)
+        Spacer(Modifier.height(10.dp))
+        // v0.30.5 (Luke: "a simple button to take them where they have to go, or simply asking Blaze to get it"):
+        // Blaze can do it (its browser + the jamendo_setup tool), or the dev portal opens in the browser.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PillButton("Ask Blaze to set it up", primary = true) {
+                com.blaze.assistant.agent.Agent.send("Set up the Jamendo Store in Blaze Music for me: get a free Jamendo API client_id on " +
+                    JamendoSource.DEVPORTAL + " (ask me before creating an account) and save it with " + JamendoSource.TOOL + ".")
+                runCatching { ctx.startActivity(android.content.Intent(ctx, com.blaze.assistant.MainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }
+            }
+            PillButton("Get a free ID", primary = false) {
+                runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(JamendoSource.DEVPORTAL))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+        }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             BlazeTextField(id, { id = it }, "Jamendo client_id", Modifier.weight(1f))
             Spacer(Modifier.width(8.dp))
-            PillButton("Save", primary = true) { if (id.isNotBlank()) { JamendoSource.setClientId(id); onSaved() } }
+            PillButton("Save", primary = true) {
+                val v = id.trim()
+                if (v.isNotBlank()) scope.launch {
+                    checking = true
+                    val ok = JamendoSource.works(v)
+                    checking = false
+                    if (ok) { JamendoSource.setClientId(v); onSaved() } else bad = true
+                }
+            }
         }
+        if (checking || bad) MText(if (checking) "Checking with Jamendo\u2026" else "Jamendo didn't accept that ID.", 12.sp, if (bad) BlazeBrush.orange else c.sub,
+            modifier = Modifier.padding(top = 6.dp))
     }
 }
 

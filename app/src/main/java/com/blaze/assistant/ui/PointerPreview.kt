@@ -60,8 +60,8 @@ fun PointerBar() {
     Row(Modifier.clip(BlazeShapes.pill).background(Color(0xFFFFFAF2)).padding(horizontal = 6.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         Text("Paused · drag, double-tap to click", Modifier.padding(horizontal = 8.dp), style = TextStyle(fontSize = 12.sp, color = Color(0xFF6B645B)))
-        Box(Modifier.clip(BlazeShapes.pill).background(BlazeBrush.primary).padding(horizontal = 14.dp, vertical = 8.dp)) { Text("Resume", style = TextStyle(fontSize = 13.sp, color = Color.White)) }
-        Box(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) { Text("Stop", style = TextStyle(fontSize = 13.sp, color = Color(0xFF1D1A16))) }
+        Box(Modifier.clip(BlazeShapes.pill).background(BlazeBrush.primary).padding(horizontal = 14.dp, vertical = 8.dp)) { Text("Resume", maxLines = 1, softWrap = false, style = TextStyle(fontSize = 13.sp, color = Color.White)) }
+        Box(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) { Text("Stop", maxLines = 1, softWrap = false, style = TextStyle(fontSize = 13.sp, color = Color(0xFF1D1A16))) }
     }
 }
 

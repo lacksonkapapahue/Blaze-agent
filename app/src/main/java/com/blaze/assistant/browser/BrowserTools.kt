@@ -72,6 +72,8 @@ object BrowserTools {
     fun show(ctx: Context) = ctx.startActivity(Intent(ctx, BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
 
     suspend fun run(ctx: Context, name: String, a: JSONObject): String = try {
+        // v0.30.5: Home's live preview window shows the page while Blaze works in it.
+        if (name != "browser_vpn" && name != "browser_tabs") BrowserLive.mark(describe(name, a))
         when (name) {
             // v0.28.4: a guessed Blaze repo URL (wrong owner / case) opens the real repo.
             "browser_open" -> BrowserEngine.open(ctx, com.blaze.assistant.agent.ToolLeak.fixBlazeUrl(a.optString("url")), a.optBoolean("new_tab", false), a.optBoolean("private", false)).also { if (a.optBoolean("show")) show(ctx) }
@@ -112,4 +114,18 @@ object BrowserTools {
             else -> BrowserVpn.statusText()
         }
     }
+}
+
+/**
+ * v0.30.5: what Blaze is doing in its background browser, for the Home tab's live preview window. Set on each browser
+ * tool call; the preview shows while a chat is working and a browser step happened in the last [WINDOW_MS].
+ */
+object BrowserLive {
+    data class Step(val what: String, val at: Long)
+    const val WINDOW_MS = 90_000L
+    private val _step = kotlinx.coroutines.flow.MutableStateFlow<Step?>(null)
+    val step: kotlinx.coroutines.flow.StateFlow<Step?> = _step
+    fun mark(what: String, now: Long = System.currentTimeMillis()) { _step.value = Step(what, now) }
+    /** Pure (BrowserLiveTest): show the preview? [busy] = a chat is working right now. */
+    fun showing(s: Step?, busy: Boolean, now: Long): Boolean = busy && s != null && now - s.at in 0..WINDOW_MS
 }
