@@ -70,6 +70,9 @@ object Friendly {
             "set_timer" -> "Setting a timer"
             "set_volume" -> "Changing the volume"
             "device_setting", "open_settings_page", "phone_mode" -> "Changing a setting"
+            "open_settings" -> "Opening " + (if (v("app").isNotBlank()) v("app") + "\u2019s " else "") + when (v("page")) {
+                "open_by_default" -> "link settings"; "app_details" -> "App info"; "" -> "settings"
+                else -> v("page").removePrefix("app_").replace('_', ' ') + " settings" }
             "battery_level" -> "Checking your battery"
             "app_usage" -> "Checking your screen time"
             "navigate_to" -> "Getting directions to " + or(v("destination"), v("place"), "there")

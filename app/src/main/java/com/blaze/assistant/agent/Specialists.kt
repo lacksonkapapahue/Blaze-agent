@@ -128,7 +128,7 @@ object Specialists {
     val groupNames = listOf("web", "phone", "comms", "connectors", "memory", "routines", "terminal", "device", "notifications", "browser", "study", "design")
 
     private val phone = setOf("open_app", "read_screen", "look_at_screen", "tap", "type_text", "scroll", "press_button", "open_url", "dial",
-        "compose_sms", "set_alarm", "set_timer", "wait", "do_actions", "search_in_app", "run_skill")
+        "compose_sms", "set_alarm", "set_timer", "wait", "do_actions", "search_in_app", "run_skill", "open_settings")
     fun group(tool: String): String = when {
         tool in Web.names -> "web"
         tool.startsWith("browser_") -> "browser"

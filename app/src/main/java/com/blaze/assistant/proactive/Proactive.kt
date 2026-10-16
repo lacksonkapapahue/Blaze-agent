@@ -161,8 +161,8 @@ Reply ONLY with JSON: {"say": "" or "one or two short friendly sentences", "urge
                 }
         } catch (_: Exception) { }
         try {
-            val st = android.os.StatFs(android.os.Environment.getDataDirectory().path)
-            val freeGb = st.availableBytes / 1e9
+            // v0.30.4: the Settings figure (StorageStatsManager), not StatFs(/data), which under-reports free space.
+            val freeGb = com.blaze.assistant.device.DeviceStatus.internalStorage(app)?.free?.div(1e9) ?: 99.0
             if (freeGb < 1.5) out.append("- Storage low: %.1f GB free\n".format(freeGb))
         } catch (_: Exception) { }
         try { com.blaze.assistant.agent.Autonomy.dueSoon().takeIf { it.isNotBlank() }?.let { out.append("- Goals due soon: $it\n") } } catch (_: Exception) { }

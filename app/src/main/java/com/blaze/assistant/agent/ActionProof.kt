@@ -49,7 +49,7 @@ object ActionProof {
             r("""\b(file|pdf|document|doc|csv|spreadsheet|export|save|folder|delete)\b""")),
         Action("open", "open that",
             r("""$ME(?:opened|launched|started|loaded)\b[^.!?\n]{0,30}\b(?:app|whatsapp|youtube|spotify|camera|settings|browser|page|site|website|link|maps|chrome|gallery|instagram|tiktok|facebook)\b|\b(?:whatsapp|youtube|spotify|camera|settings|maps|chrome)\b[^.!?\n]{0,10}\bis (?:now )?open\b"""),
-            setOf("open_app", "open_url", "browser_open", "browser_show", "open_camera", "blaze_camera", "open_settings_page", "navigate_to", "search_in_app", "share_to_app", "spotify_play", "message_contact", "tap", "browser_read", "fetch_page", "browser_click"),
+            setOf("open_app", "open_url", "browser_open", "browser_show", "open_camera", "blaze_camera", "open_settings_page", "open_settings", "navigate_to", "search_in_app", "share_to_app", "spotify_play", "message_contact", "tap", "browser_read", "fetch_page", "browser_click"),
             r("""\b(open|launch|start|go to|show me|play)\b""")),
         Action("install", "install or uninstall that",
             r("""$ME(?:installed|uninstalled|removed|updated)\b[^.!?\n]{0,30}\b(?:app|apk|package|skill|linux|distro|ubuntu|debian|alpine|python|node)\b"""),

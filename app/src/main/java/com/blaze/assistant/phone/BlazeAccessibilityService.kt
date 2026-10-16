@@ -297,25 +297,96 @@ class BlazeAccessibilityService : AccessibilityService() {
      */
     fun findTarget(label: String, wantField: Boolean = false): Int? {
         readScreen()
-        val l = label.trim().lowercase(); if (l.isEmpty()) return null
+        if (label.isBlank()) return null
+        // v0.30.4: LabelMatch (normalised words, OEM synonyms like Samsung "Apps" / Pixel "Apps & notifications",
+        // fuzzy spelling, never "Don't allow" for "Allow" or a destructive row for a plain target).
         var best = -1; var bestScore = 0
         elements.forEachIndexed { i, n ->
             if (n == null) return@forEachIndexed
-            val ls = labelsOf(n).map { it.lowercase() } + labelOf(i).lowercase()
-            var sc = 0
-            for (x in ls) sc = maxOf(sc, when {
-                x == l -> 100
-                x.startsWith(l) || Regex("\\b" + Regex.escape(l)).containsMatchIn(x) -> 70
-                x.contains(l) -> 50
-                l.contains(x) && x.length >= 3 -> 30
-                else -> 0 })
-            if (sc == 0) return@forEachIndexed
+            val ls = labelsOf(n) + labelOf(i)
+            var sc = ls.maxOfOrNull { LabelMatch.score(label, it) } ?: 0
+            if (sc < LabelMatch.MIN) return@forEachIndexed
             if (wantField && n.isEditable) sc += 25
             if (!wantField && n.isClickable) sc += 10
             if (!n.isEnabled) sc -= 40
             if (sc > bestScore) { bestScore = sc; best = i }
         }
-        return best.takeIf { it >= 0 && bestScore >= 30 }
+        return best.takeIf { it >= 0 && bestScore >= LabelMatch.MIN }
+    }
+
+    // ---------- v0.30.4 fast actions: find anywhere in the tree, scroll it into view ----------
+
+    private fun nodeLabel(n: AccessibilityNodeInfo): String =
+        listOfNotNull(n.text?.toString(), n.contentDescription?.toString(),
+            if (android.os.Build.VERSION.SDK_INT >= 26) n.hintText?.toString() else null).firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+
+    /** Every labelled node in the window, visible or not (RecyclerViews keep a few rows past the edge, ScrollViews all). */
+    private fun labelled(n: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>, scrollers: MutableList<AccessibilityNodeInfo>, depth: Int = 0) {
+        if (n == null || depth > 45 || out.size >= 1500) return
+        if (nodeLabel(n).isNotEmpty()) out += n
+        if (n.isScrollable) scrollers += n
+        for (i in 0 until n.childCount) labelled(n.getChild(i), out, scrollers, depth + 1)
+    }
+
+    /** The node anywhere in the active window that best matches [label], or null. */
+    fun locate(label: String, wantField: Boolean = false): AccessibilityNodeInfo? {
+        val nodes = ArrayList<AccessibilityNodeInfo>(); val scrollers = ArrayList<AccessibilityNodeInfo>()
+        labelled(rootInActiveWindow ?: return null, nodes, scrollers)
+        var best: AccessibilityNodeInfo? = null; var bs = 0
+        for (n in nodes) {
+            var s = LabelMatch.score(label, nodeLabel(n))
+            if (s < LabelMatch.MIN) continue
+            if (wantField && n.isEditable) s += 10
+            if (!n.isVisibleToUser) s -= 5
+            if (!n.isEnabled) s -= 30
+            if (s > bs) { bs = s; best = n }
+        }
+        return best?.takeIf { bs >= LabelMatch.MIN }
+    }
+
+    /** The biggest visible scrollable list on screen (Settings' list), or null. */
+    private fun mainScroller(): AccessibilityNodeInfo? {
+        val nodes = ArrayList<AccessibilityNodeInfo>(); val scrollers = ArrayList<AccessibilityNodeInfo>()
+        labelled(rootInActiveWindow ?: return null, nodes, scrollers)
+        val r = Rect()
+        return scrollers.filter { it.isVisibleToUser }.maxByOrNull { it.getBoundsInScreen(r); r.width().toLong() * r.height() }
+    }
+
+    private fun visibleSig(): Int = (rootInActiveWindow?.let { r ->
+        val nodes = ArrayList<AccessibilityNodeInfo>(); labelled(r, nodes, ArrayList()); nodes.filter { it.isVisibleToUser }.joinToString("|") { nodeLabel(it) }
+    } ?: "").hashCode()
+
+    /** How many scrolls the last [reveal] needed (for the step trace). */
+    @Volatile var lastRevealScrolls = 0
+
+    /**
+     * The element number for [label] on screen: as is, by synonym or fuzzy match, or after bringing an off-screen row
+     * into view (ACTION_SHOW_ON_SCREEN, else scrolling the main list down, then up, until it shows or the list stops
+     * moving). One call replaces the old "scroll, look, scroll, look" model turns. Null when it isn't anywhere.
+     */
+    suspend fun reveal(label: String, wantField: Boolean = false, maxScrolls: Int = 8): Int? {
+        lastRevealScrolls = 0
+        findTarget(label, wantField)?.let { return it }
+        suspend fun bringIn(): Int? {
+            val n = locate(label, wantField) ?: return null
+            if (n.isVisibleToUser) return findTarget(label, wantField)
+            if (n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)) { settle(450, 120); findTarget(label, wantField)?.let { return it } }
+            return null
+        }
+        bringIn()?.let { return it }
+        for (dir in listOf(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
+            var sig = visibleSig()
+            for (k in 0 until maxScrolls) {
+                val list = mainScroller() ?: return null
+                if (!list.performAction(dir)) break
+                lastRevealScrolls++
+                settle(450, 120)
+                findTarget(label, wantField)?.let { return it }
+                bringIn()?.let { return it }
+                val now = visibleSig(); if (now == sig) break; sig = now
+            }
+        }
+        return null
     }
 
     /** Waits up to [ms] for [label] to show up (apps load lazily). */
@@ -554,11 +625,12 @@ class BlazeAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Fresh read, then tap the element whose words match [label]. Immune to stale numbers. */
+    /** Fresh read, then tap the element whose words match [label] (synonyms, off-screen rows scrolled in). Immune to stale numbers. */
     suspend fun tapText(label: String, long: Boolean = false): String {
-        readScreen()
-        val id = findByLabel(label) ?: return "No element with text \"$label\" on screen. Read the screen or scroll."
-        return tap(id, long).replace("[$id]", "\"${label.take(40)}\"")
+        val id = reveal(label) ?: return "No element matching \"$label\" on this screen, even after scrolling through it. Read the screen for the real labels."
+        val scrolled = lastRevealScrolls
+        val name = labelOf(id).ifBlank { label }.take(40)
+        return tap(id, long).replace("[$id]", "\"$name\"") + if (scrolled > 0) " (scrolled $scrolled× to find it)" else ""
     }
 
     suspend fun type(id: Int, text: String, submit: Boolean = false): String {

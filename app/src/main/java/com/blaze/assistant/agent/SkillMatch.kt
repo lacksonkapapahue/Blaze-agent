@@ -63,7 +63,8 @@ object SkillMatch {
     }
 
     /** The skills for [query]: disabled ones excluded, best first, top [maxFull] in full within [budget]. */
-    fun match(query: String, cands: List<Cand>, maxFull: Int = MAX_FULL, budget: Int = BUDGET_CHARS, minScore: Int = MIN_SCORE): Result {
+    fun match(query: String, cands: List<Cand>, maxFull: Int = MAX_FULL, budget: Int = BUDGET_CHARS, minScore: Int = MIN_SCORE,
+              fullMin: Int = 0, fullWords: Int = 0, maxOthers: Int = 8): Result {
         if (query.isBlank()) return Result.NONE
         val hits = cands.asSequence().filter { it.on }.distinctBy { it.name.lowercase() }
             .map { Hit(it, score(query, it)) }.filter { it.score >= minScore }
@@ -72,10 +73,30 @@ object SkillMatch {
         var left = budget
         for (h in hits) {
             val len = minOf(h.cand.body.length, PER_SKILL_CHARS)
-            if (full.size < maxFull && len <= left) { full += h.cand; left -= len } else others += h.cand.name
+            // v0.30.4: a body goes in full only on a strong match (score and distinct query words); weaker ones by name.
+            val strong = h.score >= fullMin && (fullWords <= 0 || matchedWords(query, h.cand) >= fullWords)
+            if (strong && full.size < maxFull && len <= left) { full += h.cand; left -= len } else others += h.cand.name
         }
-        return Result(full, others.take(8))
+        return Result(full, others.take(maxOthers))
     }
+
+    /** Distinct query words the skill's name, keywords or description share with [query]. */
+    fun matchedWords(query: String, c: Cand): Int {
+        val q = words(query)
+        val mine = words(c.name.replace('-', ' ')) + c.keywords.flatMap { words(it) } + words(c.description)
+        return (q intersect mine).size
+    }
+
+    /** v0.30.4: per-turn bar for a skill body in full: score ≥ 5 from ≥ 2 distinct query words. */
+    const val FULL_MIN = 5
+    const val FULL_WORDS = 2
+    /** v0.30.4: a learned (recorded) skill joins a plain device action only on this strong a match. */
+    const val STRONG = 6
+
+    /** For a plain device action: only the user's own learned skills on a strong match (they replay in seconds). */
+    fun learnedOnly(query: String, cands: List<Cand> = cached()): Result = try {
+        match(query, cands.filter { it.source == "learned" }, maxFull = 1, minScore = STRONG, fullMin = STRONG, fullWords = FULL_WORDS, maxOthers = 2)
+    } catch (_: Throwable) { Result.NONE }
 
     /** The prompt block for a [Result] ("" when nothing matched). */
     fun block(r: Result): String {
@@ -139,7 +160,9 @@ object SkillMatch {
     } catch (_: Throwable) { emptyList() }
 
     // v0.26.1: an in-chat diagram / chart doesn't pull in the file-route skills (VisualRoute); it's drawn in the reply.
-    fun forTurn(query: String): Result = try { match(query, VisualRoute.filter(query, cached())) } catch (_: Throwable) { Result.NONE }
+    fun forTurn(query: String): Result = try {
+        match(query, VisualRoute.filter(query, cached()), fullMin = FULL_MIN, fullWords = FULL_WORDS, maxOthers = 4)
+    } catch (_: Throwable) { Result.NONE }
 
     fun invalidate() { cache = null; index = null }
 
