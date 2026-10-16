@@ -1,0 +1,41 @@
+----- tail -----
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/GlassWindow.kt:107:39 'val Icons.Rounded.OpenInNew: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.OpenInNew.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/HomeBoardUi.kt:256:17 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/HomeBoardUi.kt:507:71 'fun Modifier.animateItemPlacement(animationSpec: FiniteAnimationSpec<IntOffset> = ...): Modifier' is deprecated. Use Modifier.animateItem() instead.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/HomeBoardUi.kt:634:91 'val Icons.Rounded.ShowChart: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Rounded.ShowChart.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/InAppCamera.kt:202:17 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/InAppCamera.kt:264:17 'val LocalLifecycleOwner: ProvidableCompositionLocal<LifecycleOwner>' is deprecated. Moved to lifecycle-runtime-compose library in androidx.lifecycle.compose package.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/InAppCamera.kt:399:17 Condition is always 'true'.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/LinuxDesktopPage.kt:292:31 'constructor(capitalization: KeyboardCapitalization = ..., autoCorrect: Boolean, keyboardType: KeyboardType = ..., imeAction: ImeAction = ..., platformImeOptions: PlatformImeOptions? = ..., showKeyboardOnFocus: Boolean? = ..., hintLocales: LocaleList? = ...): KeyboardOptions' is deprecated. Please use the new constructor that takes optional autoCorrectEnabled parameter.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/Overlay.kt:312:56 'static field SOFT_INPUT_ADJUST_RESIZE: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/Shell.kt:208:13 'fun quadraticBezierTo(x1: Float, y1: Float, x2: Float, y2: Float): Unit' is deprecated. Use quadraticTo() for consistency with cubicTo().
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/Shell.kt:209:13 'fun quadraticBezierTo(x1: Float, y1: Float, x2: Float, y2: Float): Unit' is deprecated. Use quadraticTo() for consistency with cubicTo().
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/Shell.kt:210:13 'fun quadraticBezierTo(x1: Float, y1: Float, x2: Float, y2: Float): Unit' is deprecated. Use quadraticTo() for consistency with cubicTo().
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/main/java/com/blaze/assistant/ui/Shell.kt:211:13 'fun quadraticBezierTo(x1: Float, y1: Float, x2: Float, y2: Float): Unit' is deprecated. Use quadraticTo() for consistency with cubicTo().
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:processReleaseJavaRes
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:expandReleaseArtProfileWildcards
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:mergeReleaseJavaResource
+
+> Task :app:compileReleaseUnitTestKotlin
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/test/java/com/blaze/assistant/terminal/PhoneShellTest.kt:128:19 'fun createTempDir(prefix: String = ..., suffix: String? = ..., directory: File? = ...): File' is deprecated. Avoid creating temporary directories in the default temp location with this function due to too wide permissions on the newly created directory. Use kotlin.io.path.createTempDirectory instead.
+w: file:///home/runner/work/Blaze-agent/Blaze-agent/app/src/test/java/com/blaze/assistant/ui/DesignSafetyTest.kt:41:69 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'java.io.File?'.
+
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:minifyReleaseWithR8
+> Task :app:testReleaseUnitTest
+> Task :app:compileReleaseArtProfile
+> Task :app:shrinkReleaseRes
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+BUILD SUCCESSFUL in 8m 8s
+65 actionable tasks: 65 executed
+YouTube plug-in in this build: true
