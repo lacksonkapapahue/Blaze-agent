@@ -1,3 +1,9 @@
+## Handoff (2026-10-16 18:36 CAT, quota ran out)
+- Released/merged: v0.30.5 (#92), v0.30.6 rapid messages (#93), v0.30.7 faster phone actions (#94).
+- v0.30.8 Qwen images: PR #95 (feat/qwen-image) CI FAILED on f3cdb64 (run 38932077151); likely compile error in ui/ImageSlotCard.kt or ui/Gallery.kt MediaStrip. Fix, merge main in (keep 124/0.30.8), merge when green.
+- v0.30.9 Bank mode: branch feat/bank-mode pushed (main merged in), versionCode 125. Open PR, merge after #95, when CI green. Compile risks: ChatScreen.kt bankOn banner, BankModeSection.kt, CommandRunner "orb" branch.
+- Blaze-mobile CI run 38926359485 failed after PR #1: unchecked.
+
 # Blaze Android status
 
 - **Versioning rule (Luke 2026-10-13): bump patch only (v0.24.N+1) per release.**

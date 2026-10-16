@@ -64,11 +64,14 @@ object Orient {
         return Decision.GO
     }
 
-    /** A run_plan that opens an app first doesn't depend on what's on screen now. */
+    /**
+     * A run_plan that opens an app (or a settings page) first doesn't depend on what's on screen now. v0.30.7: run_plan
+     * steps say "do", not "action", so before this every such plan paid for an extra full screen read and glance.
+     */
     fun startsByOpening(args: JSONObject): Boolean {
         val steps = args.optJSONArray("steps") ?: return false
         val first = steps.optJSONObject(0) ?: return false
-        return first.optString("action") in setOf("open_app", "open_url", "search_in_app")
+        return first.optString("do").ifBlank { first.optString("action") } in setOf("open_app", "open_url", "search_in_app", "open_settings")
     }
 
     private val kept = Regex("^\\[\\d+] (field|btn|switch|check|radio|link|item)\\b")
@@ -114,8 +117,8 @@ object Orient {
 
     /** The line added to the first message of a phone-control turn (the "context" step), or "" when not useful. */
     fun contextNote(compact: String): String =
-        if (compact.isBlank()) "" else "[Where the phone is right now, before you act]\n$compact\n[Re-check the screen after each action before the next one.]"
+        if (compact.isBlank()) "" else "[Where the phone is right now, before you act]\n$compact\n[Send the whole task at once (run_plan, or several calls in one reply): the phone checks each step itself and you get the screen at the end.]"
 
     /** One-line prompt rule. */
-    const val RULE = "ORIENT LOOP for phone control: context → look → act → look. You get a compact screen summary before your first screen action and the changes after each one; check that each step worked before the next. Numbered taps on a screen you haven't seen are bounced back with the fresh screen."
+    const val RULE = "ORIENT LOOP for phone control: context → plan → act → look. You get a compact screen summary before your first screen action. Plan the whole task and send it in ONE reply (run_plan by visible words, or several calls in a row): the phone checks each step itself and you get the screen once, at the end or where it got stuck. Don't spend a reply per tap. Numbered taps on a screen you haven't seen are bounced back with the fresh screen."
 }

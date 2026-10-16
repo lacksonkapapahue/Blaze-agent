@@ -100,8 +100,11 @@ object Learning {
             val label = st.optString("label")
             val res = when (tool) {
                 "tap", "type_text" -> {
-                    svc.settle(1500, 250); svc.readScreen()
-                    val id = svc.findByLabel(label) ?: return log.append("Step ${i + 1}: couldn't find \"$label\" on screen. Stopped; continue from here yourself.\n\n")
+                    // v0.30.7: a short settle, then the label by LabelMatch (OEM synonyms, fuzzy) with a short wait for a lazy
+                    // screen and off-screen rows scrolled in, instead of 1.5 s of settling and a plain substring match.
+                    svc.settle(600, 150); svc.readScreen()
+                    val id = svc.findByLabel(label) ?: (if (label.isNotBlank()) svc.waitFor(label, 1200, wantField = tool == "type_text") ?: svc.reveal(label, wantField = tool == "type_text") else null)
+                        ?: return log.append("Step ${i + 1}: couldn't find \"$label\" on screen. Stopped; continue from here yourself.\n\n")
                         .append(svc.readScreen()).toString()
                     if (tool == "tap") {
                         if (Settings.confirmRisky && Regex("\\b(send|pay|buy|order|delete|post|transfer|confirm|book)\\b", RegexOption.IGNORE_CASE).containsMatchIn(label) &&
@@ -110,6 +113,8 @@ object Learning {
                         svc.tap(id, false)
                     } else svc.type(id, args.optString("text"))
                 }
+                // v0.30.7: settings pages by intent replay too (recorded since this version).
+                com.blaze.assistant.phone.SettingsJump.TOOL -> com.blaze.assistant.phone.SettingsJump.run(ctx, args).substringBefore(" Screen now:")
                 else -> PhoneTools.run(ctx, tool, args)
             }
             log.append("Step ${i + 1} ($tool${if (label.isNotEmpty()) " \"$label\"" else ""}): $res\n")

@@ -217,14 +217,16 @@ class BlazeAccessibilityService : AccessibilityService() {
             if (changed.isEmpty() && gone.isEmpty()) return "Same screen in ${appLabel(pkg)}, nothing changed."
             if (changed.size + gone.size < found.size / 2 + 1) {
                 sb.append("Same screen in ").append(appLabel(pkg)).append(". Changed or new:\n")
-                changed.forEach { sb.append(lines[it]).append("\n") }
+                changed.forEach { lines[it]?.takeIf { l -> !com.blaze.assistant.agent.TapLoop.bareRow(l) }?.let { l -> sb.append(l).append("\n") } }
                 if (gone.isNotEmpty()) sb.append("Gone: ").append(gone.take(20).joinToString(" ") { "[$it]" }).append("\n")
                 sb.append("Other ").append(found.size - changed.size).append(" elements unchanged, same numbers.")
                 return sb.toString()
             }
         }
         sb.append(appLabel(pkg)).append(" (").append(pkg).append("). Elements, use the [number]:\n")
-        ordered.forEach { sb.append(lines[it]).append("\n") }
+        // v0.30.7: unlabelled clickable rows ("[12] item") are left out: their labelled children follow, and a tap on a
+        // child climbs to the clickable row anyway. Their numbers stay valid.
+        ordered.forEach { lines[it]?.takeIf { l -> !com.blaze.assistant.agent.TapLoop.bareRow(l) }?.let { l -> sb.append(l).append("\n") } }
         if (found.isEmpty()) sb.append("(nothing readable on screen)\n")
         val out = sb.toString()
         return if (out.length <= 6_000) out else out.take(6_000) + "\n…(more below; scroll to see it)"
@@ -482,6 +484,43 @@ class BlazeAccessibilityService : AccessibilityService() {
      * the middle of the element like a finger would.
      */
     suspend fun tap(id: Int, long: Boolean = false): String {
+        // v0.30.7: a tap that flipped a switch remembers which way it ended up (plan memory replays it with want=…).
+        val before = try { switchState(id) } catch (_: Exception) { null }
+        lastToggle = null
+        val r = tapRaw(id, long)
+        if (before != null && (r.startsWith("Tapped"))) try {
+            val after = switchState(id)
+            if (after != null && after != before) lastToggle = after
+        } catch (_: Exception) { }
+        return r
+    }
+
+    /** v0.30.7: the switch state the last [tap] left behind, when it flipped one (null = not a switch / didn't change). */
+    @Volatile var lastToggle: Boolean? = null
+
+    /**
+     * v0.30.7: whether element [id] is a switch / checkbox that is on, or sits in a settings row with one (a row's title
+     * text → its clickable row → the switch inside). Null when there's no switch there, or the element went away.
+     */
+    fun switchState(id: Int): Boolean? {
+        val node = element(id) ?: return null
+        if (!node.refresh() || !node.isVisibleToUser) return null
+        if (node.isCheckable) return node.isChecked
+        var row: AccessibilityNodeInfo? = node
+        var hops = 0
+        while (row != null && !row.isClickable && hops < 4) { row = row.parent; hops++ }
+        val base = row?.takeIf { it.isClickable && !it.isScrollable } ?: return null
+        return checkableIn(base, 0)?.isChecked
+    }
+
+    private fun checkableIn(n: AccessibilityNodeInfo?, depth: Int): AccessibilityNodeInfo? {
+        if (n == null || depth > 4) return null
+        if (n.isCheckable) return n
+        for (i in 0 until n.childCount) checkableIn(n.getChild(i), depth + 1)?.let { return it }
+        return null
+    }
+
+    private suspend fun tapRaw(id: Int, long: Boolean): String {
         val node = element(id) ?: return "No element [$id]. Call read_screen again to get fresh numbers."
         node.refresh()
         val action = if (long) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK

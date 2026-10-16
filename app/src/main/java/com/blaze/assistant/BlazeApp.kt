@@ -39,6 +39,8 @@ class BlazeApp : Application() {
         com.blaze.assistant.connect.Mcp.load()
         com.blaze.assistant.connect.BlazeAccount.start()
         com.blaze.assistant.agent.Traces.init(this)
+        // v0.30.7: phone steps that worked, per request, sent back as one run_plan next time.
+        try { com.blaze.assistant.agent.TapLoop.Plans.init(java.io.File(filesDir, "plan_memory.json")) } catch (_: Exception) { }
         Agent.init(this)
         com.blaze.assistant.agent.BgAgents.init(this)
         com.blaze.assistant.routine.Routines.init(this)

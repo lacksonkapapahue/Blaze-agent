@@ -32,7 +32,9 @@ object PhoneTools {
         put(fn("tap", "Tap an element from the latest screen by its number, or by its visible text with 'text' (safer when numbers may be stale).",
             JSONObject().put("element", p("integer", "Element number"))
                 .put("text", p("string", "Visible text or description of the element, instead of a number"))
-                .put("long_press", p("boolean", "Long-press instead of tap"))))
+                .put("long_press", p("boolean", "Long-press instead of tap"))
+                .put("want", JSONObject().put("type", "string").put("enum", JSONArray(listOf("on", "off")))
+                    .put("description", "For a switch: the state it should end in. Blaze reads it first and doesn't tap if it already is."))))
         put(fn("type_text", "Type into a text field (replaces its content). A search icon/bar works too: it's tapped first. Set submit=true to press Enter/Search after typing.",
             JSONObject().put("element", p("integer", "Element number of the field"))
                 .put("text", p("string", "Text to type"))
