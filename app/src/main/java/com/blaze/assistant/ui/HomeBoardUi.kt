@@ -236,6 +236,8 @@ fun HomePane(onAsk: (String) -> Unit, onQuote: (String) -> Unit = {}) {
     var look by remember { mutableIntStateOf(0) }   // bumps when the look changes
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60_000); now = System.currentTimeMillis() } }
+    // v0.30.5: looking at Home marks what's on it as seen (Home heads-ups only tell about things you haven't seen).
+    LaunchedEffect(Unit) { com.blaze.assistant.home.HomeBoard.markSeen() }
     LaunchedEffect(toast) { if (toast.isNotBlank()) { delay(3_500); toast = "" } }
     // v0.30.5: Blaze's browser at work → the live preview window.
     val busyChats by com.blaze.assistant.agent.Agent.busyChats.collectAsState()
