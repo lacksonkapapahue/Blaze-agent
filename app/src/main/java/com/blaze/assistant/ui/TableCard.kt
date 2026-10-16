@@ -58,16 +58,34 @@ object TableCardStyle {
     const val MAX_COL_DP = 200
     const val FIRST_SHOWN = 8
 
-    /** Column widths (px) from each column's natural width: clamped, then stretched to fill [avail] when they fit. */
+    /**
+     * Column widths (px) from each column's natural width: clamped, then stretched to fill [avail] when they fit.
+     * v0.30.5 (a user's "unreadable table": columns slid under a sticky first column and got cut on both edges): too
+     * wide now shrinks every column above [minPx] proportionally so the grid always fits the card; nothing scrolls
+     * sideways. A table whose columns can't fit even at [minPx] is shown as stacked rows instead ([stacked]).
+     */
     fun widths(natural: List<Int>, minPx: Int, maxPx: Int, avail: Int): List<Int> {
         val w = natural.map { it.coerceIn(minPx, maxPx) }
         val total = w.sum()
-        if (total >= avail || total == 0) return w
+        if (total == 0) return w
+        if (total > avail) {
+            val floor = minPx * w.size
+            if (floor >= avail) return w.map { minPx }
+            val over = total - floor
+            val room = avail - floor
+            val out = w.map { v -> minPx + ((v - minPx).toLong() * room / over).toInt() }.toMutableList()
+            out[out.lastIndex] += avail - out.sum()
+            return out
+        }
+        if (total >= avail) return w
         val extra = avail - total
         val out = w.mapIndexed { i, v -> v + extra * v / total }.toMutableList()
         if (out.isNotEmpty()) out[out.lastIndex] += avail - out.sum()
         return out
     }
+
+    /** v0.30.5: more columns than fit at the minimum width: each row becomes a small block (first cell bold, then "Header: value"). */
+    fun stacked(cols: Int, availDp: Float): Boolean = cols >= 3 && cols * MIN_COL_DP > availDp
 
     /** The sticky first column is only worth it with 3+ columns that need scrolling. */
     fun sticky(wanted: Boolean, cols: Int, scrolls: Boolean): Boolean = wanted && cols >= 3 && scrolls
@@ -91,7 +109,10 @@ fun TableCardView(t: RichKit.TableCard, modifier: Modifier = Modifier) {
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(TableCardStyle.Divider))
         Spacer(Modifier.height(4.dp))
-        SelectionContainer { TableGridCard(t.copy(rows = rows)) }
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val narrow = TableCardStyle.stacked(t.cols, maxWidth.value - 8f)
+            SelectionContainer { if (narrow) TableStacked(t.copy(rows = rows)) else TableGridCard(t.copy(rows = rows)) }
+        }
         if (!all) Text("Show all ${t.rows.size} rows", modifier = Modifier.padding(start = 10.dp, bottom = 10.dp).clip(RoundedCornerShape(50))
             .clickable { all = true }.padding(horizontal = 8.dp, vertical = 6.dp),
             style = TextStyle(fontFamily = Type.Sans, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TableCardStyle.Head))
@@ -99,7 +120,32 @@ fun TableCardView(t: RichKit.TableCard, modifier: Modifier = Modifier) {
     }
 }
 
-/** The grid: one Layout so a wrapped cell sets its whole row's height, the sticky column included. */
+/** v0.30.5: a table too wide for the phone, one block per row: the first cell bold, then each other column as "Header  value". */
+@Composable
+private fun TableStacked(t: RichKit.TableCard) {
+    val c = LocalBlaze.current
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
+        t.rows.forEachIndexed { i, row ->
+            if (i > 0) Box(Modifier.fillMaxWidth().padding(vertical = 8.dp).height(1.dp).background(TableCardStyle.Divider))
+            val first = row.getOrElse(0) { "" }
+            Text(remember(first) { Md.render(first, c.accent, Color.White.copy(alpha = 0.12f)) }, modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+                style = TextStyle(fontFamily = Type.Sans, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold, color = TableCardStyle.Cell))
+            for (k in 1 until t.cols) {
+                val v = row.getOrElse(k) { "" }
+                if (v.isBlank()) continue
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Text(t.headers.getOrElse(k) { "" }, modifier = Modifier.weight(0.38f).padding(end = 10.dp),
+                        style = TextStyle(fontFamily = Type.Sans, fontSize = 12.5.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium, color = TableCardStyle.Head))
+                    Text(remember(v) { Md.render(v, c.accent, Color.White.copy(alpha = 0.12f)) }, modifier = Modifier.weight(0.62f),
+                        style = TextStyle(fontFamily = Type.Sans, fontSize = 14.sp, lineHeight = 20.sp, color = TableCardStyle.Cell))
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+/** The grid: one Layout so a wrapped cell sets its whole row's height. v0.30.5: always fits the card (no sideways scroll). */
 @Composable
 private fun TableGridCard(t: RichKit.TableCard) {
     val cols = t.cols
