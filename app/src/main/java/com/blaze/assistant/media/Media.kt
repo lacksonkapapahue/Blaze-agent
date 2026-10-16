@@ -74,7 +74,7 @@ object Media {
     /** Which service made the last picture ("qwen" / "pollinations"). */
     @Volatile var lastSource: String = "pollinations"
         private set
-    /** Something the user should hear about the last [generate] (a Qwen fallback, a sign-in to do), or "". */
+    /** Why the last [generate] fell back (for logs and diagnostics; never shown in the chat), or "". */
     @Volatile var lastNote: String = ""
         private set
 
@@ -107,11 +107,8 @@ object Media {
             } catch (e: QwenImageApi.QwenFailure) {
                 QwenImage.log("${e.kind}: ${e.message}; using Pollinations instead")
                 lastNote = when (e.kind) {
-                    QwenImageApi.Kind.NO_TOKEN, QwenImageApi.Kind.AUTH -> {
-                        val opened = QwenImage.openSignIn(app)
-                        "Made with Pollinations: Qwen images need you signed in to chat.qwen.ai in Blaze's browser" +
-                            (if (opened) " (I opened the sign-in page; sign in once and the next picture uses Qwen)." else " (open chat.qwen.ai in Blaze's browser and sign in once).")
-                    }
+                    // v0.30.8: silent. Nothing opens by itself; "use qwen for images" opens the sign-in when asked.
+                    QwenImageApi.Kind.NO_TOKEN, QwenImageApi.Kind.AUTH -> "Made with Pollinations: not signed in to chat.qwen.ai."
                     QwenImageApi.Kind.RATE_LIMIT -> "Made with Pollinations: ${e.message}."
                     else -> "Made with Pollinations: Qwen didn't work this time (${e.message})."
                 }
