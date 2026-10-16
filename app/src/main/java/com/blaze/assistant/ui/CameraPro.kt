@@ -312,9 +312,12 @@ fun ZoomDial(s: CameraProState, a: CameraProActions, modifier: Modifier = Modifi
             // Track, the digital stretch, then the accent arc from the low end to the thumb.
             drawArc(Color.White.copy(alpha = 0.16f), 180f, 180f, false, tl, sz, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
             if (digitalFrom != null) {
+                // The digital stretch: tinted on the track and as a thin outer rim that stays visible under the accent arc.
                 val db = CameraZoom.angleFor(digitalFrom, lo, hi)
                 drawArc(CamDigital.copy(alpha = 0.55f), -db, db, false, tl, sz, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
-                drawCircle(CamDigital, 2.5.dp.toPx(), pt(db, r))
+                val ro = r + 6.dp.toPx()
+                drawArc(CamDigital.copy(alpha = 0.85f), -db, db, false, Offset(c.x - ro, c.y - ro), Size(ro * 2, ro * 2), style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
+                drawLine(CamDigital, pt(db, r - 2.dp.toPx()), pt(db, r + 9.dp.toPx()), 2.dp.toPx(), cap = StrokeCap.Round)
             }
             val cur = CameraZoom.angleFor(s.zoom, lo, hi)
             if (cur < 179.5f) drawArc(CamAccent, 180f, 180f - cur, false, tl, sz, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
