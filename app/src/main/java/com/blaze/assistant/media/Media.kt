@@ -19,7 +19,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 /**
- * Blaze's gallery: images it generates (free, keyless Pollinations) and anything it makes in the
+ * Blaze's gallery: images it generates (Qwen via the user's chat.qwen.ai sign-in, else free keyless Pollinations) and anything it makes in the
  * terminal (beats, charts, edited photos). Everything lives in filesDir/gallery with a small
  * sidecar .json (what it is, the prompt). Chats show items inline; the Gallery screen lists them.
  */
@@ -71,10 +71,62 @@ object Media {
 
     private fun slug(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_').take(36).ifBlank { "image" }
 
-    /** Free keyless text-to-image. Returns the saved file or an error message. */
-    suspend fun generate(prompt: String, width: Int = 1024, height: Int = 1024, seed: Int? = null, model: String = ""): Result<File> = withContext(Dispatchers.IO) {
+    /** Which service made the last picture ("qwen" / "pollinations"). */
+    @Volatile var lastSource: String = "pollinations"
+        private set
+    /** Something the user should hear about the last [generate] (a Qwen fallback, a sign-in to do), or "". */
+    @Volatile var lastNote: String = ""
+        private set
+
+    /**
+     * v0.30.8: text-to-image. Qwen's image model through the user's chat.qwen.ai sign-in by default
+     * ([com.blaze.assistant.agent.Settings.imageRoute], "use pollinations for images" switches), with free keyless
+     * Pollinations as the fallback whenever Qwen isn't signed in or fails. [provider] "qwen" / "pollinations" forces one
+     * for this call. Returns the saved file or an error.
+     */
+    suspend fun generate(prompt: String, width: Int = 1024, height: Int = 1024, seed: Int? = null, model: String = "", provider: String = ""): Result<File> = withContext(Dispatchers.IO) {
+        lastNote = ""; lastSource = "pollinations"
         val p = prompt.trim()
         if (p.isEmpty()) return@withContext Result.failure(IllegalArgumentException("Empty prompt"))
+        val useQwen = when (provider.trim().lowercase()) {
+            "qwen" -> true
+            "pollinations" -> false
+            else -> com.blaze.assistant.agent.Settings.imageRoute != "pollinations"
+        }
+        if (useQwen) {
+            try {
+                val url = QwenImage.imageUrl(app, p.take(2000), width, height)
+                val ext = Regex("""\.(png|jpe?g|webp)(?:[?#]|$)""", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)?.lowercase()?.replace("jpeg", "jpg") ?: "png"
+                val f = File(dir(), "${slug(p)}_${System.currentTimeMillis() % 1_000_000}.$ext")
+                QwenImage.download(url, f, QwenImage.ua(app))
+                meta(f, p.take(80), JSONObject().put("prompt", p).put("source", "qwen").put("url", url))
+                refresh()
+                lastSource = "qwen"
+                return@withContext Result.success(f)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: QwenImageApi.QwenFailure) {
+                QwenImage.log("${e.kind}: ${e.message}; using Pollinations instead")
+                lastNote = when (e.kind) {
+                    QwenImageApi.Kind.NO_TOKEN, QwenImageApi.Kind.AUTH -> {
+                        val opened = QwenImage.openSignIn(app)
+                        "Made with Pollinations: Qwen images need you signed in to chat.qwen.ai in Blaze's browser" +
+                            (if (opened) " (I opened the sign-in page; sign in once and the next picture uses Qwen)." else " (open chat.qwen.ai in Blaze's browser and sign in once).")
+                    }
+                    QwenImageApi.Kind.RATE_LIMIT -> "Made with Pollinations: ${e.message}."
+                    else -> "Made with Pollinations: Qwen didn't work this time (${e.message})."
+                }
+            } catch (e: Exception) {
+                QwenImage.log("unexpected ${e.javaClass.simpleName}: ${e.message}; using Pollinations instead")
+                lastNote = "Made with Pollinations: Qwen didn't work this time (${e.message})."
+            }
+        }
+        val r = pollinations(p, width, height, seed, model)
+        if (r.isFailure && lastNote.isNotEmpty()) lastNote = ""   // the error says enough
+        r
+    }
+
+    /** Free keyless text-to-image (image.pollinations.ai). */
+    private suspend fun pollinations(p: String, width: Int, height: Int, seed: Int?, model: String): Result<File> {
         val w = width.coerceIn(256, 1536); val h = height.coerceIn(256, 1536)
         val s = seed ?: (Math.random() * 1_000_000).toInt()
         val q = "width=$w&height=$h&seed=$s&nologo=true&private=true" + (if (model.isNotBlank()) "&model=" + URLEncoder.encode(model, "UTF-8") else "")
@@ -96,10 +148,10 @@ object Media {
                 if (f.length() < 2000) { f.delete(); last = Exception("got an empty image"); return@repeat }
                 meta(f, p.take(80), JSONObject().put("prompt", p).put("seed", s).put("source", "pollinations"))
                 refresh()
-                return@withContext Result.success(f)
+                return Result.success(f)
             } catch (e: Exception) { last = e; if (attempt == 0) kotlinx.coroutines.delay(1500) }
         }
-        Result.failure(last ?: Exception("unknown error"))
+        return Result.failure(last ?: Exception("unknown error"))
     }
 
     private val directRe = Regex("""^(?:please\s+|can you\s+|could you\s+|blaze,?\s+)?(?:(draw|paint|sketch|illustrate)\s+(?:me\s+)?(?:an?\s+)?(?:(?:image|picture|pic|drawing|painting|sketch|illustration)\s+of\s+)?|(?:generate|create|make|design)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|pic|photo|drawing|painting|illustration|wallpaper|poster|artwork|art)\s+(?:of|showing|with)\s+)(.{3,400}?)[\s.!?]*$""", RegexOption.IGNORE_CASE)
@@ -179,9 +231,10 @@ object Media {
     private fun i(d: String) = JSONObject().put("type", "integer").put("description", d)
 
     fun tools(): List<JSONObject> = listOf(
-        fn("generate_image", "Create an image from a description (free, no key). The picture appears in the chat and in the user's Gallery. Write a rich English prompt: subject, style, lighting, colours. For exact graphics (charts, text layouts, edits of an existing photo) use run_code with Python/Pillow instead.",
+        fn("generate_image", "Create an image from a description (Qwen's image model when the user is signed in to chat.qwen.ai, else free Pollinations; both free). The picture appears in the chat and in the user's Gallery. Write a rich English prompt: subject, style, lighting, colours. For exact graphics (charts, text layouts, edits of an existing photo) use run_code with Python/Pillow instead.",
             JSONObject().put("prompt", s("Detailed description of the image")).put("width", i("Pixels, default 1024")).put("height", i("Pixels, default 1024 (use 1080x1920 for a phone wallpaper)"))
-                .put("seed", i("Optional, reuse to get the same image again")).put("model", s("Optional: flux (default), turbo")), listOf("prompt")),
+                .put("seed", i("Optional, reuse to get the same image again")).put("model", s("Optional Pollinations model: flux (default), turbo. Only used when Pollinations makes the picture"))
+                .put("provider", JSONObject().put("type", "string").put("enum", JSONArray(listOf("qwen", "pollinations"))).put("description", "Optional: force one service for this picture. Leave out to use the user's choice (Qwen by default)")), listOf("prompt")),
         fn("gallery", "The user's Blaze Gallery (images, beats/audio, video Blaze made). list = recent items; add = put a file you made in the terminal into the gallery and show it in chat; save = copy an item to the phone's Pictures/Music; share = open the share sheet; delete = remove (asks first).",
             JSONObject().put("action", JSONObject().put("type", "string").put("enum", JSONArray(listOf("list", "add", "save", "share", "delete"))))
                 .put("path", s("add: file path in the terminal (e.g. ~/beat.wav). save/share/delete: the gallery file name"))

@@ -1263,6 +1263,18 @@ When you finish, say what you did in one short sentence.
                 // Plan mode and background agents skip the fast lane: it acts on the phone without the tool gate.
                 if (attachments.isEmpty() && !routine && !Modes.plan && !agentPlan && agentId == null && notificationContext.isNullOrBlank()) {
                     mood = Mood.THINKING
+                    // v0.30.8: "use pollinations for images" / "use qwen for images" switches the picture service.
+                    val imgRoute = com.blaze.assistant.media.QwenImageApi.routePhrase(shown)
+                    if (imgRoute != null) {
+                        Settings.imageRoute = imgRoute
+                        val reply = if (imgRoute == "pollinations") "Done. I'll make pictures with Pollinations from now on. Say \u201cuse Qwen for images\u201d to switch back."
+                            else "Done. I'll make pictures with Qwen from now on (it needs you signed in to chat.qwen.ai in my browser; until then I use Pollinations). Say \u201cuse Pollinations for images\u201d to switch back."
+                        history.put(JSONObject().put("role", "assistant").put("content", reply))
+                        addReply(-1, reply, "")
+                        mood = Mood.IDLE
+                        persist(); announce()
+                        return@launch
+                    }
                     val fast = try { kotlinx.coroutines.withContext(ConfirmGate.Direct) { FastLane.tryHandle(app, shown, offline) { t, d, a -> confirm(t, d, a) } } } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
                     // "Draw a lion in sunglasses": straight to the free image service, no model call needed.
                     val pic = if (fast == null && !offline && !Settings.lowData) com.blaze.assistant.media.Media.directPrompt(shown) else null
@@ -1271,10 +1283,11 @@ When you finish, say what you did in one short sentence.
                         add(Role.STEP, "Drawing \u201c${pic.take(60)}\u201d")
                         val t0 = System.currentTimeMillis()
                         val r = com.blaze.assistant.media.Media.generate(pic)
-                        val reply = r.fold({ f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }; "Here you go. It's saved in your Gallery." },
+                        val note = com.blaze.assistant.media.Media.lastNote
+                        val reply = r.fold({ f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }; "Here you go. It's saved in your Gallery." + (if (note.isNotEmpty()) "\n\n$note" else "") },
                             { "I couldn't reach the image service just now (${it.message}). Try again in a moment." })
                         history.put(JSONObject().put("role", "assistant").put("content", if (r.isSuccess) "[Generated an image of: $pic, shown to the user and saved in their Gallery]" else reply))
-                        addReply(-1, reply, "", meta = "\uD83C\uDFA8 free image · %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
+                        addReply(-1, reply, "", meta = (if (com.blaze.assistant.media.Media.lastSource == "qwen") "\uD83C\uDFA8 Qwen image" else "\uD83C\uDFA8 free image") + " · %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
                         mood = Mood.IDLE
                         persist(); announce()
                         return@launch
@@ -2301,9 +2314,11 @@ When you finish, say what you did in one short sentence.
                 } else {
                     add(Role.STEP, "Drawing \u201c${args.optString("prompt").take(60)}\u201d")
                     com.blaze.assistant.media.Media.generate(args.optString("prompt"), args.optInt("width", 1024), args.optInt("height", 1024),
-                        if (args.has("seed")) args.optInt("seed") else null, args.optString("model")).fold(
+                        if (args.has("seed")) args.optInt("seed") else null, args.optString("model"), args.optString("provider")).fold(
                         { f -> synchronized(pendingMedia) { pendingMedia += f.absolutePath }
-                            "Image made and shown to the user in the chat (saved in their Gallery as ${f.name}). Reply with one short line about it; don't describe it at length or paste a link." },
+                            val note = com.blaze.assistant.media.Media.lastNote
+                            "Image made and shown to the user in the chat (saved in their Gallery as ${f.name}). Reply with one short line about it; don't describe it at length or paste a link." +
+                                (if (note.isNotEmpty()) " Also tell the user, in one short line: $note" else "") },
                         { e -> "Image service failed (${e.message}). Try once more with a simpler prompt, or draw it with run_code (Python + Pillow) and save it under /root/phone/." })
                 }
                 "gallery" -> {
